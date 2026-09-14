@@ -1,0 +1,25 @@
+# Render deploy config — free tier, Docker runtime.
+# Push this folder as its own GitHub repo, then Render → New → Web Service → select the repo.
+services:
+  - type: web
+    name: skip-checkin-app
+    runtime: docker
+    plan: free
+    envVars:
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: SKIP_API_KEY
+        generateValue: true
+      # Set to "true" for the FIRST deploy only so the coach account is seeded.
+      # Copy the credentials from the deploy logs, then remove this var and redeploy.
+      - key: SEED_ON_BOOT
+        value: "true"
+    # NOTE: the free tier has an EPHEMERAL filesystem — the SQLite database
+    # (accounts + check-ins) is wiped when the service restarts. Fine for
+    # testing. For real use, upgrade to Starter ($7/mo) and add a persistent
+    # disk mounted at /app/data:
+    #   disk:
+    #     name: skip-data
+    #     mountPath: /app/data
+    #     sizeGB: 1
+    # (The Dockerfile already points DB_PATH at /app/data/skip.db.)
