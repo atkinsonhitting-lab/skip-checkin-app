@@ -1,0 +1,58 @@
+// Skip database: users, check-ins, and express-session storage.
+// Uses Node's built-in node:sqlite (Node 24+) — no native dependencies.
+// DB_PATH env var overrides the default ./skip.db location.
+const path = require('path');
+const { DatabaseSync } = require('node:sqlite');
+
+const dbPath = process.env.DB_PATH || path.join(__dirname, '..', 'skip.db');
+const db = new DatabaseSync(dbPath);
+db.exec('PRAGMA journal_mode = WAL;');
+
+db.exec(`
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  role TEXT NOT NULL CHECK(role IN ('coach','athlete')),
+  athlete_name TEXT,
+  created_at TEXT NOT NULL
+);
+`);
+
+// Check-ins: the full Skip flow — environment, drills done, Feel/Confidence/
+// Focus (1-10), instant session score + tier, journal fields, and Skip's
+// journal rating (posted back by the assistant via the API).
+db.exec(`
+CREATE TABLE IF NOT EXISTS checkins (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  athlete_name TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  environment TEXT NOT NULL DEFAULT '',
+  drills_done TEXT NOT NULL DEFAULT '[]',
+  feel INTEGER,
+  confidence INTEGER,
+  focus INTEGER,
+  session_score REAL,
+  score_tier TEXT NOT NULL DEFAULT '',
+  session_notes TEXT NOT NULL DEFAULT '',
+  what_worked TEXT NOT NULL DEFAULT '',
+  whats_next TEXT NOT NULL DEFAULT '',
+  skip_journal_score REAL,
+  skip_journal_note TEXT,
+  skip_rated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_checkins_athlete_time ON checkins(athlete_name, created_at);
+CREATE INDEX IF NOT EXISTS idx_checkins_time ON checkins(created_at);
+CREATE INDEX IF NOT EXISTS idx_checkins_user ON checkins(user_id);
+`);
+
+db.exec(`
+CREATE TABLE IF NOT EXISTS sessions (
+  sid TEXT PRIMARY KEY,
+  sess TEXT NOT NULL,
+  expires INTEGER NOT NULL
+);
+`);
+
+module.exports = db;
