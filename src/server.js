@@ -1,0 +1,481 @@
+// Skip — the standalone session check-in app.
+// Real accounts (bcrypt + sessions), open public signup, the full Skip
+// check-in flow (environment, drills, Feel/Confidence/Focus 1-10, instant
+// session score + tier, Skip's journal read), a coach dashboard, and an API
+// for the AI assistant. No programs, no video library — those live in the
+// private programs portal. Free for now; subscription later (accounts ready).
+require('dotenv').config();
+const path = require('path');
+const express = require('express');
+const session = require('express-session');
+const helmet = require('helmet');
+const bcrypt = require('bcryptjs');
+
+const db = require('./db');
+const SQLiteStore = require('./store');
+const data = require('./data');
+const views = require('./views');
+const { seedUsers, writeCredentialsFile, userCount } = require('./seed');
+
+const app = express();
+app.set('trust proxy', 1); // needed for secure cookies behind Render's proxy
+
+app.use(helmet());
+app.use(express.urlencoded({ extended: false }));
+app.use(express.json());
+app.use(express.static(path.join(__dirname, '..', 'public')));
+
+const isProd = process.env.NODE_ENV === 'production';
+const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-only-secret-change-me';
+
+app.use(
+  session({
+    store: new SQLiteStore(db),
+    secret: SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: isProd,
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    },
+  })
+);
+
+// ---- First-boot seeding (used on Render: set SEED_ON_BOOT=true once) ----
+if (process.env.SEED_ON_BOOT === 'true' && userCount() === 0) {
+  const created = seedUsers();
+  const outPath = writeCredentialsFile(created);
+  console.log('=== FIRST-BOOT SEED COMPLETE ===');
+  console.log(`Credentials file: ${outPath}`);
+  for (const u of created) console.log(`  ${u.username} / ${u.password}`);
+  console.log('Copy these now, then remove SEED_ON_BOOT and redeploy.');
+}
+
+// ---- Auth helpers ----
+
+function attachUser(req, res, next) {
+  if (req.session && req.session.userId) {
+    const row = db.prepare('SELECT id, username, role, athlete_name FROM users WHERE id = ?').get(req.session.userId);
+    if (row) {
+      req.user = {
+        id: row.id,
+        username: row.username,
+        role: row.role,
+        athleteName: row.athlete_name,
+        displayName: row.athlete_name || 'Bobby',
+      };
+    }
+  }
+  next();
+}
+app.use(attachUser);
+
+function requireLogin(req, res, next) {
+  if (!req.user) return res.redirect('/login');
+  next();
+}
+
+function requireCoach(req, res, next) {
+  if (!req.user) return res.redirect('/login');
+  if (req.user.role !== 'coach') return res.status(403).send('Forbidden');
+  next();
+}
+
+// Simple in-memory throttle: 10 attempts per 5 minutes per IP.
+const attempts = new Map();
+function attemptAllowed(ip) {
+  const now = Date.now();
+  const rec = attempts.get(ip) || { count: 0, reset: now + 5 * 60 * 1000 };
+  if (now > rec.reset) { rec.count = 0; rec.reset = now + 5 * 60 * 1000; }
+  attempts.set(ip, rec);
+  return rec.count < 10;
+}
+function attemptFailed(ip) {
+  const rec = attempts.get(ip) || { count: 0, reset: Date.now() + 5 * 60 * 1000 };
+  rec.count += 1;
+  attempts.set(ip, rec);
+}
+
+// ---- Public routes: login / register / logout ----
+
+app.get('/login', (req, res) => {
+  if (req.user) return res.redirect('/');
+  res.send(views.loginPage(req.query.error));
+});
+
+app.post('/login', (req, res) => {
+  const ip = req.ip;
+  if (!attemptAllowed(ip)) {
+    return res.send(views.loginPage('Too many attempts. Wait a few minutes and try again.'));
+  }
+  const { username, password } = req.body;
+  const row = db.prepare('SELECT * FROM users WHERE username = ?').get((username || '').trim().toLowerCase());
+  if (!row || !bcrypt.compareSync(password || '', row.password_hash)) {
+    attemptFailed(ip);
+    return res.send(views.loginPage('Wrong username or password.'));
+  }
+  req.session.userId = row.id;
+  res.redirect('/');
+});
+
+app.get('/register', (req, res) => {
+  if (req.user) return res.redirect('/');
+  res.send(views.registerPage(req.query.error));
+});
+
+app.post('/register', (req, res) => {
+  const ip = req.ip;
+  if (!attemptAllowed(ip)) {
+    return res.send(views.registerPage('Too many attempts. Wait a few minutes and try again.'));
+  }
+  const fail = (msg) => {
+    attemptFailed(ip);
+    return res.send(views.registerPage(msg));
+  };
+  const username = (req.body.username || '').trim().toLowerCase();
+  const password = req.body.password || '';
+  const confirm = req.body.confirm_password || '';
+  if (!/^[a-z0-9]{3,20}$/.test(username)) {
+    return fail('Username must be 3–20 characters, letters and numbers only.');
+  }
+  if (password.length < 8) {
+    return fail('Password must be at least 8 characters.');
+  }
+  if (password !== confirm) {
+    return fail('Passwords do not match.');
+  }
+  const exists = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+  if (exists) {
+    return fail('That username is taken. Pick another one.');
+  }
+  const hash = bcrypt.hashSync(password, 12);
+  const info = db
+    .prepare(
+      'INSERT INTO users (username, password_hash, role, athlete_name, created_at) VALUES (?, ?, ?, ?, ?)'
+    )
+    .run(username, hash, 'athlete', username, new Date().toISOString());
+  req.session.userId = info.lastInsertRowid;
+  res.redirect('/');
+});
+
+app.get('/logout', (req, res) => {
+  req.session.destroy(() => res.redirect('/login'));
+});
+
+// ---- Skip's session score ----
+
+const ENVIRONMENTS = ['Game', 'Cage', 'Live BP', 'Tee Work', 'Other'];
+
+function scoreTier(score) {
+  if (score >= 9.0) return 'Locked In';
+  if (score >= 7.0) return 'Solid';
+  if (score >= 5.0) return 'Off';
+  return 'Rough';
+}
+
+function parseRating(v) {
+  const n = parseInt(v, 10);
+  return n >= 1 && n <= 10 ? n : null;
+}
+
+function parseDrillsDone(raw) {
+  // Form sends one text field; multiple drills are comma-separated.
+  // Also accepts a JSON array string (API-style input).
+  if (!raw) return [];
+  const s = String(raw).trim();
+  if (!s) return [];
+  if (s.startsWith('[')) {
+    try {
+      const arr = JSON.parse(s);
+      if (Array.isArray(arr)) return arr.map((d) => String(d).trim()).filter(Boolean);
+    } catch (e) { /* fall through to comma split */ }
+  }
+  return s.split(',').map((d) => d.trim()).filter(Boolean);
+}
+
+// Drills ranked by this hitter's average session score (min 3 sessions each).
+function drillStats(athleteName) {
+  const rows = db
+    .prepare('SELECT drills_done, session_score FROM checkins WHERE athlete_name = ? AND session_score IS NOT NULL')
+    .all(athleteName);
+  const map = new Map();
+  for (const r of rows) {
+    let drills = [];
+    try { drills = JSON.parse(r.drills_done || '[]'); } catch (e) { drills = []; }
+    const seen = new Set();
+    for (const d of drills) {
+      const name = String(d || '').trim();
+      const key = name.toLowerCase();
+      if (!name || seen.has(key)) continue;
+      seen.add(key);
+      const e = map.get(key) || { name, total: 0, count: 0 };
+      e.total += r.session_score;
+      e.count += 1;
+      map.set(key, e);
+    }
+  }
+  return [...map.values()]
+    .filter((e) => e.count >= 3)
+    .map((e) => ({ name: e.name, avg: Math.round((e.total / e.count) * 10) / 10, count: e.count }))
+    .sort((a, b) => b.avg - a.avg)
+    .slice(0, 5);
+}
+
+function userScoreSummary(userId) {
+  const checkins = db
+    .prepare('SELECT session_score FROM checkins WHERE user_id = ? AND session_score IS NOT NULL')
+    .all(userId);
+  const avgScore = checkins.length
+    ? Math.round((checkins.reduce((s, c) => s + c.session_score, 0) / checkins.length) * 10) / 10
+    : null;
+  return { avgScore, checkinCount: checkins.length };
+}
+
+// ---- Hitter routes ----
+
+app.get('/', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.redirect('/coach');
+  const { avgScore, checkinCount } = userScoreSummary(req.user.id);
+  const recent = db
+    .prepare('SELECT * FROM checkins WHERE user_id = ? ORDER BY created_at DESC LIMIT 3')
+    .all(req.user.id);
+  res.send(views.userHome(req.user, {
+    drillStats: drillStats(req.user.athleteName),
+    avgScore,
+    checkinCount,
+    recent,
+  }));
+});
+
+app.get('/checkin', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.redirect('/coach');
+  res.send(views.checkinForm(req.user, null, {}, data.drillNames()));
+});
+
+app.get('/checkin/score/:id', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.redirect('/coach');
+  const row = db
+    .prepare('SELECT * FROM checkins WHERE id = ? AND user_id = ?')
+    .get(req.params.id, req.user.id);
+  if (!row) return res.status(404).send('Check-in not found.');
+  res.send(views.scorePage(req.user, row));
+});
+
+app.post('/checkin', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.status(403).send('Forbidden');
+  const b = req.body;
+  const fail = (msg) => res.send(views.checkinForm(req.user, msg, b, data.drillNames()));
+  if (!ENVIRONMENTS.includes(b.environment)) {
+    return fail('Pick the environment you were in.');
+  }
+  const feel = parseRating(b.feel);
+  const confidence = parseRating(b.confidence);
+  const focus = parseRating(b.focus);
+  if (feel === null || confidence === null || focus === null) {
+    return fail('Rate feel, confidence, and focus from 1 to 10.');
+  }
+  const drills = parseDrillsDone(b.drills_done);
+  if (!drills.length) {
+    return fail('Tell Skip what drills you did today.');
+  }
+  const sessionScore = Math.round(((feel + confidence + focus) / 3) * 10) / 10;
+  const tier = scoreTier(sessionScore);
+  const info = db
+    .prepare(
+      `INSERT INTO checkins
+       (user_id, athlete_name, created_at, environment, drills_done, feel, confidence, focus,
+        session_score, score_tier, session_notes, what_worked, whats_next)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      req.user.id,
+      req.user.athleteName,
+      new Date().toISOString(),
+      b.environment,
+      JSON.stringify(drills),
+      feel,
+      confidence,
+      focus,
+      sessionScore,
+      tier,
+      (b.session_notes || '').trim(),
+      (b.what_worked || '').trim(),
+      (b.whats_next || '').trim()
+    );
+  res.redirect(`/checkin/score/${info.lastInsertRowid}`);
+});
+
+app.get('/history', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.redirect('/coach');
+  const rows = db
+    .prepare('SELECT * FROM checkins WHERE user_id = ? ORDER BY created_at DESC')
+    .all(req.user.id);
+  res.send(views.historyPage(req.user, rows, req.query.saved === '1'));
+});
+
+// ---- Coach routes ----
+
+app.get('/coach', requireCoach, (req, res) => {
+  const users = db
+    .prepare("SELECT id, username, athlete_name, created_at FROM users WHERE role != 'coach' ORDER BY created_at ASC")
+    .all();
+  const stats = users.map((u) => {
+    const row = db
+      .prepare('SELECT COUNT(*) AS total, MAX(created_at) AS last FROM checkins WHERE user_id = ?')
+      .get(u.id);
+    return { id: u.id, username: u.username, name: u.athlete_name || u.username, total: row.total, last: row.last };
+  });
+  const latest = db
+    .prepare('SELECT * FROM checkins ORDER BY created_at DESC LIMIT 20')
+    .all();
+  res.send(views.coachDashboard(req.user, stats, latest));
+});
+
+app.get('/coach/user/:username', requireCoach, (req, res) => {
+  const uname = (req.params.username || '').toLowerCase();
+  const user = db
+    .prepare("SELECT id, username, athlete_name FROM users WHERE username = ? AND role != 'coach'")
+    .get(uname);
+  if (!user) return res.status(404).send('Unknown user.');
+  const rows = db
+    .prepare('SELECT * FROM checkins WHERE user_id = ? ORDER BY created_at DESC')
+    .all(user.id);
+  const name = user.athlete_name || user.username;
+  res.send(views.coachUser(req.user, name, rows, drillStats(name)));
+});
+
+// Coach-only backup: download every check-in as JSON.
+app.get('/coach/export', requireCoach, (req, res) => {
+  const rows = db
+    .prepare(
+      `SELECT c.id, c.athlete_name, u.username, c.created_at, c.environment, c.drills_done,
+              c.feel, c.confidence, c.focus, c.session_score, c.score_tier,
+              c.session_notes, c.what_worked, c.whats_next,
+              c.skip_journal_score, c.skip_journal_note, c.skip_rated_at
+       FROM checkins c JOIN users u ON u.id = c.user_id ORDER BY c.created_at ASC`
+    )
+    .all()
+    .map((r) => ({ ...r, drills_done: safeParseDrills(r.drills_done) }));
+  res.setHeader('Content-Disposition', 'attachment; filename="skip-checkins-export.json"');
+  res.json({ exported_at: new Date().toISOString(), checkins: rows });
+});
+
+// ---- Ingestion API for the AI assistant ----
+//
+// GET /api/checkins?since=<ISO timestamp>
+// POST /api/checkins/:id/skip-rating   { score: 1-10, note: "..." }
+// Auth: x-api-key header or ?key= query param, must equal SKIP_API_KEY.
+// Returns: { "checkins": [ { id, athlete_name, username, created_at,
+//   environment, drills_done[], feel, confidence, focus, session_score,
+//   score_tier, session_notes, what_worked, whats_next,
+//   skip_journal_score, skip_journal_note, skip_rated_at }, ... ] }
+// ordered oldest-first.
+
+const CHECKIN_COLS =
+  'c.id, c.athlete_name, u.username, c.created_at, c.environment, c.drills_done, c.feel, c.confidence, c.focus, c.session_score, c.score_tier, c.session_notes, c.what_worked, c.whats_next, c.skip_journal_score, c.skip_journal_note, c.skip_rated_at';
+
+function safeParseDrills(raw) {
+  try {
+    const arr = JSON.parse(raw || '[]');
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function checkApiKey(req, res) {
+  const apiKey = process.env.SKIP_API_KEY;
+  if (!apiKey) {
+    res.status(500).json({ error: 'API not configured on server' });
+    return false;
+  }
+  const provided = req.get('x-api-key') || req.query.key;
+  if (provided !== apiKey) {
+    res.status(401).json({ error: 'unauthorized' });
+    return false;
+  }
+  return true;
+}
+
+app.get('/api/checkins', (req, res) => {
+  if (!checkApiKey(req, res)) return;
+  const { since } = req.query;
+  let rows;
+  if (since !== undefined) {
+    if (Number.isNaN(Date.parse(since))) {
+      return res.status(400).json({ error: 'since must be an ISO timestamp' });
+    }
+    rows = db
+      .prepare(
+        `SELECT ${CHECKIN_COLS} FROM checkins c JOIN users u ON u.id = c.user_id
+         WHERE c.created_at > ? ORDER BY c.created_at ASC LIMIT 1000`
+      )
+      .all(since);
+  } else {
+    rows = db
+      .prepare(
+        `SELECT ${CHECKIN_COLS} FROM checkins c JOIN users u ON u.id = c.user_id
+         ORDER BY c.created_at ASC LIMIT 1000`
+      )
+      .all();
+  }
+  res.json({
+    checkins: rows.map((r) => ({ ...r, drills_done: safeParseDrills(r.drills_done) })),
+  });
+});
+
+// POST /api/checkins/:id/skip-rating — the AI assistant (Skip) posts its read
+// of a hitter's journal after reading session_notes / what_worked / whats_next.
+// Body: { "score": <1-10 number>, "note": "<1-2 sentences in Skip's voice>" }.
+// Sets skip_journal_score, skip_journal_note, skip_rated_at (now, ISO).
+// 401 = bad key, 404 = unknown check-in id, 400 = bad body.
+app.post('/api/checkins/:id/skip-rating', (req, res) => {
+  if (!checkApiKey(req, res)) return;
+
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isInteger(id) || id < 1) {
+    return res.status(404).json({ error: 'check-in not found' });
+  }
+  const existing = db.prepare('SELECT id FROM checkins WHERE id = ?').get(id);
+  if (!existing) return res.status(404).json({ error: 'check-in not found' });
+
+  const b = req.body || {};
+  const score = typeof b.score === 'number' ? b.score : Number(b.score);
+  const note = typeof b.note === 'string' ? b.note.trim() : '';
+  if (!Number.isFinite(score) || score < 1 || score > 10) {
+    return res.status(400).json({ error: 'score must be a number from 1 to 10' });
+  }
+  if (!note) {
+    return res.status(400).json({ error: 'note must be a non-empty string' });
+  }
+  if (note.length > 500) {
+    return res.status(400).json({ error: 'note must be 500 characters or fewer' });
+  }
+
+  const ratedAt = new Date().toISOString();
+  db.prepare(
+    `UPDATE checkins SET skip_journal_score = ?, skip_journal_note = ?, skip_rated_at = ? WHERE id = ?`
+  ).run(score, note, ratedAt, id);
+
+  const row = db
+    .prepare(`SELECT ${CHECKIN_COLS} FROM checkins c JOIN users u ON u.id = c.user_id WHERE c.id = ?`)
+    .get(id);
+  res.json({ ...row, drills_done: safeParseDrills(row.drills_done) });
+});
+
+// ---- Boot ----
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Skip listening on port ${PORT}`);
+  const n = db.prepare("SELECT COUNT(*) AS n FROM users WHERE role != 'coach'").get().n;
+  console.log(`Hitters signed up: ${n}`);
+  if (!process.env.SESSION_SECRET && isProd) {
+    console.warn('WARNING: SESSION_SECRET is not set.');
+  }
+  if (!process.env.SKIP_API_KEY) {
+    console.warn('WARNING: SKIP_API_KEY is not set — the assistant API is disabled.');
+  }
+});
