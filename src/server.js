@@ -435,7 +435,7 @@ app.get('/api/checkins', (req, res) => {
 });
 
 // POST /api/checkins/:id/skip-rating — the AI assistant (Skip) posts its read
-// of a hitter's journal after reading session_notes / what_worked / whats_next.
+// of a hitter's journal after reading session_notes / what_worked.
 // Body: { "score": <1-10 number>, "note": "<1-2 sentences in Skip's voice>" }.
 // Sets skip_journal_score, skip_journal_note, skip_rated_at (now, ISO).
 // 401 = bad key, 404 = unknown check-in id, 400 = bad body.
@@ -471,6 +471,165 @@ app.post('/api/checkins/:id/skip-rating', (req, res) => {
     .prepare(`SELECT ${CHECKIN_COLS} FROM checkins c JOIN users u ON u.id = c.user_id WHERE c.id = ?`)
     .get(id);
   res.json({ ...row, drills_done: safeParseDrills(row.drills_done) });
+});
+
+// ---- Talk to Skip (AI chat) ----
+//
+// GET /chat renders the chat page. POST /api/chat takes { message } and
+// returns { reply }. The server injects the hitter's check-in data as
+// context so Skip coaches off their actual sessions. Needs LLM_API_KEY
+// (Anthropic) set on the server; without it the chat tab explains it is
+// not switched on yet. 30 messages per hitter per day keeps API costs sane.
+
+const LLM_MODEL = process.env.LLM_MODEL || 'claude-haiku-4-5';
+const CHAT_DAILY_LIMIT = 30;
+
+const SKIP_SYSTEM = `You are Skip, the AI hitting coach inside The Dugout, a session check-in app for baseball and softball hitters. Hitters check in after sessions and talk to you when they need coaching.
+
+Voice: direct, no fluff. Talk like a good hitting coach — straight answers, specific fixes, zero motivational-poster talk. Short messages. Never lecture, never pad.
+
+You get this hitter's check-in data below: recent sessions, scores, what they wrote, and which drills line up with their best days. Use it. When they're struggling, get them back on track by pointing at what actually worked on THEIR good days — specific drills, routines, feels — not generic advice.
+
+Rules:
+- Keep replies short: a few sentences, or a short list when giving a plan. This is a phone chat, not an essay.
+- Be specific to THEIR data. Reference their drills, their scores, their own words.
+- If they ask about something outside hitting and training, answer briefly and steer back to the plate.
+- Never mention you are an AI model. You are Skip.
+- No medical advice. If something sounds like pain or injury, tell them to get it checked by a trainer and stick to swing talk.`;
+
+function hitterSnapshot(userId) {
+  const rows = db
+    .prepare(
+      `SELECT created_at, environment, drills_done, feel, confidence, focus,
+              session_score, score_tier, session_notes, what_worked, whats_next
+       FROM checkins WHERE user_id = ? ORDER BY created_at DESC LIMIT 8`
+    )
+    .all(userId);
+  const lines = rows.map((r) => {
+    let drills = [];
+    try { drills = JSON.parse(r.drills_done || '[]'); } catch (e) { drills = []; }
+    const bits = [
+      `${String(r.created_at).slice(0, 10)} · ${r.environment}`,
+      r.session_score != null ? `Score ${r.session_score} (${r.score_tier})` : 'Unscored',
+      `Feel ${r.feel} Conf ${r.confidence} Focus ${r.focus}`,
+      drills.length ? `Drills: ${drills.join(', ')}` : null,
+      r.session_notes ? `Notes: "${String(r.session_notes).slice(0, 200)}"` : null,
+      r.what_worked ? `What worked: "${String(r.what_worked).slice(0, 200)}"` : null,
+    ].filter(Boolean);
+    return '- ' + bits.join(' · ');
+  });
+  const scored = rows.filter((r) => r.session_score != null);
+  const avg = scored.length
+    ? scored.reduce((s, r) => s + r.session_score, 0) / scored.length
+    : null;
+  const last3 = scored.slice(0, 3);
+  const prev = scored.slice(3);
+  const avgOf = (arr) => arr.reduce((s, r) => s + r.session_score, 0) / arr.length;
+  let trend = '';
+  if (last3.length && prev.length) {
+    const a = avgOf(last3), b = avgOf(prev);
+    trend = `Trend: last ${last3.length} avg ${a.toFixed(1)} vs prior ${b.toFixed(1)} — ${
+      a < b - 0.5 ? 'trending DOWN' : a > b + 0.5 ? 'trending UP' : 'holding steady'}.`;
+  }
+  const total = db.prepare('SELECT COUNT(*) AS n FROM checkins WHERE user_id = ?').get(userId).n;
+  const top = drillStats(
+    (db.prepare('SELECT athlete_name FROM users WHERE id = ?').get(userId) || {}).athlete_name
+  ).slice(0, 3);
+  return { lines, avg, total, trend, top };
+}
+
+async function askSkip(userId, userMessage) {
+  const apiKey = process.env.LLM_API_KEY;
+  if (!apiKey) {
+    const err = new Error('chat_not_configured');
+    err.code = 'chat_not_configured';
+    throw err;
+  }
+  const snap = hitterSnapshot(userId);
+  const history = db
+    .prepare('SELECT role, content FROM chat_messages WHERE user_id = ? ORDER BY created_at DESC LIMIT 20')
+    .all(userId)
+    .reverse();
+  const dataBlock = snap.lines.length
+    ? `HITTER DATA (newest first):\n${snap.lines.join('\n')}\nSessions logged: ${snap.total}${
+        snap.avg != null ? ` · Average score: ${snap.avg.toFixed(1)}` : ''
+      }\n${snap.trend}${
+        snap.top.length
+          ? `\nDrills tied to their best days: ${snap.top.map((d) => `${d.name} (avg ${d.avg} over ${d.count})`).join(', ')}`
+          : ''
+      }`
+    : 'HITTER DATA: no check-ins logged yet — this is a brand-new hitter. Ask what they are working on.';
+  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: LLM_MODEL,
+      max_tokens: 500,
+      system: `${SKIP_SYSTEM}\n\n${dataBlock}`,
+      messages: [
+        ...history.map((m) => ({ role: m.role, content: m.content })),
+        { role: 'user', content: userMessage },
+      ],
+    }),
+  });
+  if (!resp.ok) {
+    const err = new Error(`llm_http_${resp.status}`);
+    err.code = 'llm_error';
+    throw err;
+  }
+  const data = await resp.json();
+  const text = (data.content || [])
+    .filter((b) => b.type === 'text')
+    .map((b) => b.text)
+    .join('')
+    .trim();
+  if (!text) {
+    const err = new Error('llm_empty');
+    err.code = 'llm_error';
+    throw err;
+  }
+  return text;
+}
+
+app.get('/chat', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.redirect('/coach');
+  const messages = db
+    .prepare('SELECT role, content, created_at FROM chat_messages WHERE user_id = ? ORDER BY created_at ASC LIMIT 100')
+    .all(req.user.id);
+  res.send(views.chatPage(req.user, messages, !!process.env.LLM_API_KEY));
+});
+
+app.post('/api/chat', requireLogin, async (req, res) => {
+  if (req.user.role !== 'athlete') return res.status(403).json({ error: 'Forbidden' });
+  const message = typeof req.body.message === 'string' ? req.body.message.trim() : '';
+  if (!message) return res.status(400).json({ error: 'Message is empty.' });
+  if (message.length > 2000) return res.status(400).json({ error: 'Keep it under 2000 characters.' });
+  const today = new Date().toISOString().slice(0, 10);
+  const used = db
+    .prepare("SELECT COUNT(*) AS n FROM chat_messages WHERE user_id = ? AND role = 'user' AND substr(created_at, 1, 10) = ?")
+    .get(req.user.id, today).n;
+  if (used >= CHAT_DAILY_LIMIT) {
+    return res.status(429).json({ error: "You've hit today's chat limit (30). Back tomorrow." });
+  }
+  const now = new Date().toISOString();
+  db.prepare('INSERT INTO chat_messages (user_id, role, content, created_at) VALUES (?, ?, ?, ?)')
+    .run(req.user.id, 'user', message, now);
+  try {
+    const reply = await askSkip(req.user.id, message);
+    db.prepare('INSERT INTO chat_messages (user_id, role, content, created_at) VALUES (?, ?, ?, ?)')
+      .run(req.user.id, 'assistant', reply, new Date().toISOString());
+    res.json({ reply });
+  } catch (err) {
+    if (err.code === 'chat_not_configured') {
+      return res.status(503).json({ error: "Skip's chat isn't switched on yet — check back soon." });
+    }
+    console.error('chat error:', err.message);
+    return res.status(502).json({ error: 'Skip is having trouble right now. Try again in a bit.' });
+  }
 });
 
 // ---- Boot ----

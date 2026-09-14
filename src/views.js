@@ -24,12 +24,12 @@ function layout({ title, user, tabs, body }) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>${esc(title)} · Skip</title>
+<title>${esc(title)} · The Dugout</title>
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 <header class="topbar">
-  <div class="brand"><span class="brand-mark">S</span> SKIP</div>
+  <div class="brand"><span class="brand-mark">D</span> THE DUGOUT</div>
   ${user ? `<div class="userbox">${esc(user.displayName)} · <a href="/logout">Log out</a></div>` : ''}
 </header>
 ${tabHtml ? `<nav class="tabs">${tabHtml}</nav>` : ''}
@@ -43,6 +43,7 @@ function userTabs(active) {
   return [
     { href: '/', label: 'Home', active: active === 'home' },
     { href: '/checkin', label: 'Check In', active: active === 'checkin' },
+    { href: '/chat', label: 'Talk to Skip', active: active === 'chat' },
     { href: '/history', label: 'History', active: active === 'history' },
   ];
 }
@@ -59,8 +60,8 @@ function loginPage(error) {
     user: null,
     tabs: [],
     body: `<div class="login-card card">
-      <h1>Skip</h1>
-      <p class="hint">Check in with Skip. He'll score your session and learn what your best days look like.</p>
+      <h1>The Dugout</h1>
+      <p class="hint">Step into The Dugout. Skip scores your sessions and learns what your best days look like.</p>
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
       <form method="post" action="/login" class="form">
         <label>Email<input type="email" name="email" autocomplete="email" required></label>
@@ -78,7 +79,7 @@ function registerPage(error) {
     user: null,
     tabs: [],
     body: `<div class="login-card card">
-      <h1>Join Skip</h1>
+      <h1>Join The Dugout</h1>
       <p class="hint">Free. Use your email, set a password, start checking in.</p>
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
       <form method="post" action="/register" class="form">
@@ -164,7 +165,7 @@ function checkinForm(user, error, values, drillNames) {
     user,
     tabs: userTabs('checkin'),
     body: `<h1 class="page-title">Check in with Skip</h1>
-    <div class="card"><p class="hint skip-intro">Tell Skip about your session. He'll score it and start learning what your best days look like.</p>
+    <div class="card"><p class="hint skip-intro">Tell Skip about your session. Give as much detail as you can — the more he knows, the better his reads get.</p>
     <form method="post" action="/checkin" class="form">
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
       <div class="field-label">Where were you?</div>
@@ -176,9 +177,8 @@ function checkinForm(user, error, values, drillNames) {
       ${sliderField('feel', 'Feel', 'How good did you feel?', v.feel)}
       ${sliderField('confidence', 'Confidence', 'How confident did you feel?', v.confidence)}
       ${sliderField('focus', 'Focus', 'How locked in was your focus?', v.focus)}
-      <label>Session notes<textarea name="session_notes" rows="4" placeholder="How did it go? What did you feel?">${esc(v.session_notes || '')}</textarea></label>
-      <label>What worked<textarea name="what_worked" rows="2" placeholder="What clicked today?">${esc(v.what_worked || '')}</textarea></label>
-      <label>What's next<textarea name="whats_next" rows="2" placeholder="What are you working on next?">${esc(v.whats_next || '')}</textarea></label>
+      <label>Session notes <span class="hint-inline">(don't hold back — what you felt, what you saw, what was off)</span><textarea name="session_notes" rows="4" placeholder="How did it go? What did you feel?">${esc(v.session_notes || '')}</textarea></label>
+      <label>What worked <span class="hint-inline">(be specific — the exact drill, cue, or feel)</span><textarea name="what_worked" rows="2" placeholder="What clicked today?">${esc(v.what_worked || '')}</textarea></label>
       <button type="submit" class="btn-primary">Submit check-in</button>
     </form></div>`,
   });
@@ -217,6 +217,7 @@ function scorePage(user, c) {
       ${skipReadBlock(c)}
       <div class="score-actions">
         <a href="/history" class="btn-primary">See your history</a>
+        <p class="hint" style="text-align:center"><a href="/chat">Talk it through with Skip →</a></p>
         <p class="hint" style="text-align:center"><a href="/checkin">Log another session</a></p>
       </div>
     </div>`,
@@ -264,7 +265,6 @@ function checkinCard(c) {
     ${c.session_notes ? `<p>${esc(c.session_notes)}</p>` : ''}
     <div class="checkin-grid">
       ${c.what_worked ? `<div><span class="label">What worked</span>${esc(c.what_worked)}</div>` : ''}
-      ${c.whats_next ? `<div><span class="label">What's next</span>${esc(c.whats_next)}</div>` : ''}
     </div>
   </div>`;
 }
@@ -282,6 +282,28 @@ function historyPage(user, checkins, justSubmitted) {
     ${avg !== null ? `<p class="hint">Skip's average score for you: <strong class="score-inline">${avg}</strong> over ${scored.length} session${scored.length === 1 ? '' : 's'}.</p>` : ''}
     ${justSubmitted ? `<div class="success">Check-in saved. Good work.</div>` : ''}
     ${checkins.length ? checkins.map(checkinCard).join('') : `<div class="card empty">No check-ins yet. <a href="/checkin">Log your first session</a>.</div>`}`,
+  });
+}
+
+function chatPage(user, messages, chatEnabled) {
+  const msgs = (messages || [])
+    .map(
+      (m) => `<div class="msg ${m.role === 'user' ? 'msg-user' : 'msg-skip'}"><div class="msg-bubble">${esc(m.content)}</div></div>`
+    )
+    .join('');
+  return layout({
+    title: 'Talk to Skip',
+    user,
+    tabs: userTabs('chat'),
+    body: `<h1 class="page-title">Talk to Skip</h1>
+    <p class="hint">Struggling? Tell Skip what's going on at the plate — he's seen your check-ins and will point you back on track.</p>
+    ${chatEnabled
+      ? `<div id="chat-log" class="chat-log">${msgs || `<div class="msg msg-skip"><div class="msg-bubble">What's going on at the plate? Tell me what feels off.</div></div>`}</div>
+      <form id="chat-form" class="chat-form" autocomplete="off">
+        <input id="chat-input" type="text" placeholder="Ask Skip…" maxlength="2000" required>
+        <button type="submit" class="btn-primary">Send</button>
+      </form>`
+      : `<div class="card empty">Skip's chat isn't switched on yet — check back soon.</div>`}`,
   });
 }
 
@@ -337,6 +359,7 @@ module.exports = {
   checkinForm,
   scorePage,
   historyPage,
+  chatPage,
   coachDashboard,
   coachUser,
   esc,

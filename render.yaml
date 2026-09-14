@@ -17,6 +17,15 @@ services:
       # Copy the credentials from the deploy logs, then remove this var and redeploy.
       - key: SEED_ON_BOOT
         value: "true"
+      # Talk to Skip (AI chat): paste an Anthropic API key here. Until set, the
+      # chat tab tells hitters it isn't switched on yet. Get one at
+      # https://console.anthropic.com/ (billing required — chats cost a few
+      # cents each; capped at 30 messages per hitter per day).
+      - key: LLM_API_KEY
+        value: ""
+      # Optional: override the chat model (default claude-haiku-4-5).
+      # - key: LLM_MODEL
+      #   value: "claude-haiku-4-5"
     # NOTE: the free tier has an EPHEMERAL filesystem — the SQLite database
     # (accounts + check-ins) is wiped when the service restarts. Fine for
     # testing. For real use, upgrade to Starter ($7/mo) and add a persistent

@@ -18,6 +18,54 @@
     slider.addEventListener('input', () => { out.textContent = slider.value; });
   });
 
+  // ---- Talk to Skip chat ----
+  (function chat() {
+    const form = document.getElementById('chat-form');
+    if (!form) return;
+    const log = document.getElementById('chat-log');
+    const input = document.getElementById('chat-input');
+    function scroll() { log.scrollTop = log.scrollHeight; }
+    function addMsg(role, text) {
+      const d = document.createElement('div');
+      d.className = 'msg ' + (role === 'user' ? 'msg-user' : 'msg-skip');
+      const b = document.createElement('div');
+      b.className = 'msg-bubble';
+      b.textContent = text;
+      d.appendChild(b);
+      log.appendChild(d);
+      scroll();
+    }
+    scroll();
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = '';
+      input.disabled = true;
+      addMsg('user', text);
+      const thinking = document.createElement('div');
+      thinking.className = 'msg msg-skip';
+      thinking.innerHTML = '<div class="msg-bubble typing"><span></span><span></span><span></span></div>';
+      log.appendChild(thinking);
+      scroll();
+      try {
+        const resp = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: text }),
+        });
+        const data = await resp.json().catch(() => ({}));
+        thinking.remove();
+        addMsg('assistant', data.reply || data.error || 'Something went wrong. Try again.');
+      } catch (err) {
+        thinking.remove();
+        addMsg('assistant', 'Could not reach Skip. Check your connection and try again.');
+      }
+      input.disabled = false;
+      input.focus();
+    });
+  })();
+
   // ---- Voice dictation: mic button on every text box ----
   // Uses the browser's built-in speech recognition (iOS Safari 14.5+, Android/ desktop Chrome).
   // On browsers without it, no mic buttons are added — nothing looks broken.
