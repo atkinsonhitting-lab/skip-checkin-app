@@ -63,7 +63,7 @@ function loginPage(error) {
       <p class="hint">Check in with Skip. He'll score your session and learn what your best days look like.</p>
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
       <form method="post" action="/login" class="form">
-        <label>Username<input name="username" autocomplete="username" required></label>
+        <label>Email<input type="email" name="email" autocomplete="email" required></label>
         <label>Password<input type="password" name="password" autocomplete="current-password" required></label>
         <button type="submit" class="btn-primary">Log in</button>
       </form>
@@ -79,11 +79,11 @@ function registerPage(error) {
     tabs: [],
     body: `<div class="login-card card">
       <h1>Join Skip</h1>
-      <p class="hint">Free. Pick a username, set a password, start checking in.</p>
+      <p class="hint">Free. Use your email, set a password, start checking in.</p>
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
       <form method="post" action="/register" class="form">
-        <label>Username <span class="hint-inline">(3–20, letters and numbers only)</span>
-          <input name="username" autocomplete="username" required minlength="3" maxlength="20">
+        <label>Email
+          <input type="email" name="email" autocomplete="email" required>
         </label>
         <label>Password <span class="hint-inline">(8+ characters)</span>
           <input type="password" name="password" autocomplete="new-password" required minlength="8">
@@ -289,8 +289,9 @@ function coachDashboard(user, userStats, latest) {
   const totalCheckins = userStats.reduce((s, u) => s + u.total, 0);
   const cards = userStats
     .map(
-      (a) => `<a class="card athlete-card" href="/coach/user/${encodeURIComponent(a.username)}">
+      (a) => `<a class="card athlete-card" href="/coach/user/${encodeURIComponent(a.email)}">
         <div class="athlete-card-name">${esc(a.name)}</div>
+        <div class="athlete-card-email">${esc(a.email)}</div>
         <div class="athlete-card-meta">${a.total} check-in${a.total === 1 ? '' : 's'}${a.last ? ` · last ${fmtDate(a.last)}` : ' · none yet'}</div>
       </a>`
     )

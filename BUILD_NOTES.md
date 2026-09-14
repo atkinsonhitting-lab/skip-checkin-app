@@ -14,10 +14,11 @@ Forked from `portal-server/` with everything program-related stripped out:
 
 - **Auth** — bcrypt-hashed passwords, server-side sessions in SQLite (survive restarts),
   login/registration throttling, secure/HttpOnly/SameSite cookies in production.
-- **Open signup** — `GET/POST /register`: username (3–20 chars, alphanumeric, unique),
-  password (min 8), confirm password. No email. New users auto-login; role `athlete`,
-  `athlete_name` = username (unique, used for drill-correlation grouping).
-- **Seed** — coach/admin account `bobby` only. No athlete seeds; everyone signs up.
+- **Open signup** — `GET/POST /register`: email (validated, unique, lowercased),
+  password (min 8), confirm password. New users auto-login; role `athlete`,
+  `athlete_name` = email prefix (used for display + drill-correlation grouping).
+- **Seed** — coach/admin account only (email from `COACH_EMAIL` env var, set to
+  atkinsonhitting@gmail.com in `render.yaml`). No athlete seeds; everyone signs up.
   `CREDENTIALS.md` (gitignored, mode 600) holds the coach password.
 - **Check-in flow ("Check in with Skip")** — environment (Game / Cage / Live BP /
   Tee Work / Other), drills done (autocomplete datalist from the drill registry in
@@ -47,7 +48,7 @@ password change/reset, CSRF tokens, email.
 ## API shape (for the assistant)
 
 `GET /api/checkins?since=2026-09-14T00:00:00Z` with `x-api-key: <SKIP_API_KEY>`
-→ `{ "checkins": [{ id, athlete_name, username, created_at, environment,
+→ `{ "checkins": [{ id, athlete_name, email, created_at, environment,
 drills_done[], feel, confidence, focus, session_score, score_tier,
 session_notes, what_worked, whats_next,
 skip_journal_score, skip_journal_note, skip_rated_at }] }`
@@ -68,7 +69,7 @@ journal text, and POSTs Skip's rating back — no in-app scheduling needed.
 3. **Create the service** — Render → New → Web Service → pick the repo.
    `render.yaml` pre-fills everything. Secrets generate automatically (2 min).
 4. **Deploy, copy credentials** — open deploy Logs, copy the coach
-   username/password printed on first boot (2 min).
+   email/password printed on first boot (2 min).
 5. **Remove `SEED_ON_BOOT`** — delete that env var in Render and redeploy, so the
    credentials never print again (1 min).
 6. **Save `SKIP_API_KEY`** — from Render → Environment; hand it to the assistant

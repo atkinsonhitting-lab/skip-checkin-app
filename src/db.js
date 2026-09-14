@@ -8,16 +8,17 @@ const dbPath = process.env.DB_PATH || path.join(__dirname, '..', 'skip.db');
 const db = new DatabaseSync(dbPath);
 db.exec('PRAGMA journal_mode = WAL;');
 
-db.exec(`
+const USERS_SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  username TEXT UNIQUE NOT NULL,
+  email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL CHECK(role IN ('coach','athlete')),
   athlete_name TEXT,
   created_at TEXT NOT NULL
 );
-`);
+`;
+db.exec(USERS_SCHEMA);
 
 // Check-ins: the full Skip flow — environment, drills done, Feel/Confidence/
 // Focus (1-10), instant session score + tier, journal fields, and Skip's
@@ -46,6 +47,23 @@ CREATE INDEX IF NOT EXISTS idx_checkins_athlete_time ON checkins(athlete_name, c
 CREATE INDEX IF NOT EXISTS idx_checkins_time ON checkins(created_at);
 CREATE INDEX IF NOT EXISTS idx_checkins_user ON checkins(user_id);
 `);
+
+// Migration: the pre-launch schema identified users by `username`. The app
+// has not been distributed yet and storage is ephemeral, so a legacy schema
+// is rebuilt for email login (users + check-ins reset) instead of migrated.
+const userCols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+if (userCols.includes('username') && !userCols.includes('email')) {
+  console.warn(
+    'MIGRATION: legacy username-based users table found — rebuilding for email login. ' +
+    'Existing users and check-ins will be reset.'
+  );
+  db.exec('DROP TABLE users;');
+  db.exec(USERS_SCHEMA);
+  // Recreate users before clearing checkins: the checkins table has a
+  // REFERENCES users(id) clause, and SQLite requires the parent table to
+  // exist when preparing DML against the child table.
+  db.exec('DELETE FROM checkins;');
+}
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS sessions (

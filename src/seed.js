@@ -11,7 +11,8 @@ const bcrypt = require('bcryptjs');
 const db = require('./db');
 
 const SEED_USERS = [
-  { username: 'bobby', role: 'coach', athlete_name: null, display: 'Bobby (coach/admin)' },
+  // Coach login email: override with the COACH_EMAIL env var (set in render.yaml).
+  { email: (process.env.COACH_EMAIL || 'coach@skip.app').trim().toLowerCase(), role: 'coach', athlete_name: null, display: 'Bobby (coach/admin)' },
 ];
 
 function generatePassword() {
@@ -31,13 +32,13 @@ function seedUsers({ reset = false } = {}) {
   }
   const created = [];
   const insert = db.prepare(
-    'INSERT INTO users (username, password_hash, role, athlete_name, created_at) VALUES (?, ?, ?, ?, ?)'
+    'INSERT INTO users (email, password_hash, role, athlete_name, created_at) VALUES (?, ?, ?, ?, ?)'
   );
   const now = new Date().toISOString();
   for (const u of SEED_USERS) {
     const password = generatePassword();
     const hash = bcrypt.hashSync(password, 12);
-    insert.run(u.username, hash, u.role, u.athlete_name, now);
+    insert.run(u.email, hash, u.role, u.athlete_name, now);
     created.push({ ...u, password });
   }
   return created;
@@ -50,11 +51,11 @@ function writeCredentialsFile(created) {
     '> PRIVATE. Hand these to Bobby directly. Do NOT commit this file.',
     `> Generated ${new Date().toISOString()}.`,
     '',
-    '| Username | Who | Initial password |',
+    '| Email | Who | Initial password |',
     '|---|---|---|',
   ];
   for (const u of created) {
-    lines.push(`| \`${u.username}\` | ${u.display} | \`${u.password}\` |`);
+    lines.push(`| \`${u.email}\` | ${u.display} | \`${u.password}\` |`);
   }
   lines.push(
     '',
@@ -73,7 +74,7 @@ if (require.main === module) {
     const outPath = writeCredentialsFile(created);
     console.log(`Seeded ${created.length} user(s).`);
     console.log(`Credentials written to ${outPath} (gitignored, mode 600).`);
-    for (const u of created) console.log(`  ${u.username} / ${u.password}`);
+    for (const u of created) console.log(`  ${u.email} / ${u.password}`);
   } catch (err) {
     console.error('Seed failed:', err.message);
     process.exit(1);

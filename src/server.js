@@ -49,7 +49,7 @@ if (process.env.SEED_ON_BOOT === 'true' && userCount() === 0) {
   const outPath = writeCredentialsFile(created);
   console.log('=== FIRST-BOOT SEED COMPLETE ===');
   console.log(`Credentials file: ${outPath}`);
-  for (const u of created) console.log(`  ${u.username} / ${u.password}`);
+  for (const u of created) console.log(`  ${u.email} / ${u.password}`);
   console.log('Copy these now, then remove SEED_ON_BOOT and redeploy.');
 }
 
@@ -57,11 +57,11 @@ if (process.env.SEED_ON_BOOT === 'true' && userCount() === 0) {
 
 function attachUser(req, res, next) {
   if (req.session && req.session.userId) {
-    const row = db.prepare('SELECT id, username, role, athlete_name FROM users WHERE id = ?').get(req.session.userId);
+    const row = db.prepare('SELECT id, email, role, athlete_name FROM users WHERE id = ?').get(req.session.userId);
     if (row) {
       req.user = {
         id: row.id,
-        username: row.username,
+        email: row.email,
         role: row.role,
         athleteName: row.athlete_name,
         displayName: row.athlete_name || 'Bobby',
@@ -100,6 +100,10 @@ function attemptFailed(ip) {
 
 // ---- Public routes: login / register / logout ----
 
+function validEmail(v) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v || '');
+}
+
 app.get('/login', (req, res) => {
   if (req.user) return res.redirect('/');
   res.send(views.loginPage(req.query.error));
@@ -110,11 +114,14 @@ app.post('/login', (req, res) => {
   if (!attemptAllowed(ip)) {
     return res.send(views.loginPage('Too many attempts. Wait a few minutes and try again.'));
   }
-  const { username, password } = req.body;
-  const row = db.prepare('SELECT * FROM users WHERE username = ?').get((username || '').trim().toLowerCase());
+  const { email, password } = req.body;
+  const clean = (email || '').trim().toLowerCase();
+  const row = validEmail(clean)
+    ? db.prepare('SELECT * FROM users WHERE email = ?').get(clean)
+    : null;
   if (!row || !bcrypt.compareSync(password || '', row.password_hash)) {
     attemptFailed(ip);
-    return res.send(views.loginPage('Wrong username or password.'));
+    return res.send(views.loginPage('Wrong email or password.'));
   }
   req.session.userId = row.id;
   res.redirect('/');
@@ -134,11 +141,11 @@ app.post('/register', (req, res) => {
     attemptFailed(ip);
     return res.send(views.registerPage(msg));
   };
-  const username = (req.body.username || '').trim().toLowerCase();
+  const email = (req.body.email || '').trim().toLowerCase();
   const password = req.body.password || '';
   const confirm = req.body.confirm_password || '';
-  if (!/^[a-z0-9]{3,20}$/.test(username)) {
-    return fail('Username must be 3–20 characters, letters and numbers only.');
+  if (!validEmail(email)) {
+    return fail('Enter a valid email address.');
   }
   if (password.length < 8) {
     return fail('Password must be at least 8 characters.');
@@ -146,16 +153,17 @@ app.post('/register', (req, res) => {
   if (password !== confirm) {
     return fail('Passwords do not match.');
   }
-  const exists = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+  const exists = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
   if (exists) {
-    return fail('That username is taken. Pick another one.');
+    return fail('An account with that email already exists. Try logging in.');
   }
   const hash = bcrypt.hashSync(password, 12);
+  const athleteName = email.split('@')[0];
   const info = db
     .prepare(
-      'INSERT INTO users (username, password_hash, role, athlete_name, created_at) VALUES (?, ?, ?, ?, ?)'
+      'INSERT INTO users (email, password_hash, role, athlete_name, created_at) VALUES (?, ?, ?, ?, ?)'
     )
-    .run(username, hash, 'athlete', username, new Date().toISOString());
+    .run(email, hash, 'athlete', athleteName, new Date().toISOString());
   req.session.userId = info.lastInsertRowid;
   res.redirect('/');
 });
@@ -319,13 +327,13 @@ app.get('/history', requireLogin, (req, res) => {
 
 app.get('/coach', requireCoach, (req, res) => {
   const users = db
-    .prepare("SELECT id, username, athlete_name, created_at FROM users WHERE role != 'coach' ORDER BY created_at ASC")
+    .prepare("SELECT id, email, athlete_name, created_at FROM users WHERE role != 'coach' ORDER BY created_at ASC")
     .all();
   const stats = users.map((u) => {
     const row = db
       .prepare('SELECT COUNT(*) AS total, MAX(created_at) AS last FROM checkins WHERE user_id = ?')
       .get(u.id);
-    return { id: u.id, username: u.username, name: u.athlete_name || u.username, total: row.total, last: row.last };
+    return { id: u.id, email: u.email, name: u.athlete_name || u.email, total: row.total, last: row.last };
   });
   const latest = db
     .prepare('SELECT * FROM checkins ORDER BY created_at DESC LIMIT 20')
@@ -333,16 +341,16 @@ app.get('/coach', requireCoach, (req, res) => {
   res.send(views.coachDashboard(req.user, stats, latest));
 });
 
-app.get('/coach/user/:username', requireCoach, (req, res) => {
-  const uname = (req.params.username || '').toLowerCase();
+app.get('/coach/user/:email', requireCoach, (req, res) => {
+  const em = (req.params.email || '').toLowerCase();
   const user = db
-    .prepare("SELECT id, username, athlete_name FROM users WHERE username = ? AND role != 'coach'")
-    .get(uname);
+    .prepare("SELECT id, email, athlete_name FROM users WHERE email = ? AND role != 'coach'")
+    .get(em);
   if (!user) return res.status(404).send('Unknown user.');
   const rows = db
     .prepare('SELECT * FROM checkins WHERE user_id = ? ORDER BY created_at DESC')
     .all(user.id);
-  const name = user.athlete_name || user.username;
+  const name = user.athlete_name || user.email;
   res.send(views.coachUser(req.user, name, rows, drillStats(name)));
 });
 
@@ -350,7 +358,7 @@ app.get('/coach/user/:username', requireCoach, (req, res) => {
 app.get('/coach/export', requireCoach, (req, res) => {
   const rows = db
     .prepare(
-      `SELECT c.id, c.athlete_name, u.username, c.created_at, c.environment, c.drills_done,
+      `SELECT c.id, c.athlete_name, u.email, c.created_at, c.environment, c.drills_done,
               c.feel, c.confidence, c.focus, c.session_score, c.score_tier,
               c.session_notes, c.what_worked, c.whats_next,
               c.skip_journal_score, c.skip_journal_note, c.skip_rated_at
@@ -367,14 +375,14 @@ app.get('/coach/export', requireCoach, (req, res) => {
 // GET /api/checkins?since=<ISO timestamp>
 // POST /api/checkins/:id/skip-rating   { score: 1-10, note: "..." }
 // Auth: x-api-key header or ?key= query param, must equal SKIP_API_KEY.
-// Returns: { "checkins": [ { id, athlete_name, username, created_at,
+// Returns: { "checkins": [ { id, athlete_name, email, created_at,
 //   environment, drills_done[], feel, confidence, focus, session_score,
 //   score_tier, session_notes, what_worked, whats_next,
 //   skip_journal_score, skip_journal_note, skip_rated_at }, ... ] }
 // ordered oldest-first.
 
 const CHECKIN_COLS =
-  'c.id, c.athlete_name, u.username, c.created_at, c.environment, c.drills_done, c.feel, c.confidence, c.focus, c.session_score, c.score_tier, c.session_notes, c.what_worked, c.whats_next, c.skip_journal_score, c.skip_journal_note, c.skip_rated_at';
+  'c.id, c.athlete_name, u.email, c.created_at, c.environment, c.drills_done, c.feel, c.confidence, c.focus, c.session_score, c.score_tier, c.session_notes, c.what_worked, c.whats_next, c.skip_journal_score, c.skip_journal_note, c.skip_rated_at';
 
 function safeParseDrills(raw) {
   try {

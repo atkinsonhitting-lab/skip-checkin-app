@@ -19,7 +19,7 @@ Copy `.env.example` to `.env` and set `SESSION_SECRET` and `SKIP_API_KEY` first.
 
 ## What hitters get
 
-- **Sign up** — pick a username (3–20 chars, letters/numbers) + password (8+ chars). Free, no email.
+- **Sign up** — your email + password (8+ chars). Free.
 - **Check In** — environment (Game / Cage / Live BP / Tee Work / Other), drills done (autocomplete from the drill registry), three 1–10 sliders (Feel, Confidence, Focus), session notes, what worked, what's next.
 - **Skip's Session Score** — instant score after submit: average of the three ratings, one decimal. Tiers: 9.0+ "Locked In", 7.0–8.9 "Solid", 5.0–6.9 "Off", below 5.0 "Rough".
 - **Skip's read** — the assistant reads the journal entry and posts back a 1–10 rating + a line or two in Skip's voice. Shows on the score page and in history; before it's rated: "Skip's reviewing your entry — his read lands here."
@@ -51,7 +51,7 @@ Response:
     {
       "id": 1,
       "athlete_name": "somehitter",
-      "username": "somehitter",
+      "email": "somehitter@example.com",
       "created_at": "2026-09-14T19:45:12.691Z",
       "environment": "Cage",
       "drills_done": ["Deep Tee Drill", "Walk In Drill"],
@@ -107,7 +107,7 @@ The assistant's loop: poll `GET /api/checkins` for check-ins with no
 2. Push this folder as its own GitHub repo. **Do not commit `CREDENTIALS.md`** (it's gitignored).
 3. Render → New → Web Service → select the repo. `render.yaml` fills in the settings (Docker, free plan).
 4. `SESSION_SECRET` and `SKIP_API_KEY` are generated automatically. Leave `SEED_ON_BOOT=true` for the first deploy.
-5. Deploy, then open the deploy **Logs** — the coach username + password is printed there once.
+5. Deploy, then open the deploy **Logs** — the coach email + password is printed there once.
 6. Copy the credentials, then **remove the `SEED_ON_BOOT` env var** and redeploy.
 7. Save the `SKIP_API_KEY` value (Render dashboard → Environment) — that's what the assistant uses for `/api/checkins`. Set up the assistant's poll→read→POST loop against the live URL.
 8. Share the public URL — anyone can sign up free.
