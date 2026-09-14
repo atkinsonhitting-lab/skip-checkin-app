@@ -6,4 +6,3 @@ data/portal.db
 data/portal.db-*
 CREDENTIALS.md
 .DS_Store
-*jar.txt

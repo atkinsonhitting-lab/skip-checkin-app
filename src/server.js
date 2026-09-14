@@ -478,10 +478,11 @@ app.post('/api/checkins/:id/skip-rating', (req, res) => {
 // GET /chat renders the chat page. POST /api/chat takes { message } and
 // returns { reply }. The server injects the hitter's check-in data as
 // context so Skip coaches off their actual sessions. Needs LLM_API_KEY
-// (Anthropic) set on the server; without it the chat tab explains it is
-// not switched on yet. 30 messages per hitter per day keeps API costs sane.
+// (a free Google AI Studio key) set on the server; without it the chat
+// tab explains it is not switched on yet. 30 messages per hitter per day
+// keeps free-tier usage sane.
 
-const LLM_MODEL = process.env.LLM_MODEL || 'claude-haiku-4-5';
+const LLM_MODEL = process.env.LLM_MODEL || 'gemini-2.5-flash';
 const CHAT_DAILY_LIMIT = 30;
 
 const SKIP_SYSTEM = `You are Skip, the AI hitting coach inside The Dugout, a session check-in app for baseball and softball hitters. Hitters check in after sessions and talk to you when they need coaching.
@@ -559,32 +560,43 @@ async function askSkip(userId, userMessage) {
           : ''
       }`
     : 'HITTER DATA: no check-ins logged yet — this is a brand-new hitter. Ask what they are working on.';
-  const resp = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: LLM_MODEL,
-      max_tokens: 500,
-      system: `${SKIP_SYSTEM}\n\n${dataBlock}`,
-      messages: [
-        ...history.map((m) => ({ role: m.role, content: m.content })),
-        { role: 'user', content: userMessage },
-      ],
-    }),
-  });
+  // Gemini roles are "user"/"model" (our DB stores "assistant").
+  const contents = [
+    ...history.map((m) => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: m.content }],
+    })),
+    { role: 'user', parts: [{ text: userMessage }] },
+  ];
+  const resp = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(LLM_MODEL)}:generateContent`,
+    {
+      method: 'POST',
+      headers: {
+        'x-goog-api-key': apiKey,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: `${SKIP_SYSTEM}\n\n${dataBlock}` }] },
+        contents,
+        generationConfig: { maxOutputTokens: 500, temperature: 0.7 },
+      }),
+    }
+  );
+  if (resp.status === 429) {
+    const err = new Error('llm_rate_limit');
+    err.code = 'llm_rate_limit';
+    throw err;
+  }
   if (!resp.ok) {
     const err = new Error(`llm_http_${resp.status}`);
     err.code = 'llm_error';
     throw err;
   }
   const data = await resp.json();
-  const text = (data.content || [])
-    .filter((b) => b.type === 'text')
-    .map((b) => b.text)
+  const parts = (((data.candidates || [])[0] || {}).content || {}).parts || [];
+  const text = parts
+    .map((p) => p.text || '')
     .join('')
     .trim();
   if (!text) {
@@ -626,6 +638,9 @@ app.post('/api/chat', requireLogin, async (req, res) => {
   } catch (err) {
     if (err.code === 'chat_not_configured') {
       return res.status(503).json({ error: "Skip's chat isn't switched on yet — check back soon." });
+    }
+    if (err.code === 'llm_rate_limit') {
+      return res.status(429).json({ error: "Skip's getting a lot of traffic right now — try again in a minute." });
     }
     console.error('chat error:', err.message);
     return res.status(502).json({ error: 'Skip is having trouble right now. Try again in a bit.' });
