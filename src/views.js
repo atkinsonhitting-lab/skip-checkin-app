@@ -54,7 +54,7 @@ function userTabs(active) {
     { href: '/', label: 'Home', active: active === 'home' },
     { href: '/checkin', label: 'Check In', active: active === 'checkin' },
     { href: '/notebook', label: 'Notebook', active: active === 'notebook' },
-    { href: '/chat', label: 'Skip', active: active === 'chat' },
+    { href: '/chat', label: 'Skip AI Coach', active: active === 'chat' },
   ];
 }
 
@@ -496,10 +496,10 @@ function chatPage(user, messages, chatEnabled) {
     )
     .join('');
   return layout({
-    title: 'Talk to Skip',
+    title: 'Skip AI Coach',
     user,
     tabs: userTabs('chat'),
-    body: `<h1 class="page-title chat-title"><img src="/skip-avatar.webp" class="skip-avatar" alt="Skip">Talk to Skip</h1>
+    body: `<h1 class="page-title chat-title"><img src="/skip-avatar.webp" class="skip-avatar" alt="Skip">Skip AI Coach</h1>
     <p class="hint">Struggling? Tell Skip what's going on at the plate — he's seen your check-ins and will point you back on track.</p>
     ${chatEnabled
       ? `<div id="text-panel">
