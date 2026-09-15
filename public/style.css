@@ -208,6 +208,12 @@ a:active { color: #ff3b30; }
 .level-head .hint { margin-bottom: 6px; }
 .level-hero-meter { margin: 16px auto; max-width: 440px; }
 /* Learn page — hitting notebook + players studied */
+.subnav { display: flex; gap: 8px; margin: 0 0 4px; }
+.subnav a {
+  border: 1px solid var(--line); border-radius: 999px; padding: 6px 16px;
+  font-size: 13px; font-weight: 700; color: var(--muted); text-decoration: none;
+}
+.subnav a:active { border-color: var(--red); color: var(--fg); }
 .prompt-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 2px 0 10px; }
 .prompt-chip {
   background: transparent; border: 1px dashed var(--line); border-radius: 999px;

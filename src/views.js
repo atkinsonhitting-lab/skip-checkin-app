@@ -53,10 +53,8 @@ function userTabs(active) {
   return [
     { href: '/', label: 'Home', active: active === 'home' },
     { href: '/checkin', label: 'Check In', active: active === 'checkin' },
-    { href: '/routine', label: 'Routine', active: active === 'routine' },
-    { href: '/learn', label: 'Learn', active: active === 'learn' },
-    { href: '/chat', label: 'Talk to Skip', active: active === 'chat' },
-    { href: '/history', label: 'History', active: active === 'history' },
+    { href: '/notebook', label: 'Notebook', active: active === 'notebook' },
+    { href: '/chat', label: 'Skip', active: active === 'chat' },
   ];
 }
 
@@ -154,7 +152,7 @@ function userHome(user, extras) {
     </div>
     ${head}
     ${whatWorksSection(drillStats, thoughtStats, avgScore, checkinCount)}
-    ${recent.length ? `<h2 class="section-head">Recent</h2>${recent.map(checkinCard).join('')}<p><a href="/history">See all history →</a></p>` : ''}`,
+    ${recent.length ? `<h2 class="section-head">Recent</h2>${recent.map(checkinCard).join('')}<p><a href="/notebook">See your notebook →</a></p>` : ''}`,
   });
 }
 
@@ -245,6 +243,7 @@ function checkinForm(user, error, values, drillNames, routine) {
           <input id="drills-input" name="drills_done" list="drill-list" placeholder="e.g. Deep Tee Drill, Walk In Drill" value="${esc(v.drills_done || '')}">
         </label>
         ${rt.length ? `<button type="button" id="use-routine" class="btn-ghost" data-routine="${routineJson}">Use my daily routine</button>` : ''}
+        <p class="hint"><a href="/routine">Edit daily routine →</a></p>
         <p class="hint">Tip: add (tee), (side toss), (front toss), (BP), or (machine) after a drill — e.g. "Fence drill (tee)".</p>
       </div>
       <datalist id="drill-list">${datalist}</datalist>
@@ -263,7 +262,7 @@ function routinePage(user, drills, error, drillNames, stations) {
   return layout({
     title: 'Daily Routine',
     user,
-    tabs: userTabs('routine'),
+    tabs: userTabs('checkin'),
     body: `<h1 class="page-title">Daily routine</h1>
     <div class="card"><p class="hint skip-intro">Your everyday drills. Set it once — then one tap loads it into your check-in.</p>
     ${error ? `<div class="error">${esc(error)}</div>` : ''}
@@ -297,7 +296,7 @@ function routinePage(user, drills, error, drillNames, stations) {
 
 const LEARN_CATEGORIES = ['Mechanics', 'Mental', 'Approach', 'Drills', 'Other'];
 
-function learnPage(user, notes, players) {
+function notebookPage(user, checkins, notes, players, justSubmitted) {
   const catChips = LEARN_CATEGORIES.map(
     (c, i) =>
       `<label class="chip-radio"><input type="radio" name="category" value="${c}"${i === 0 ? ' checked' : ''}><span>${c}</span></label>`
@@ -329,12 +328,23 @@ function learnPage(user, notes, players) {
       </div>`
     )
     .join('');
-
+  const scored = checkins.filter((c) => c.session_score != null);
+  const avg = scored.length
+    ? Math.round((scored.reduce((s, c) => s + c.session_score, 0) / scored.length) * 10) / 10
+    : null;
+  const checkinsHtml = `
+    ${avg !== null ? `<div class="level-head"><p class="hint">Skip's read on you over ${scored.length} session${scored.length === 1 ? '' : 's'}:</p>${levelLine(avg)}</div>` : ''}
+    ${checkins.length ? checkins.map(checkinCard).join('') : `<div class="card empty">No check-ins yet. <a href="/checkin">Log your first session</a>.</div>`}`;
   return layout({
-    title: 'Learn',
+    title: 'Notebook',
     user,
-    tabs: userTabs('learn'),
-    body: `<h1 class="page-title">What I'm learning</h1>
+    tabs: userTabs('notebook'),
+    body: `<h1 class="page-title">Notebook</h1>
+    <div class="subnav"><a href="#checkins">Check-ins</a><a href="#notes">Notes</a></div>
+    ${justSubmitted ? `<div class="success">Check-in saved. Good work.</div>` : ''}
+    <h2 class="section-head" id="checkins">Check-ins</h2>
+    ${checkinsHtml}
+    <h2 class="section-head" id="notes">Notes</h2>
     <div class="card"><p class="hint skip-intro">Your hitting notebook — jot down anything about your swing and your game, no check-in needed. Skip reads this too.</p>
     <form method="post" action="/learn/note" class="form">
       <label>Something new I'm learning
@@ -369,12 +379,6 @@ function learnPage(user, notes, players) {
   });
 }
 
-const TIER_NOTES = {
-  'Locked In': "That's the standard. Remember exactly what this felt like.",
-  'Solid': 'Good day. Stack another one on top of it.',
-  'Off': 'Shake it off — keep what worked, flush the rest.',
-  'Rough': 'Everyone has them. Write down one thing to fix and move on.',
-};
 
 function tierBadgeClass(tier) {
   if (tier === 'Locked In') return 'ok';
@@ -421,7 +425,7 @@ function scorePage(user, c) {
       </div>
       ${skipReadBlock(c)}
       <div class="score-actions">
-        <a href="/history" class="btn-primary">See your history</a>
+        <a href="/notebook" class="btn-primary">See your notebook</a>
         <p class="hint" style="text-align:center"><a href="/chat">Talk it through with Skip →</a></p>
         <p class="hint" style="text-align:center"><a href="/checkin">Log another session</a></p>
       </div>
@@ -482,22 +486,6 @@ function checkinCard(c) {
       ${c.what_worked ? `<div><span class="label">What worked</span>${esc(c.what_worked)}</div>` : ''}
     </div>
   </div>`;
-}
-
-function historyPage(user, checkins, justSubmitted) {
-  const scored = checkins.filter((c) => c.session_score != null);
-  const avg = scored.length
-    ? Math.round((scored.reduce((s, c) => s + c.session_score, 0) / scored.length) * 10) / 10
-    : null;
-  return layout({
-    title: 'History',
-    user,
-    tabs: userTabs('history'),
-    body: `<h1 class="page-title">Your Check-Ins</h1>
-    ${avg !== null ? `<div class="level-head"><p class="hint">Skip's read on you over ${scored.length} session${scored.length === 1 ? '' : 's'}:</p>${levelLine(avg)}</div>` : ''}
-    ${justSubmitted ? `<div class="success">Check-in saved. Good work.</div>` : ''}
-    ${checkins.length ? checkins.map(checkinCard).join('') : `<div class="card empty">No check-ins yet. <a href="/checkin">Log your first session</a>.</div>`}`,
-  });
 }
 
 function chatPage(user, messages, chatEnabled) {
@@ -829,9 +817,8 @@ module.exports = {
   userHome,
   checkinForm,
   routinePage,
-  learnPage,
+  notebookPage,
   scorePage,
-  historyPage,
   chatPage,
   coachDashboard,
   coachApprovalsPage,

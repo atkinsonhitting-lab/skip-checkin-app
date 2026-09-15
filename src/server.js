@@ -562,18 +562,6 @@ app.post('/routine/remove', requireLogin, (req, res) => {
   res.redirect('/routine');
 });
 
-// ---- Learn: hitting notebook + players studied ----
-app.get('/learn', requireLogin, (req, res) => {
-  if (req.user.role === 'coach') return res.redirect('/coach');
-  const notes = db
-    .prepare('SELECT * FROM learning_notes WHERE user_id = ? ORDER BY created_at DESC')
-    .all(req.user.id);
-  const players = db
-    .prepare('SELECT * FROM study_players WHERE user_id = ? ORDER BY created_at DESC')
-    .all(req.user.id);
-  res.send(views.learnPage(req.user, notes, players));
-});
-
 app.post('/learn/note', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.status(403).send('Forbidden');
   const note = String(req.body.note || '').trim().slice(0, 1000);
@@ -583,7 +571,7 @@ app.post('/learn/note', requireLogin, (req, res) => {
       "INSERT INTO learning_notes (user_id, note, category, created_at) VALUES (?, ?, ?, datetime('now'))"
     ).run(req.user.id, note, category);
   }
-  res.redirect('/learn');
+  res.redirect('/notebook');
 });
 
 app.post('/learn/player', requireLogin, (req, res) => {
@@ -595,19 +583,19 @@ app.post('/learn/player', requireLogin, (req, res) => {
       "INSERT INTO study_players (user_id, player_name, takeaway, created_at) VALUES (?, ?, ?, datetime('now'))"
     ).run(req.user.id, playerName, takeaway);
   }
-  res.redirect('/learn');
+  res.redirect('/notebook');
 });
 
 app.post('/learn/note/:id/delete', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.status(403).send('Forbidden');
   db.prepare('DELETE FROM learning_notes WHERE id = ? AND user_id = ?').run(req.params.id, req.user.id);
-  res.redirect('/learn');
+  res.redirect('/notebook');
 });
 
 app.post('/learn/player/:id/delete', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.status(403).send('Forbidden');
   db.prepare('DELETE FROM study_players WHERE id = ? AND user_id = ?').run(req.params.id, req.user.id);
-  res.redirect('/learn');
+  res.redirect('/notebook');
 });
 
 app.get('/checkin/score/:id', requireLogin, (req, res) => {
@@ -682,12 +670,29 @@ app.post('/checkin', requireLogin, (req, res) => {
   res.redirect(`/checkin/score/${info.lastInsertRowid}`);
 });
 
-app.get('/history', requireLogin, (req, res) => {
+// ---- Notebook: check-ins + hitting notes in one place ----
+app.get('/notebook', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
-  const rows = db
+  const checkins = db
     .prepare('SELECT * FROM checkins WHERE user_id = ? ORDER BY created_at DESC')
     .all(req.user.id);
-  res.send(views.historyPage(req.user, rows, req.query.saved === '1'));
+  const notes = db
+    .prepare('SELECT * FROM learning_notes WHERE user_id = ? ORDER BY created_at DESC')
+    .all(req.user.id);
+  const players = db
+    .prepare('SELECT * FROM study_players WHERE user_id = ? ORDER BY created_at DESC')
+    .all(req.user.id);
+  res.send(views.notebookPage(req.user, checkins, notes, players, req.query.saved === '1'));
+});
+
+// Old routes fold into the notebook.
+app.get('/history', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.redirect('/coach');
+  res.redirect('/notebook');
+});
+app.get('/learn', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.redirect('/coach');
+  res.redirect('/notebook');
 });
 
 // ---- Coach routes ----
