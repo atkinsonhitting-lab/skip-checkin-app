@@ -1496,8 +1496,9 @@ app.get('/coach/user/:email', requireCoach, (req, res) => {
     .all(user.id);
   const name = user.athlete_name || user.email;
   const thread = db
-    .prepare('SELECT role, content, created_at FROM chat_messages WHERE user_id = ? ORDER BY created_at ASC LIMIT 200')
-    .all(user.id);
+    .prepare('SELECT role, content, created_at FROM chat_messages WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 200')
+    .all(user.id)
+    .reverse();
   res.send(views.coachUser(realUser(req), name, rows, whatWorksData(name, user.id), thread, user.email, brain.listMemory(db, user.id), getRoutine(user.id)));
 });
 
@@ -1590,8 +1591,9 @@ app.get('/coach/skip', requireCoach, (req, res) => {
       ).content,
     }));
   const thread = db
-    .prepare('SELECT role, content, created_at FROM chat_messages WHERE user_id = ? ORDER BY created_at ASC LIMIT 100')
-    .all(req.user.id);
+    .prepare('SELECT role, content, created_at FROM chat_messages WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 100')
+    .all(req.user.id)
+    .reverse();
   res.send(views.coachSkipPage(realUser(req), entries, hitters, thread, !!process.env.LLM_API_KEY, req.query.saved === '1'));
 });
 
@@ -2041,8 +2043,9 @@ async function askSkip(user, userMessage, opts = {}) {
 app.get('/chat', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
   const messages = db
-    .prepare('SELECT role, content, created_at FROM chat_messages WHERE user_id = ? ORDER BY created_at ASC LIMIT 100')
-    .all(req.user.id);
+    .prepare('SELECT role, content, created_at FROM chat_messages WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 100')
+    .all(req.user.id)
+    .reverse();
   res.send(views.chatPage(req.user, messages, !!process.env.LLM_API_KEY));
 });
 
