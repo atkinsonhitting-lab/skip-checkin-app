@@ -817,13 +817,6 @@ app.post('/api/coach/chat', requireCoach, async (req, res) => {
   const message = typeof req.body.message === 'string' ? req.body.message.trim() : '';
   if (!message) return res.status(400).json({ error: 'Message is empty.' });
   if (message.length > 2000) return res.status(400).json({ error: 'Keep it under 2000 characters.' });
-  const today = new Date().toISOString().slice(0, 10);
-  const used = db
-    .prepare("SELECT COUNT(*) AS n FROM chat_messages WHERE user_id = ? AND role = 'user' AND substr(created_at, 1, 10) = ?")
-    .get(req.user.id, today).n;
-  if (used >= CHAT_DAILY_LIMIT) {
-    return res.status(429).json({ error: "You've hit today's chat limit (30). Back tomorrow." });
-  }
   const now = new Date().toISOString();
   db.prepare('INSERT INTO chat_messages (user_id, role, content, created_at) VALUES (?, ?, ?, ?)')
     .run(req.user.id, 'user', message, now);
@@ -953,11 +946,10 @@ app.post('/api/checkins/:id/skip-rating', (req, res) => {
 // returns { reply }. The server injects the hitter's check-in data as
 // context so Skip coaches off their actual sessions. Needs LLM_API_KEY
 // (a free Google AI Studio key) set on the server; without it the chat
-// tab explains it is not switched on yet. 30 messages per hitter per day
-// keeps free-tier usage sane.
+// tab explains it is not switched on yet. No per-day message cap — Google's
+// free tier may still rate-limit heavy use, handled with a friendly retry message.
 
 const LLM_MODEL = process.env.LLM_MODEL || 'gemini-2.5-flash';
-const CHAT_DAILY_LIMIT = 30;
 
 const SKIP_SYSTEM = `You are Skip, the AI hitting coach inside The Daily Hitter, a session check-in app for baseball and softball hitters. Hitters check in after sessions and talk to you when they need coaching. You coach the way Bobby Atkinson coaches — his brain is your brain.
 
@@ -1134,13 +1126,6 @@ app.post('/api/chat', requireLogin, async (req, res) => {
   const message = typeof req.body.message === 'string' ? req.body.message.trim() : '';
   if (!message) return res.status(400).json({ error: 'Message is empty.' });
   if (message.length > 2000) return res.status(400).json({ error: 'Keep it under 2000 characters.' });
-  const today = new Date().toISOString().slice(0, 10);
-  const used = db
-    .prepare("SELECT COUNT(*) AS n FROM chat_messages WHERE user_id = ? AND role = 'user' AND substr(created_at, 1, 10) = ?")
-    .get(req.user.id, today).n;
-  if (used >= CHAT_DAILY_LIMIT) {
-    return res.status(429).json({ error: "You've hit today's chat limit (30). Back tomorrow." });
-  }
   const now = new Date().toISOString();
   db.prepare('INSERT INTO chat_messages (user_id, role, content, created_at) VALUES (?, ?, ?, ?)')
     .run(req.user.id, 'user', message, now);
