@@ -155,4 +155,22 @@ if (!db.prepare("SELECT value FROM settings WHERE key = 'test_cleanup_20260915'"
   console.log(`TEST CLEANUP: removed ${ids.length} test account(s): ${victims.map((r) => r.email).join(', ') || 'none'}`);
 }
 
+// Follow-up (Sep 15 2026): remove any leftover synthetic verification
+// accounts (@e2e.com) created after the main cleanup. One-time, flagged.
+if (!db.prepare("SELECT value FROM settings WHERE key = 'test_cleanup_e2e_20260915'").get()) {
+  const victims = db
+    .prepare("SELECT id, email FROM users WHERE role != 'coach' AND email LIKE '%@e2e.com'")
+    .all();
+  const ids = victims.map((r) => r.id);
+  if (ids.length) {
+    const ph = ids.map(() => '?').join(',');
+    for (const t of ['chat_messages', 'checkins', 'routine_drills', 'password_reset_tokens']) {
+      db.prepare(`DELETE FROM ${t} WHERE user_id IN (${ph})`).run(...ids);
+    }
+    db.prepare(`DELETE FROM users WHERE id IN (${ph})`).run(...ids);
+  }
+  db.prepare("INSERT INTO settings (key, value) VALUES ('test_cleanup_e2e_20260915', ?)").run(String(ids.length));
+  console.log(`TEST CLEANUP (e2e): removed ${ids.length} account(s): ${victims.map((r) => r.email).join(', ') || 'none'}`);
+}
+
 module.exports = db;
