@@ -76,7 +76,7 @@ function loginPage(error, notice) {
     tabs: [],
     body: `<div class="login-card card">
       <img src="/daily-hitter-logo.jpg" class="brand-logo-full" alt="The Daily Hitter — A Hitting Journal">
-      <p class="hint">Step into The Daily Hitter. Skip scores your sessions and learns what your best days look like.</p>
+      <p class="hint">Step into The Daily Hitter. Skip reads your sessions and learns what your best days look like.</p>
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
       ${notice ? `<div class="notice">${esc(notice)}</div>` : ''}
       <form method="post" action="/login" class="form">
@@ -140,7 +140,7 @@ function pendingPage() {
 function userHome(user, extras) {
   const { drillStats = [], thoughtStats = [], avgScore = null, checkinCount = 0, recent = [] } = extras || {};
   const head = avgScore !== null
-    ? `<p class="hint">Skip's average score for you: <strong class="score-inline">${avgScore}</strong> across ${checkinCount} session${checkinCount === 1 ? '' : 's'}.</p>`
+    ? `<div class="level-head"><p class="hint">Skip's read on you across ${checkinCount} session${checkinCount === 1 ? '' : 's'}:</p>${levelLine(avgScore)}</div>`
     : `<p class="hint">No check-ins yet. Log your first session and Skip starts learning your game.</p>`;
   return layout({
     title: 'Home',
@@ -148,7 +148,7 @@ function userHome(user, extras) {
     tabs: userTabs('home'),
     body: `<h1 class="page-title">What's up, ${esc(user.displayName)}</h1>
     <div class="card cta-card">
-      <p class="skip-intro">Check in with Skip. He'll score your session and learn what your best days look like.</p>
+      <p class="skip-intro">Check in with Skip. He'll rate every session and learn what your best days look like.</p>
       <a href="/checkin" class="btn-primary">Check in today's session</a>
     </div>
     ${head}
@@ -158,13 +158,13 @@ function userHome(user, extras) {
 }
 
 // Skip's read on this hitter's check-ins: the hitter's own thoughts first,
-// then drills — each ranked by average session score.
+// then drills — each ranked by average session level.
 function whatWorksSection(drillStats, thoughtStats, avgScore, checkinCount) {
   const thoughts = (thoughtStats || [])
     .map(
       (t) => `<div class="works-row">
           <div class="works-drill">&ldquo;${esc(t.text)}&rdquo;</div>
-          <div class="works-line">On your best days you keep coming back to this <strong class="score-inline">${t.avg}</strong> <span class="hint-inline">(${t.count} sessions)</span></div>
+          <div class="works-line">On your best days you keep coming back to this <span class="hint-inline">(${t.count} sessions)</span>${levelLine(t.avg)}</div>
         </div>`
     )
     .join('');
@@ -172,7 +172,7 @@ function whatWorksSection(drillStats, thoughtStats, avgScore, checkinCount) {
     .map(
       (s) => `<div class="works-row">
           <div class="works-drill">${esc(s.name)}</div>
-          <div class="works-line">When you do <strong>${esc(s.name)}</strong>, your average score is <strong class="score-inline">${s.avg}</strong> <span class="hint-inline">(${s.count} sessions)</span></div>
+          <div class="works-line">When you do <strong>${esc(s.name)}</strong> <span class="hint-inline">(${s.count} sessions)</span>${levelLine(s.avg)}</div>
         </div>`
     )
     .join('');
@@ -308,17 +308,34 @@ function tierBadgeClass(tier) {
   return 'bad';
 }
 
+// Session levels — color-coded, no numeric scores shown to hitters.
+// The fuller the bar, the better the session. Bright green = best.
+const LEVEL_COLORS = { 'Rough': '#ff5252', 'Off': '#ffd54f', 'Solid': '#66bb6a', 'Locked In': '#00e676' };
+function tierFor(score) {
+  if (score >= 9.0) return 'Locked In';
+  if (score >= 7.0) return 'Solid';
+  if (score >= 5.0) return 'Off';
+  return 'Rough';
+}
+function levelColor(tier) { return LEVEL_COLORS[tier] || '#999'; }
+function levelBar(score, tier, lg) {
+  const t = tier || tierFor(Number(score) || 0);
+  const pct = Math.max(6, Math.min(100, (Number(score) / 10) * 100));
+  return `<div class="level-meter${lg ? ' lg' : ''}"><div class="level-fill" style="width:${pct}%;background:${levelColor(t)}"></div></div>`;
+}
+function levelLine(score, tier) {
+  const t = tier || tierFor(Number(score) || 0);
+  return `<div class="level-row">${levelBar(score, t)}<span class="badge ${tierBadgeClass(t)}">${esc(t)}</span></div>`;
+}
+
 function scorePage(user, c) {
-  const scoreStr = Number(c.session_score).toFixed(1);
-  const bd = c.score_breakdown;
-  const signed = (n) => (n > 0 ? `+${n.toFixed(1)}` : n.toFixed(1));
   return layout({
-    title: "Skip's Session Score",
+    title: "Skip's Session Level",
     user,
     tabs: userTabs('checkin'),
     body: `<div class="card score-hero">
-      <div class="score-kicker">Skip's Session Score</div>
-      <div class="score-num">${esc(scoreStr)}</div>
+      <div class="score-kicker">Skip's Session Level</div>
+      <div class="level-hero-meter">${levelBar(c.session_score, c.score_tier, true)}</div>
       <div><span class="badge ${tierBadgeClass(c.score_tier)} badge-lg">${esc(c.score_tier)}</span></div>
       <p class="hint skip-note">${esc(TIER_NOTES[c.score_tier] || '')}</p>
       <div class="score-breakdown">
@@ -327,7 +344,6 @@ function scorePage(user, c) {
         <div><span class="label">Focus</span><strong>${esc(c.focus)}</strong></div>
         ${c.difficulty != null ? `<div><span class="label">Difficulty</span><strong>${esc(c.difficulty)}</strong></div>` : ''}
       </div>
-      ${bd ? `<p class="hint score-formula">Base ${bd.base.toFixed(1)} · Grind ${signed(bd.grind)} · Your words ${signed(bd.words)}</p>` : ''}
       ${skipReadBlock(c)}
       <div class="score-actions">
         <a href="/history" class="btn-primary">See your history</a>
@@ -381,8 +397,7 @@ function checkinCard(c) {
     </div>
     ${c.athlete_name && c.showAthlete ? `<div class="checkin-athlete">${esc(c.athlete_name)}</div>` : ''}
     ${c.session_score != null ? `<div class="checkin-score">
-      <span class="score-inline-lg">${esc(c.session_score)}</span>
-      <span class="badge ${tierBadgeClass(c.score_tier)}">${esc(c.score_tier)}</span>
+      ${levelLine(c.session_score, c.score_tier)}
       <span class="hint-inline">Feel ${esc(c.feel)} · Conf ${esc(c.confidence)} · Focus ${esc(c.focus)}${c.difficulty != null ? ` · Difficulty ${esc(c.difficulty)}` : ''}</span>
     </div>` : ''}
     ${drills.length ? `<div class="drill-chips">${drills.map(drillChip).join('')}</div>` : ''}
@@ -404,7 +419,7 @@ function historyPage(user, checkins, justSubmitted) {
     user,
     tabs: userTabs('history'),
     body: `<h1 class="page-title">Your Check-Ins</h1>
-    ${avg !== null ? `<p class="hint">Skip's average score for you: <strong class="score-inline">${avg}</strong> over ${scored.length} session${scored.length === 1 ? '' : 's'}.</p>` : ''}
+    ${avg !== null ? `<div class="level-head"><p class="hint">Skip's read on you over ${scored.length} session${scored.length === 1 ? '' : 's'}:</p>${levelLine(avg)}</div>` : ''}
     ${justSubmitted ? `<div class="success">Check-in saved. Good work.</div>` : ''}
     ${checkins.length ? checkins.map(checkinCard).join('') : `<div class="card empty">No check-ins yet. <a href="/checkin">Log your first session</a>.</div>`}`,
   });

@@ -1015,7 +1015,7 @@ VOICE: Direct, no fluff. Talk like a cage coach standing next to the hitter — 
 
 HOW YOU COACH:
 1. LEARN HIM OVER TIME — your #1 job. Every session and chat teaches you this hitter: his words, his feels, what his best days have in common. Know what each hitter needs — no two hitters get the same coaching.
-2. GETTING HIM BACK ON TRACK — when he's struggling, work in this order: (a) his own past entries — take him back to what he was doing, feeling, and thinking on his best days, in his own words, name the date and score; (b) mental first — simple plan, clear intent, full commitment; (c) external cues — a target or outcome outside the body; (d) mechanics — needed a lot, and always fair game when the hitter brings them up. READ WHAT THE HITTER WANTS: if he's talking mechanics or asking for mechanical help, meet him there and coach mechanics directly — don't force the order on a hitter who's telling you what he needs. Never give generic advice to a hitter you have history on.
+2. GETTING HIM BACK ON TRACK — when he's struggling, work in this order: (a) his own past entries — take him back to what he was doing, feeling, and thinking on his best days, in his own words, name the date and level; (b) mental first — simple plan, clear intent, full commitment; (c) external cues — a target or outcome outside the body; (d) mechanics — needed a lot, and always fair game when the hitter brings them up. READ WHAT THE HITTER WANTS: if he's talking mechanics or asking for mechanical help, meet him there and coach mechanics directly — don't force the order on a hitter who's telling you what he needs. Never give generic advice to a hitter you have history on. Never mention numeric scores to hitters — talk only in levels and colors: red, yellow, green, bright green (bright green = best day).
 3. Their words first — a cue in the hitter's own words beats a "better" cue every time.
 4. One fix at a time — praise what's good first, then the single fix.
 5. The head coach's playbook below overrides your defaults wherever they conflict. Use an entry only when it's relevant to what the hitter just said — never force one in.`;
@@ -1038,7 +1038,7 @@ function hitterSnapshot(userId) {
     }).filter(Boolean);
     const bits = [
       `${String(r.created_at).slice(0, 10)} · ${r.environment}`,
-      r.session_score != null ? `Score ${r.session_score} (${r.score_tier})` : 'Unscored',
+      r.session_score != null ? `Level: ${r.score_tier}` : 'Unscored',
       `Feel ${r.feel} Conf ${r.confidence} Focus ${r.focus}${r.difficulty != null ? ` Difficulty ${r.difficulty}` : ''}`,
       drillBits.length ? `Drills: ${drillBits.join(', ')}` : null,
       r.session_notes ? `Notes: "${String(r.session_notes).slice(0, 200)}"` : null,
@@ -1056,7 +1056,7 @@ function hitterSnapshot(userId) {
   let trend = '';
   if (last3.length && prev.length) {
     const a = avgOf(last3), b = avgOf(prev);
-    trend = `Trend: last ${last3.length} avg ${a.toFixed(1)} vs prior ${b.toFixed(1)} — ${
+    trend = `Trend: last ${last3.length} avg level ${scoreTier(a)} vs prior ${scoreTier(b)} — ${
       a < b - 0.5 ? 'trending DOWN' : a > b + 0.5 ? 'trending UP' : 'holding steady'}.`;
   }
   const total = db.prepare('SELECT COUNT(*) AS n FROM checkins WHERE user_id = ?').get(userId).n;
@@ -1082,7 +1082,7 @@ function hitterSnapshot(userId) {
       .map((d) => String((d && typeof d === 'object' ? d.name : d) || '').trim())
       .filter(Boolean);
     const bits = [
-      `${String(best.created_at).slice(0, 10)} · ${best.environment} · Score ${best.session_score}`,
+      `${String(best.created_at).slice(0, 10)} · ${best.environment} · Level: ${scoreTier(best.session_score)}`,
       `Feel ${best.feel} Conf ${best.confidence} Focus ${best.focus}`,
       names.length ? `Drills: ${names.join(', ')}` : null,
       best.what_worked ? `What worked: "${String(best.what_worked).slice(0, 200)}"` : null,
@@ -1100,10 +1100,10 @@ function skipDataBlock(userId) {
   const memBlock = mem ? `\n${mem}` : '';
   return snap.lines.length
     ? `HITTER DATA (newest first):\n${snap.lines.join('\n')}\nSessions logged: ${snap.total}${
-        snap.avg != null ? ` · Average score: ${snap.avg.toFixed(1)}` : ''
+        snap.avg != null ? ` · Average level: ${scoreTier(snap.avg)}` : ''
       }\n${snap.trend}${
         snap.top.length
-          ? `\nDrills tied to their best days: ${snap.top.map((d) => `${d.name} (avg ${d.avg} over ${d.count})`).join(', ')}`
+          ? `\nDrills tied to their best days: ${snap.top.map((d) => `${d.name} (${scoreTier(d.avg)} over ${d.count} sessions)`).join(', ')}`
           : ''
       }${
         snap.bestDay

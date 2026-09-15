@@ -198,7 +198,17 @@ a:active { color: #ff3b30; }
 .checkin-date { color: var(--muted); font-size: 13px; }
 .badge.env { background: rgba(225,6,0,.15); color: #ff6b61; }
 .checkin-athlete { font-weight: 800; font-size: 16px; margin-bottom: 6px; }
-.checkin-score { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+/* Session level meter — color-coded, no numeric scores.
+   The fuller the bar, the better the session. Bright green = best. */
+.level-meter { height: 12px; border-radius: 999px; background: #26262b; overflow: hidden; min-width: 90px; flex: 1; }
+.level-meter.lg { height: 30px; }
+.level-fill { height: 100%; border-radius: 999px; }
+.level-row { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+.level-head { margin: 12px 0; }
+.level-head .hint { margin-bottom: 6px; }
+.level-hero-meter { margin: 16px auto; max-width: 440px; }
+.checkin-score { display: flex; align-items: center; gap: 10px; margin: 8px 0; flex-wrap: wrap; }
+.checkin-score .level-row { flex: 1; min-width: 180px; margin: 0; }
 .score-inline { color: var(--red); font-weight: 800; }
 .score-inline-lg { color: var(--red); font-weight: 900; font-size: 28px; }
 .drill-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
