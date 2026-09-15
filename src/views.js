@@ -29,7 +29,7 @@ function layout({ title, user, tabs, body }) {
 </head>
 <body>
 <header class="topbar">
-  <div class="brand"><span class="brand-mark">D</span> THE DAILY HITTER</div>
+  <div class="brand"><img src="/daily-hitter-logo.jpg" class="brand-logo-icon" alt=""> THE DAILY HITTER</div>
   ${user ? `<div class="userbox">${esc(user.displayName)} · <a href="/logout">Log out</a></div>` : ''}
 </header>
 ${tabHtml ? `<nav class="tabs">${tabHtml}</nav>` : ''}
@@ -61,7 +61,7 @@ function loginPage(error, notice) {
     user: null,
     tabs: [],
     body: `<div class="login-card card">
-      <h1>The Daily Hitter</h1>
+      <img src="/daily-hitter-logo.jpg" class="brand-logo-full" alt="The Daily Hitter — A Hitting Journal">
       <p class="hint">Step into The Daily Hitter. Skip scores your sessions and learns what your best days look like.</p>
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
       ${notice ? `<div class="notice">${esc(notice)}</div>` : ''}
@@ -82,7 +82,7 @@ function registerPage(error) {
     user: null,
     tabs: [],
     body: `<div class="login-card card">
-      <h1>Join The Daily Hitter</h1>
+      <img src="/daily-hitter-logo.jpg" class="brand-logo-full" alt="The Daily Hitter — A Hitting Journal">
       <p class="hint">Free. Use your email, set a password, start checking in.</p>
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
       <form method="post" action="/register" class="form">
