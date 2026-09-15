@@ -247,6 +247,37 @@ db.exec(`CREATE TABLE IF NOT EXISTS remote_programs (
       }
     } catch (e) { /* leave the program as-is */ }
   }
+  // One-time repair: standalone finisher sections ("Game Swings", "Open Angle")
+  // fold into the section they follow — Bobby: they're part of that section's
+  // work (Liam's Tee Work / Side Flips / Front Toss), not their own section.
+  {
+    try {
+      const FINISHERS = new Set(['game swings', 'open angle']);
+      const rows = db.prepare('SELECT id, athlete_name, program_json FROM remote_programs').all();
+      for (const row of rows) {
+        const prog = JSON.parse(row.program_json || '{}');
+        const routine = Array.isArray(prog.routine) ? prog.routine : null;
+        if (!routine) continue;
+        let changed = false;
+        const out = [];
+        for (const c of routine) {
+          const cat = String(c.category || '').trim();
+          if (FINISHERS.has(cat.toLowerCase()) && out.length) {
+            out[out.length - 1].items.push(...(c.items || []));
+            changed = true;
+          } else {
+            out.push(c);
+          }
+        }
+        if (changed) {
+          prog.routine = out;
+          db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?')
+            .run(JSON.stringify(prog), new Date().toISOString(), row.id);
+          console.log(`Folded finisher sections for ${row.athlete_name}.`);
+        }
+      }
+    } catch (e) { /* leave the program as-is */ }
+  }
   // Backfill: match accounts by full name, honoring aliases
   // (runs every boot; idempotent).
   const programs = db.prepare('SELECT id, athlete_name, aliases FROM remote_programs').all();
@@ -406,7 +437,15 @@ CREATE TABLE IF NOT EXISTS study_players (
   takeaway TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_players_user_time ON study_players(user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_drill_insights_drill ON drill_insights(drill);
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  endpoint TEXT PRIMARY KEY,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_push_subs_user ON push_subscriptions(user_id);
 CREATE TABLE IF NOT EXISTS mental_baseline (
   user_id INTEGER PRIMARY KEY REFERENCES users(id),
   pregame_routine TEXT NOT NULL DEFAULT '',

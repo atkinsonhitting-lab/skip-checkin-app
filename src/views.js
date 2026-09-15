@@ -146,7 +146,27 @@ function pendingPage() {
 }
 
 function userHome(user, extras) {
-  const { whatWorks = {}, avgScore = null, checkinCount = 0, recent = [] } = extras || {};
+  const { whatWorks = {}, avgScore = null, checkinCount = 0, recent = [], streak = null, pushOn = false, pushEnabled = false } = extras || {};
+  let streakCard = '';
+  if (streak) {
+    const n = streak.streak || 0;
+    if (n >= 1) {
+      const line =
+        n >= 30 ? '30 days. You\u2019re a different hitter.' :
+        n >= 7 ? 'A full week \u2014 that\u2019s how habits are built.' :
+        n >= 2 ? 'Keep it rolling.' :
+        'Check in tomorrow to build it.';
+      streakCard = `<div class="card streak-card"><div class="streak-num">${n}</div><div><div class="streak-label">day streak</div><div class="hint">${line}</div></div></div>`;
+    } else if (streak.daysSince != null && streak.daysSince >= 1) {
+      streakCard = `<div class="card"><p style="margin:0">Streak reset \u2014 last check-in ${streak.daysSince} day${streak.daysSince === 1 ? '' : 's'} ago. Today starts a new one.</p></div>`;
+    }
+  }
+  const pushCard = (pushEnabled && !pushOn)
+    ? `<div class="card push-card">
+        <p style="margin:0 0 10px"><strong>Never miss a day.</strong> <span class="hint">Turn on reminders \u2014 Skip nudges you on days you haven\u2019t checked in.</span></p>
+        <p style="margin:0"><button type="button" class="btn-primary" id="push-enable-btn" style="margin-top:0">Turn on reminders</button></p>
+      </div>`
+    : '';
   const head = avgScore !== null
     ? `<div class="level-head"><p class="hint">Skip's read on you across ${checkinCount} session${checkinCount === 1 ? '' : 's'}:</p>${levelLine(avgScore)}</div>`
     : `<p class="hint">No check-ins yet. Log your first session and Skip starts learning your game.</p>`;
@@ -160,6 +180,8 @@ function userHome(user, extras) {
       <a href="/checkin" class="btn-primary">Check in today's session</a>
     </div>
     ${head}
+    ${streakCard}
+    ${pushCard}
     ${whatWorksSection(whatWorks)}
     ${recent.length ? `<h2 class="section-head">Recent</h2>${recent.map(checkinCard).join('')}<p><a href="/notebook">See your notebook →</a></p>` : ''}`,
   });
@@ -628,7 +650,7 @@ function coachApprovalsPage(user, pending) {
   });
 }
 
-function coachDashboard(user, userStats, latest, pending, remotePrograms, library) {
+function coachDashboard(user, userStats, latest, pending, remotePrograms, library, opts) {
   const totalCheckins = userStats.reduce((s, u) => s + u.total, 0);
   const cards = userStats
     .map(
@@ -656,6 +678,7 @@ function coachDashboard(user, userStats, latest, pending, remotePrograms, librar
     user,
     tabs: coachTabs('dashboard', user.approvalCount),
     body: `<h1 class="page-title">Skip Dashboard</h1>
+    ${!(opts && opts.pushOn) ? '<p><button type="button" class="btn-small" id="push-enable-btn">Turn on notifications</button> <span class="hint-inline">get a push when a hitter needs approval</span></p>' : ''}
     <div class="stat-row">
       <div class="card stat"><div class="stat-num">${userStats.length}</div><div class="stat-label">hitters</div></div>
       <div class="card stat"><div class="stat-num">${totalCheckins}</div><div class="stat-label">check-ins</div></div>

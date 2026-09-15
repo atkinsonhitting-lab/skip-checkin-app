@@ -225,3 +225,62 @@
       if (!window.confirm('Remove ' + name + ' and their program?')) e.preventDefault();
     });
   });
+
+// ---- Push notifications: service worker + subscribe ----
+(function push() {
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(function () {});
+  }
+  var btn = document.getElementById('push-enable-btn');
+  if (!btn) return;
+  function urlBase64ToUint8Array(base64String) {
+    var padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+    var base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    var raw = atob(base64);
+    var out = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+    return out;
+  }
+  fetch('/api/push/status').then(function (r) { return r.json(); }).then(function (st) {
+    if (!st.pushEnabled) { btn.style.display = 'none'; return; }
+    if (st.subscribed) {
+      btn.textContent = /notification/i.test(btn.textContent) ? 'Notifications on' : 'Reminders on';
+      btn.disabled = true;
+    }
+  }).catch(function () {});
+  btn.addEventListener('click', function () {
+    btn.disabled = true;
+    (async function () {
+      try {
+        if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+          btn.textContent = 'Not supported on this browser';
+          return;
+        }
+        var perm = await Notification.requestPermission();
+        if (perm !== 'granted') {
+          btn.textContent = 'Blocked — allow notifications in settings';
+          btn.disabled = false;
+          return;
+        }
+        var reg = await navigator.serviceWorker.ready;
+        var keyResp = await fetch('/api/push/vapid-key');
+        var keyJson = await keyResp.json();
+        if (!keyJson.publicKey) { btn.textContent = 'Reminders not set up yet'; return; }
+        var sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(keyJson.publicKey),
+        });
+        var resp = await fetch('/api/push/subscribe', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ subscription: sub.toJSON() }),
+        });
+        if (!resp.ok) throw new Error('subscribe failed');
+        btn.textContent = /notification/i.test(btn.textContent) ? 'Notifications on' : 'Reminders on';
+      } catch (e) {
+        btn.textContent = 'Could not turn on — try again';
+        btn.disabled = false;
+      }
+    })();
+  });
+})();

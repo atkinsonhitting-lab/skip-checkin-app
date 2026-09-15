@@ -9,6 +9,7 @@ const path = require('path');
 const express = require('express');
 const session = require('express-session');
 const helmet = require('helmet');
+const webpush = require('web-push');
 const bcrypt = require('bcryptjs');
 
 const db = require('./db');
@@ -34,6 +35,17 @@ app.use((req, res, next) => {
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 const isProd = process.env.NODE_ENV === 'production';
+
+// ---- Web Push (VAPID) — hitter reminders + coach alerts ----
+const VAPID_PUBLIC_KEY = (process.env.VAPID_PUBLIC_KEY || '').trim();
+const VAPID_PRIVATE_KEY = (process.env.VAPID_PRIVATE_KEY || '').trim();
+let pushEnabled = false;
+if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
+  webpush.setVapidDetails('mailto:atkinsonhitting@gmail.com', VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+  pushEnabled = true;
+} else {
+  console.warn('Push off: VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY not set.');
+}
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-only-secret-change-me';
 
 const sessionStore = new SQLiteStore(db);
@@ -675,6 +687,9 @@ app.get('/', requireLogin, (req, res) => {
     avgScore,
     checkinCount,
     recent,
+    streak: streakData(req.user.id),
+    pushOn: userPushSubscriptions(req.user.id).length > 0,
+    pushEnabled,
   }));
 });
 
@@ -792,6 +807,59 @@ app.get('/program', requireLogin, (req, res) => {
   const p = getProgram(req.user.remoteProgramId);
   if (!p) return res.redirect('/');
   res.send(views.programPage(req.user, p));
+});
+
+// ---- Push notifications ----
+function savePushSubscription(userId, sub) {
+  const endpoint = String(sub.endpoint || '').slice(0, 500);
+  const p256dh = String((sub.keys || {}).p256dh || '').slice(0, 200);
+  const auth = String((sub.keys || {}).auth || '').slice(0, 200);
+  if (!endpoint || !p256dh || !auth) return;
+  db.prepare(
+    'INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, created_at) VALUES (?, ?, ?, ?, ?)'
+    + ' ON CONFLICT(endpoint) DO UPDATE SET user_id=excluded.user_id, p256dh=excluded.p256dh, auth=excluded.auth'
+  ).run(userId, endpoint, p256dh, auth, new Date().toISOString());
+}
+function userPushSubscriptions(userId) {
+  return db.prepare('SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ?').all(userId);
+}
+async function sendPush(sub, title, body, url) {
+  try {
+    await webpush.sendNotification(
+      { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+      JSON.stringify({ title, body, url: url || '/' })
+    );
+  } catch (e) {
+    if (e.statusCode === 404 || e.statusCode === 410) {
+      db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(sub.endpoint);
+    } else {
+      console.warn('push send failed:', e.message);
+    }
+  }
+}
+async function pushToUser(userId, title, body, url) {
+  if (!pushEnabled) return;
+  for (const sub of userPushSubscriptions(userId)) await sendPush(sub, title, body, url);
+}
+async function pushToCoaches(title, body, url) {
+  if (!pushEnabled) return;
+  const coaches = db.prepare("SELECT id FROM users WHERE role = 'coach'").all();
+  for (const c of coaches) await pushToUser(c.id, title, body, url);
+}
+app.get('/api/push/vapid-key', (req, res) => res.json({ publicKey: VAPID_PUBLIC_KEY || null }));
+app.get('/api/push/status', requireLogin, (req, res) => {
+  res.json({ pushEnabled, subscribed: userPushSubscriptions(req.user.id).length > 0 });
+});
+app.post('/api/push/subscribe', requireLogin, (req, res) => {
+  const sub = req.body && req.body.subscription;
+  if (!sub || !sub.endpoint || !sub.keys) return res.status(400).json({ error: 'bad subscription' });
+  savePushSubscription(req.user.id, sub);
+  res.json({ ok: true });
+});
+app.post('/api/push/unsubscribe', requireLogin, (req, res) => {
+  const endpoint = req.body && req.body.endpoint;
+  if (endpoint) db.prepare('DELETE FROM push_subscriptions WHERE user_id = ? AND endpoint = ?').run(req.user.id, endpoint);
+  res.json({ ok: true });
 });
 
 // Mental Game — every hitter's baseline. Skip coaches from this.
@@ -1302,6 +1370,7 @@ app.get('/coach', requireCoach, (req, res) => {
     views.coachDashboard(realUser(req), stats, latest, pending, remotePrograms, {
       cats: libraryCats,
       lastSync: librarySync ? librarySync.value : '',
+      pushOn: userPushSubscriptions(req.user.id).length > 0,
     })
   );
 });
@@ -1640,6 +1709,32 @@ HOW YOU COACH:
 3. Their words first — a cue in the hitter's own words beats a "better" cue every time.
 4. One fix at a time — praise what's good first, then the single fix.
 5. The head coach's playbook below overrides your defaults wherever they conflict. Use an entry only when it's relevant to what the hitter just said — never force one in.`;
+
+// ---- Check-in streak (Chicago days) ----
+const chiDayFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' });
+const chiHourFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', hour: 'numeric', hour12: false });
+const chiDay = (d) => chiDayFmt.format(d instanceof Date ? d : new Date(d));
+function ymdToUTC(ymd) {
+  const parts = String(ymd).split('-').map(Number);
+  return Date.UTC(parts[0], parts[1] - 1, parts[2]);
+}
+function prevDayStr(ymd) {
+  return new Date(ymdToUTC(ymd) - 864e5).toISOString().slice(0, 10);
+}
+function streakData(userId) {
+  let rows = [];
+  try { rows = db.prepare('SELECT created_at FROM checkins WHERE user_id = ?').all(userId); } catch (e) { return { streak: 0, lastCheckinDay: null, daysSince: null }; }
+  const days = new Set();
+  for (const r of rows) { try { days.add(chiDay(r.created_at)); } catch (e) {} }
+  const today = chiDay(new Date());
+  let cursor = days.has(today) ? today : prevDayStr(today);
+  let streak = 0;
+  if (days.has(cursor)) { while (days.has(cursor)) { streak += 1; cursor = prevDayStr(cursor); } }
+  const sorted = Array.from(days).sort();
+  const last = sorted.length ? sorted[sorted.length - 1] : null;
+  const daysSince = last ? Math.round((ymdToUTC(today) - ymdToUTC(last)) / 864e5) : null;
+  return { streak, lastCheckinDay: last, daysSince };
+}
 
 function hitterSnapshot(userId) {
   const rows = db
@@ -2021,6 +2116,11 @@ async function notifyCoachOfSignup(req, email, name) {
       `${name} (${email}) just signed up for The Daily Hitter and is waiting for your approval.\n\n` +
       `Approve or decline them here:\n${base}/coach\n`,
   });
+  pushToCoaches(
+    'New hitter waiting',
+    `${name} just signed up and needs your approval.`,
+    '/coach/approvals'
+  ).catch((e) => console.warn('signup push failed:', e.message));
 }
 
 // Bobby approved a hitter — let them know they're in.
@@ -2204,9 +2304,30 @@ async function ratePendingJournals() {
   }
 }
 
+// ---- Nightly check-in reminder sweep (8pm Chicago) ----
+let lastReminderDay = '';
+setInterval(async () => {
+  if (!pushEnabled) return;
+  try {
+    const nowDay = chiDay(new Date());
+    const hour = Number(chiHourFmt.format(new Date()));
+    if (hour < 20 || lastReminderDay === nowDay) return;
+    lastReminderDay = nowDay;
+    const athletes = db.prepare("SELECT id FROM users WHERE role = 'athlete' AND status = 'approved'").all();
+    for (const a of athletes) {
+      const sd = streakData(a.id);
+      if (sd.daysSince === 0) continue;
+      if (!userPushSubscriptions(a.id).length) continue;
+      await pushToUser(a.id, 'Log today\u2019s session', 'No check-in yet today \u2014 log it while it\u2019s fresh.', '/checkin');
+    }
+  } catch (e) {
+    console.warn('reminder sweep failed:', e.message);
+  }
+}, 15 * 60 * 1000);
+
 // ---- Boot ----
 const PORT = process.env.PORT || 3000;
-const server = app.listen(PORT, () => {
+app.listen(PORT, () => {
   console.log(`Skip listening on port ${PORT}`);
   const n = db.prepare("SELECT COUNT(*) AS n FROM users WHERE role != 'coach'").get().n;
   console.log(`Hitters signed up: ${n}`);

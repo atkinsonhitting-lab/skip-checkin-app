@@ -520,4 +520,8 @@ details[open] > .routine-summary::after { content: '\25B4'; }
 .day-pill.active { background: var(--red); border-color: var(--red); color: #fff; }
 .day-pill.pregame-pill { border-color: var(--red); color: var(--red); }
 .day-pill.pregame-pill.active { background: var(--red); border-color: var(--red); color: #fff; }
+.streak-card { display: flex; align-items: center; gap: 14px; }
+.streak-num { font-size: 42px; font-weight: 800; color: var(--red); line-height: 1; }
+.streak-label { font-weight: 800; font-size: 15px; }
+.push-card { border-color: var(--red); }
 .prog-day-head { font-size: 18px; font-weight: 800; margin: 2px 0 10px; }

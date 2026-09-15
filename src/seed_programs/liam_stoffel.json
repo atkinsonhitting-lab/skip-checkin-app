@@ -1,141 +1,126 @@
 {
- "adjustment": "Load around back hip, get barrel going fast early.",
- "athlete": "Liam Stoffel",
- "date_range": "8/18\u20139/16",
- "phase_emphasis": "Coil and Barrel Turn",
- "routine": [
-  {
-   "category": "Daily Routine",
-   "items": [
+  "adjustment": "Load around back hip, get barrel going fast early.",
+  "athlete": "Liam Stoffel",
+  "date_range": "8/18–9/16",
+  "phase_emphasis": "Coil and Barrel Turn",
+  "routine": [
     {
-     "drill": "No Stride Launch"
+      "category": "Daily Routine",
+      "items": [
+        {
+          "drill": "No Stride Launch"
+        },
+        {
+          "drill": "Open 45 w Stride"
+        },
+        {
+          "drill": "Ball Drop Drill"
+        }
+      ]
     },
     {
-     "drill": "Open 45 w Stride"
+      "category": "Prep Work",
+      "items": [
+        {
+          "drill": "Banded Loads",
+          "volume": "3 sets × 5 reps"
+        },
+        {
+          "drill": "Banded Turns",
+          "volume": "3 sets × 5 reps"
+        }
+      ]
     },
     {
-     "drill": "Ball Drop Drill"
+      "category": "Tee Work",
+      "items": [
+        {
+          "drill": "No Stride Launch",
+          "volume": "2 sets × 5 swings"
+        },
+        {
+          "drill": "Open 45 w Stride",
+          "volume": "2 sets × 5 swings"
+        },
+        {
+          "drill": "Ball Drop Drill",
+          "flag": "drill name missing in source sheet; inferred from daily routine pattern",
+          "volume": "2 sets × 3 swings"
+        },
+        {
+          "drill": "Game Swings",
+          "volume": "2 sets × 8 swings"
+        }
+      ]
+    },
+    {
+      "category": "Side Flips",
+      "items": [
+        {
+          "drill": "No Stride Launch",
+          "volume": "2 sets × 5 swings"
+        },
+        {
+          "drill": "Open 45 w Stride",
+          "volume": "2 sets × 5 swings"
+        },
+        {
+          "drill": "Ball Drop Drill",
+          "volume": "2 sets × 3 swings"
+        },
+        {
+          "drill": "Game Swings",
+          "volume": "2 sets × 8 swings"
+        }
+      ]
+    },
+    {
+      "category": "Front Toss",
+      "items": [
+        {
+          "drill": "No Stride Launch",
+          "volume": "2 sets × 3 swings"
+        },
+        {
+          "drill": "Open 45 w Stride",
+          "volume": "2 sets × 3 swings"
+        },
+        {
+          "drill": "Ball Drop Drill",
+          "flag": "drill name missing in source sheet; inferred from pattern",
+          "volume": "2 sets × 3 swings"
+        },
+        {
+          "drill": "Open Angle",
+          "volume": "3 rounds × 5 swings"
+        },
+        {
+          "drill": "Open Angle",
+          "volume": "3 rounds × 5 swings"
+        },
+        {
+          "drill": "Open Angle",
+          "volume": "3 rounds × 5 swings"
+        }
+      ]
     }
-   ]
+  ],
+  "grades": {
+    "Load": "B",
+    "Path": "B",
+    "Connection": "C",
+    "Timing": "C",
+    "Power Production": "B"
   },
-  {
-   "category": "Prep Work",
-   "items": [
-    {
-     "drill": "Banded Loads",
-     "volume": "3 sets \u00d7 5 reps"
-    },
-    {
-     "drill": "Banded Turns",
-     "volume": "3 sets \u00d7 5 reps"
-    }
-   ]
+  "strengths": [
+    "Wants to get better and loves the process",
+    "Barrel consistency",
+    "Adjustability"
+  ],
+  "cues": {
+    "movement": "Coil around the back hip. Turn the barrel.",
+    "timing": "Load early. Get the barrel going fast early.",
+    "game": "See it. Barrel fast."
   },
-  {
-   "category": "Tee Work",
-   "items": [
-    {
-     "drill": "No Stride Launch",
-     "volume": "2 sets \u00d7 5 swings"
-    },
-    {
-     "drill": "Open 45 w Stride",
-     "volume": "2 sets \u00d7 5 swings"
-    },
-    {
-     "drill": "Ball Drop Drill",
-     "flag": "drill name missing in source sheet; inferred from daily routine pattern",
-     "volume": "2 sets \u00d7 3 swings"
-    }
-   ]
-  },
-  {
-   "category": "Game Swings",
-   "items": [
-    {
-     "drill": "Game Swings",
-     "volume": "2 sets \u00d7 8 swings"
-    }
-   ]
-  },
-  {
-   "category": "Side Flips",
-   "items": [
-    {
-     "drill": "No Stride Launch",
-     "volume": "2 sets \u00d7 5 swings"
-    },
-    {
-     "drill": "Open 45 w Stride",
-     "volume": "2 sets \u00d7 5 swings"
-    },
-    {
-     "drill": "Ball Drop Drill",
-     "volume": "2 sets \u00d7 3 swings"
-    }
-   ]
-  },
-  {
-   "category": "Game Swings",
-   "items": [
-    {
-     "drill": "Game Swings",
-     "volume": "2 sets \u00d7 8 swings"
-    }
-   ]
-  },
-  {
-   "category": "Front Toss",
-   "items": [
-    {
-     "drill": "No Stride Launch",
-     "volume": "2 sets \u00d7 3 swings"
-    },
-    {
-     "drill": "Open 45 w Stride",
-     "volume": "2 sets \u00d7 3 swings"
-    },
-    {
-     "drill": "Ball Drop Drill",
-     "flag": "drill name missing in source sheet; inferred from pattern",
-     "volume": "2 sets \u00d7 3 swings"
-    }
-   ]
-  },
-  {
-   "category": "Open Angle",
-   "items": [
-    {
-     "drill": "Open Angle",
-     "volume": "3 rounds \u00d7 5 swings"
-    },
-    {
-     "drill": "Open Angle",
-     "volume": "3 rounds \u00d7 5 swings"
-    },
-    {
-     "drill": "Open Angle",
-     "volume": "3 rounds \u00d7 5 swings"
-    }
-   ]
-  }
- ],
- "grades": {
-  "Load": "B",
-  "Path": "B",
-  "Connection": "C",
-  "Timing": "C",
-  "Power Production": "B"
- },
- "strengths": [
-  "Wants to get better and loves the process",
-  "Barrel consistency",
-  "Adjustability"
- ],
- "cues": {
-  "movement": "Coil around the back hip. Turn the barrel.",
-  "timing": "Load early. Get the barrel going fast early.",
-  "game": "See it. Barrel fast."
- },
- "mental_framework": "PREPARED \u2192 PRESENT \u2192 COMPETE"
+  "mental_framework": "PREPARED → PRESENT → COMPETE"
 }
