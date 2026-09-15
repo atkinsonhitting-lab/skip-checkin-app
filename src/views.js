@@ -375,7 +375,9 @@ function notebookPage(user, checkins, notes, players, justSubmitted) {
     <div class="card">
       <h2 class="routine-station">Players I study</h2>
       ${playerRows || `<p class="hint">No players yet. Add the hitters you watch and learn from.</p>`}
-    </div>`,
+    </div>
+    <h2 class="section-head" id="checkins">Check-ins</h2>
+    ${checkinsHtml}`,
   });
 }
 
