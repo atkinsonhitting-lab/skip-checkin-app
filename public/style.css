@@ -517,4 +517,6 @@ details[open] > .routine-summary::after { content: '\25B4'; }
 .day-pills { display: flex; gap: 8px; margin: 2px 0 12px; }
 .day-pill { flex: 1; background: var(--bg2); border: 1px solid var(--line); color: var(--text); border-radius: 10px; padding: 10px 0; font-size: 14px; font-weight: 700; cursor: pointer; }
 .day-pill.active { background: var(--red); border-color: var(--red); color: #fff; }
+.day-pill.pregame-pill { border-color: var(--red); color: var(--red); }
+.day-pill.pregame-pill.active { background: var(--red); border-color: var(--red); color: #fff; }
 .prog-day-head { font-size: 18px; font-weight: 800; margin: 2px 0 10px; }

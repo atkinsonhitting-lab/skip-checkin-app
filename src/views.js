@@ -720,10 +720,16 @@ function programPage(user, p) {
   const everyDayBlocks = everyDayFirst;
   const everyDayCats = everyDaySet;
   const daySections = {};
+  const pregameSections = [];
   const flatBlocks = [];
   for (const c of routine) {
     if (everyDayCats.has(c)) continue;
     const cat = String(c.category || '');
+    const pg = cat.match(/^pregame(?:\s*[\u2014\u2013-]\s*(.+))?$/i);
+    if (pg) {
+      pregameSections.push({ section: (pg[1] || '').trim(), items: c.items || [] });
+      continue;
+    }
     const m = cat.match(dayLabelRe);
     if (m) {
       const lbl = 'Day ' + m[1].replace(/\D+/g, '');
@@ -732,6 +738,7 @@ function programPage(user, p) {
     }
     flatBlocks.push(c);
   }
+  const hasPregame = pregameSections.length > 0;
   const dayLabels = Object.keys(daySections).sort(
     (a, b) => parseInt(a.replace(/\D+/g, ''), 10) - parseInt(b.replace(/\D+/g, ''), 10)
   );
@@ -752,16 +759,31 @@ function programPage(user, p) {
     if (!cards.length) return `<div class="card empty">Nothing scheduled for this day.</div>`;
     return cards.join('');
   };
+  const pregamePanel = () => {
+    const cards = [];
+    for (const c of everyDayBlocks) cards.push(sectionCard(c.category, c.items));
+    for (const sec of pregameSections) cards.push(sectionCard(sec.section || 'Pregame', sec.items));
+    if (!cards.length) return `<div class="card empty">Nothing here yet.</div>`;
+    return cards.join('');
+  };
   let trainingNav = '';
   if (trainMode === 'flat') {
     trainingNav = routine.length ? `<div id="training" class="prog-anchor">${routineHtml}</div>` : '';
   } else {
-    const pillDays = trainMode === 'week' ? WEEKDAYS : dayLabels;
+    const pillDays = trainMode === 'week' ? [...WEEKDAYS] : [...dayLabels];
+    if (hasPregame) pillDays.push('Pregame');
     const pillHtml = pillDays
-      .map((d) => `<button type="button" class="day-pill" data-daypill="${esc(d)}">${esc(trainMode === 'week' ? d.slice(0, 3) : d)}</button>`)
+      .map((d) =>
+        d === 'Pregame'
+          ? `<button type="button" class="day-pill pregame-pill" data-daypill="Pregame">Pregame</button>`
+          : `<button type="button" class="day-pill" data-daypill="${esc(d)}">${esc(trainMode === 'week' ? d.slice(0, 3) : d)}</button>`
+      )
       .join('');
     const panelHtml = pillDays
       .map((d) => {
+        if (d === 'Pregame') {
+          return `<div data-daypanel="Pregame" hidden><div class="prog-day-head">Pregame <span class="hint-inline">· game day</span></div>${pregamePanel()}</div>`;
+        }
         const label = trainMode === 'week' ? schedMap[d] || '' : d;
         const head = trainMode === 'week' ? `${esc(d)}${label ? ` <span class="hint-inline">· ${esc(label)}</span>` : ''}` : esc(label);
         return `<div data-daypanel="${esc(d)}" hidden><div class="prog-day-head">${head}</div>${panelForLabel(label)}</div>`;
