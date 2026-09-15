@@ -143,17 +143,20 @@ function whatWorksSection(stats, avgScore, checkinCount) {
 
 const ENVIRONMENTS = ['Game', 'Cage', 'Live BP', 'Tee Work', 'Other'];
 
-function sliderField(name, label, question, value, ends) {
+function sliderField(name, label, question, value, ends, ids) {
   const v = Math.min(10, Math.max(1, Number(value) || 7));
   const lo = (ends && ends[0]) || '1';
   const hi = (ends && ends[1]) || '10';
+  const qId = ids ? ` id="${name}-q"` : '';
+  const loId = ids ? ` id="${name}-lo"` : '';
+  const hiId = ids ? ` id="${name}-hi"` : '';
   return `<div class="slider-block">
-    <div class="field-label">${esc(label)} <span class="hint-inline">${esc(question)}</span></div>
+    <div class="field-label">${esc(label)} <span class="hint-inline"${qId}>${esc(question)}</span></div>
     <div class="slider-row">
       <input type="range" name="${name}" min="1" max="10" step="1" value="${v}" class="slider" data-out="${name}-out" aria-label="${esc(label)}">
       <span class="slider-val" id="${name}-out">${v}</span>
     </div>
-    <div class="slider-ends"><span>${esc(lo)}</span><span>${esc(hi)}</span></div>
+    <div class="slider-ends"><span${loId}>${esc(lo)}</span><span${hiId}>${esc(hi)}</span></div>
   </div>`;
 }
 
@@ -180,7 +183,8 @@ function checkinForm(user, error, values, drillNames, routine) {
       ${sliderField('feel', 'Feel', 'How good did you feel?', v.feel)}
       ${sliderField('confidence', 'Confidence', 'How confident did you feel?', v.confidence)}
       ${sliderField('focus', 'Focus', 'How locked in was your focus?', v.focus)}
-      ${sliderField('difficulty', 'Difficulty', 'How hard was the training?', v.difficulty, ['Easy', 'Brutal'])}
+      ${sliderField('difficulty', 'Difficulty', 'How hard was the training?', v.difficulty, ['Easy', 'Brutal'], true)}
+      <script>(function(){var q=document.getElementById('difficulty-q'),lo=document.getElementById('difficulty-lo'),hi=document.getElementById('difficulty-hi');if(!q)return;function upd(){var s=document.querySelector('input[name="environment"]:checked');var g=s&&s.value==='Game';q.textContent=g?'How good was the pitching?':'How hard was the training?';lo.textContent=g?'Weak':'Easy';hi.textContent=g?'Nasty':'Brutal';}document.querySelectorAll('input[name="environment"]').forEach(function(r){r.addEventListener('change',upd)});upd();})();</script>
       <label>Session notes <span class="hint-inline">(don't hold back — what you felt, what you saw, what was off)</span><textarea name="session_notes" rows="4" placeholder="How did it go? What did you feel?">${esc(v.session_notes || '')}</textarea></label>
       <label>What worked <span class="hint-inline">(be specific — the exact drill, cue, or feel)</span><textarea name="what_worked" rows="2" placeholder="What clicked today?">${esc(v.what_worked || '')}</textarea></label>
       <div class="field-label">Did you do any drills?</div>
