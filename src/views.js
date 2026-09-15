@@ -103,7 +103,7 @@ function registerPage(error) {
 }
 
 function userHome(user, extras) {
-  const { drillStats = [], avgScore = null, checkinCount = 0, recent = [] } = extras || {};
+  const { drillStats = [], thoughtStats = [], avgScore = null, checkinCount = 0, recent = [] } = extras || {};
   const head = avgScore !== null
     ? `<p class="hint">Skip's average score for you: <strong class="score-inline">${avgScore}</strong> across ${checkinCount} session${checkinCount === 1 ? '' : 's'}.</p>`
     : `<p class="hint">No check-ins yet. Log your first session and Skip starts learning your game.</p>`;
@@ -117,26 +117,38 @@ function userHome(user, extras) {
       <a href="/checkin" class="btn-primary">Check in today's session</a>
     </div>
     ${head}
-    ${whatWorksSection(drillStats, avgScore, checkinCount)}
+    ${whatWorksSection(drillStats, thoughtStats, avgScore, checkinCount)}
     ${recent.length ? `<h2 class="section-head">Recent</h2>${recent.map(checkinCard).join('')}<p><a href="/history">See all history →</a></p>` : ''}`,
   });
 }
 
-// Skip's read on this hitter's check-ins: drills ranked by average session score.
-function whatWorksSection(stats, avgScore, checkinCount) {
-  const body = stats.length
-    ? `<div class="works-rows">${stats
-        .map(
-          (s) => `<div class="works-row">
-            <div class="works-drill">${esc(s.name)}</div>
-            <div class="works-line">When you do <strong>${esc(s.name)}</strong>, your average score is <strong class="score-inline">${s.avg}</strong> <span class="hint-inline">(${s.count} sessions)</span></div>
-          </div>`
-        )
-        .join('')}</div>`
-    : `<p class="hint">Check in 3+ times and Skip will start spotting your patterns.</p>`;
+// Skip's read on this hitter's check-ins: the hitter's own thoughts first,
+// then drills — each ranked by average session score.
+function whatWorksSection(drillStats, thoughtStats, avgScore, checkinCount) {
+  const thoughts = (thoughtStats || [])
+    .map(
+      (t) => `<div class="works-row">
+          <div class="works-drill">&ldquo;${esc(t.text)}&rdquo;</div>
+          <div class="works-line">On your best days you keep coming back to this <strong class="score-inline">${t.avg}</strong> <span class="hint-inline">(${t.count} sessions)</span></div>
+        </div>`
+    )
+    .join('');
+  const drills = (drillStats || [])
+    .map(
+      (s) => `<div class="works-row">
+          <div class="works-drill">${esc(s.name)}</div>
+          <div class="works-line">When you do <strong>${esc(s.name)}</strong>, your average score is <strong class="score-inline">${s.avg}</strong> <span class="hint-inline">(${s.count} sessions)</span></div>
+        </div>`
+    )
+    .join('');
+  const body =
+    thoughts || drills
+      ? `${thoughts ? `<div class="works-sub">Your thoughts</div><div class="works-rows">${thoughts}</div>` : ''}
+         ${drills ? `<div class="works-sub">Your drills</div><div class="works-rows">${drills}</div>` : ''}`
+      : `<p class="hint">Check in 3+ times and Skip will start spotting your patterns.</p>`;
   return `<section id="what-works" class="card">
     <h2>What works for you</h2>
-    <p class="hint">Skip's read on your sessions — the drills your best days have in common.</p>
+    <p class="hint">Skip's read on your sessions — your thoughts and the drills your best days have in common.</p>
     ${body}
   </section>`;
 }
@@ -434,14 +446,14 @@ function coachDashboard(user, userStats, latest) {
   });
 }
 
-function coachUser(user, name, checkins, stats) {
+function coachUser(user, name, checkins, stats, thoughts) {
   return layout({
     title: name,
     user,
     tabs: coachTabs('dashboard'),
     body: `<h1 class="page-title">${esc(name)}</h1>
     <p><a href="/coach">← Back to dashboard</a></p>
-    ${whatWorksSection(stats || [], null, 0)}
+    ${whatWorksSection(stats || [], thoughts || [], null, 0)}
     ${checkins.length ? checkins.map(checkinCard).join('') : '<div class="card empty">No check-ins yet.</div>'}`,
   });
 }

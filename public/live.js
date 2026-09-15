@@ -149,7 +149,7 @@
         micStream = stream;
         var ctx = ensureCtx();
         micSource = ctx.createMediaStreamSource(stream);
-        micProc = ctx.createScriptProcessor(4096, 1, 1);
+        micProc = ctx.createScriptProcessor(2048, 1, 1);
         micProc.onaudioprocess = function (e) {
           if (!ws || ws.readyState !== 1) return;
           var input = e.inputBuffer.getChannelData(0);
@@ -169,12 +169,12 @@
         micSource.connect(micProc);
         micProc.connect(sink);
         sink.connect(ctx.destination);
-        // When the mic goes quiet ~1.2s after speech, flush so Skip replies.
+        // When the mic goes quiet ~0.8s after speech, flush so Skip replies.
         lastSpeechAt = Date.now();
         audioSentSinceEnd = false;
         if (silenceTimer) clearInterval(silenceTimer);
         silenceTimer = setInterval(function () {
-          if (audioSentSinceEnd && ws && ws.readyState === 1 && Date.now() - lastSpeechAt > 1200) {
+          if (audioSentSinceEnd && ws && ws.readyState === 1 && Date.now() - lastSpeechAt > 800) {
             try { ws.send(JSON.stringify({ type: 'audioEnd' })); } catch (err) {}
             audioSentSinceEnd = false;
           }

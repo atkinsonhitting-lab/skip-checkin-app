@@ -355,6 +355,90 @@ function drillStats(athleteName) {
     .slice(0, 5);
 }
 
+// Thoughts from the hitter's own words ("what worked"), ranked by average
+// session score (min 2 sessions each). Very similar phrasings are grouped
+// together — "stayed back", "stay back", "staying back" become one entry.
+function thoughtStats(athleteName) {
+  const rows = db
+    .prepare(
+      `SELECT what_worked, session_score FROM checkins
+       WHERE athlete_name = ? AND session_score IS NOT NULL
+       AND what_worked IS NOT NULL AND TRIM(what_worked) <> ''`
+    )
+    .all(athleteName);
+  const STOP = new Set([
+    'the', 'a', 'an', 'and', 'to', 'of', 'my', 'i', 'it', 'on', 'in',
+    'was', 'were', 'with', 'for', 'just', 'really', 'so', 'very', 'too',
+    'felt', 'feeling', 'like', 'had', 'have',
+  ]);
+  const stem = (w) => {
+    if (w.length > 5 && w.endsWith('ing')) return w.slice(0, -3);
+    if (w.length > 4 && w.endsWith('ed')) return w.slice(0, -2);
+    if (w.length > 4 && w.endsWith('es')) return w.slice(0, -2);
+    if (w.length > 4 && w.endsWith('s')) return w.slice(0, -1);
+    return w;
+  };
+  const tokensOf = (t) =>
+    t
+      .toLowerCase()
+      .replace(/[^a-z0-9\s']/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w && !STOP.has(w))
+      .map(stem);
+  const splitThoughts = (text) =>
+    String(text)
+      .split(/[\n;]+/)
+      .map((s) =>
+        s
+          .trim()
+          .replace(/^[\s•·▪\-–—]+/, '')
+          .replace(/^\d+[.)]\s+/, '')
+          .slice(0, 140)
+      )
+      .filter((s) => s.length > 1);
+  const groups = [];
+  const similar = (aToks, aNorm, g) => {
+    if (!aToks.length || !g.tokens.length) return false;
+    const b = new Set(g.tokens);
+    let inter = 0;
+    for (const t of aToks) if (b.has(t)) inter++;
+    const jaccard = inter / (aToks.length + g.tokens.length - inter);
+    if (jaccard >= 0.6) return true;
+    // One phrasing contains the other ("stay back" vs "really tried to stay back").
+    if (aNorm.length >= 4 && g.norm.length >= 4) {
+      if (aNorm.includes(g.norm) || g.norm.includes(aNorm)) return true;
+    }
+    return false;
+  };
+  for (const r of rows) {
+    for (const thought of splitThoughts(r.what_worked)) {
+      const toks = tokensOf(thought);
+      const norm = thought.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+      let g = groups.find((gg) => similar(toks, norm, gg));
+      if (!g) {
+        g = { tokens: toks, norm, variants: new Map(), total: 0, count: 0 };
+        groups.push(g);
+      }
+      g.variants.set(thought, (g.variants.get(thought) || 0) + 1);
+      g.total += r.session_score;
+      g.count += 1;
+    }
+  }
+  return groups
+    .filter((g) => g.count >= 2)
+    .map((g) => {
+      // Display the most common original phrasing.
+      const display = [...g.variants.entries()].sort((a, b) => b[1] - a[1])[0][0];
+      return {
+        text: display,
+        avg: Math.round((g.total / g.count) * 10) / 10,
+        count: g.count,
+      };
+    })
+    .sort((a, b) => b.avg - a.avg || b.count - a.count)
+    .slice(0, 5);
+}
+
 function userScoreSummary(userId) {
   const checkins = db
     .prepare('SELECT session_score FROM checkins WHERE user_id = ? AND session_score IS NOT NULL')
@@ -375,6 +459,7 @@ app.get('/', requireLogin, (req, res) => {
     .all(req.user.id);
   res.send(views.userHome(req.user, {
     drillStats: drillStats(req.user.athleteName),
+    thoughtStats: thoughtStats(req.user.athleteName),
     avgScore,
     checkinCount,
     recent,
@@ -520,7 +605,7 @@ app.get('/coach/user/:email', requireCoach, (req, res) => {
     .prepare('SELECT * FROM checkins WHERE user_id = ? ORDER BY created_at DESC')
     .all(user.id);
   const name = user.athlete_name || user.email;
-  res.send(views.coachUser(req.user, name, rows, drillStats(name)));
+  res.send(views.coachUser(req.user, name, rows, drillStats(name), thoughtStats(name)));
 });
 
 // Coach-only backup: download every check-in as JSON.

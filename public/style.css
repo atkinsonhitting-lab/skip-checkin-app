@@ -248,6 +248,8 @@ a:active { color: #ff3b30; }
 .works-row { padding: 10px 0; border-bottom: 1px solid var(--line); }
 .works-row:last-child { border-bottom: none; }
 .works-drill { font-weight: 800; font-size: 15px; }
+.works-sub { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; color: var(--red); margin: 14px 0 2px; }
+.works-sub:first-of-type { margin-top: 8px; }
 .works-line { font-size: 14px; color: var(--muted); margin-top: 2px; }
 .works-line strong { color: var(--text); }
 
