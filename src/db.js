@@ -206,14 +206,29 @@ db.exec(`CREATE TABLE IF NOT EXISTS remote_programs (
       } catch (e) { console.warn('program seed skipped', f, e.message); }
     }
   }
-  // Backfill: match accounts by full name (runs every boot; idempotent).
-  const link = db.prepare(
-    `UPDATE users SET remote_program_id = ?
-     WHERE remote_program_id IS NULL AND role = 'athlete'
-     AND lower(first_name || ' ' || last_name) = lower(?)`
-  );
-  for (const r of db.prepare('SELECT id, athlete_name FROM remote_programs').all()) {
-    link.run(r.id, r.athlete_name);
+  // Backfill: match accounts by full name, honoring aliases
+  // (runs every boot; idempotent).
+  const programs = db.prepare('SELECT id, athlete_name, aliases FROM remote_programs').all();
+  const progForName = (name) => {
+    const target = String(name || '').trim().toLowerCase();
+    if (!target) return null;
+    for (const r of programs) {
+      const names = [r.athlete_name, ...String(r.aliases || '').split('\n')]
+        .map((x) => String(x).trim().toLowerCase())
+        .filter(Boolean);
+      if (names.includes(target)) return r.id;
+    }
+    return null;
+  };
+  const linkOne = db.prepare('UPDATE users SET remote_program_id = ? WHERE id = ?');
+  for (const u of db
+    .prepare(
+      `SELECT id, first_name, last_name FROM users
+       WHERE remote_program_id IS NULL AND role = 'athlete'`
+    )
+    .all()) {
+    const pid = progForName((u.first_name || '') + ' ' + (u.last_name || ''));
+    if (pid) linkOne.run(pid, u.id);
   }
 }
 
