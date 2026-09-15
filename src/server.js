@@ -1243,26 +1243,5 @@ const server = app.listen(PORT, () => {
   setInterval(ratePendingJournals, 5 * 60 * 1000);
 });
 
-// Live voice conversations with Skip (server-side Gemini Live API proxy).
-try {
-  require('./live').setupLive(server, db, {
-    sessionStore,
-    getSessionId: getWsSessionId,
-    dataBlock: skipDataBlock,
-    systemPrompt: () => SKIP_SYSTEM,
-    saveMessage: (userId, role, content) =>
-      db
-        .prepare('INSERT INTO chat_messages (user_id, role, content, created_at) VALUES (?, ?, ?, ?)')
-        .run(userId, role, content, new Date().toISOString()),
-    todayUserCount: (userId) =>
-      db
-        .prepare(
-          "SELECT COUNT(*) AS n FROM chat_messages WHERE user_id = ? AND role = 'user' AND substr(created_at, 1, 10) = ?"
-        )
-        .get(userId, new Date().toISOString().slice(0, 10)).n,
-    chatCap: 30,
-  });
-  console.log('Live voice endpoint ready at /live');
-} catch (e) {
-  console.error('Live voice setup failed:', e.message);
-}
+// Live voice conversations removed Sep 15 2026 — Bobby: stick with text.
+// (src/live.js and public/live.js parked in repo, not wired up.)

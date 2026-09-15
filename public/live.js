@@ -37,6 +37,7 @@
   var lastSpeechAt = 0;
   var audioSentSinceEnd = false;
   var silenceTimer = null;
+  var loudFrames = 0;
 
   function setStatus(t) { statusEl.textContent = t; }
 
@@ -157,7 +158,19 @@
           var sum = 0;
           var n = 0;
           for (var k = 0; k < input.length; k += 4) { sum += input[k] * input[k]; n++; }
-          if (n && Math.sqrt(sum / n) > 0.02) lastSpeechAt = Date.now();
+          var rms = n ? Math.sqrt(sum / n) : 0;
+          // HALF-DUPLEX GATE: while Skip's voice is playing, hold mic audio
+          // back. His voice echoing through the phone speaker was reaching
+          // Google and false-triggering interruptions that cut him off
+          // mid-sentence. Real barge-in still works: loud, sustained user
+          // speech (well above speaker-echo levels) punches through.
+          if (playQueue.length || scheduledSources.length) {
+            if (rms > 0.06) { loudFrames++; } else { loudFrames = 0; }
+            if (loudFrames < 10) return;
+          } else {
+            loudFrames = 0;
+          }
+          if (rms > 0.02) lastSpeechAt = Date.now();
           var pcm = downsample(input, ctx.sampleRate, 16000);
           if (pcm.length) {
             ws.send(JSON.stringify({ type: 'audio', data: b64encode(pcm) }));
