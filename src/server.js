@@ -189,6 +189,67 @@ function parseRating(v) {
   return n >= 1 && n <= 10 ? n : null;
 }
 
+// ---- Skip session score: numbers + grind + the hitter's own words ----
+// Base = mean of Feel/Confidence/Focus. Grind = how hard the training was:
+// (difficulty - 5) * 0.2, clamped to [-1, +1] — grinding through a brutal
+// session earns up to +1; an easy session with bad numbers loses up to 1.
+// Words = what the hitter actually wrote: +0.5 / 0 / -0.5 from a small
+// baseball-specific sentiment scan (negation-aware).
+const WORDS_POSITIVE = [
+  'locked in', 'dialed in', 'great', 'good', 'smooth', 'fluid', 'comfortable',
+  'confident', 'clicked', 'squared it', 'barreled', 'barrels', 'better',
+  'improved', 'improvement', 'progress', 'breakthrough', 'focused',
+  'prepared', 'strong', 'quick hands', 'clean', 'consistent', 'on time',
+  'stayed through', 'back up the middle', 'hard contact', 'felt good',
+  'feeling good', 'easy', 'grooved',
+];
+const WORDS_NEGATIVE = [
+  'frustrated', 'frustrating', 'terrible', 'awful', 'horrible', 'struggled',
+  'struggling', 'late on', 'too late', 'under it', 'popping up', 'popped up',
+  'pop ups', 'couldnt', 'cant', 'wouldnt', 'didnt', 'did not', 'lost',
+  'pressing', 'anxious', 'nervous', 'rushed', 'rushing', 'tired', 'exhausted',
+  'sore', 'soreness', 'pain', 'hurt', 'hurting', 'slump', 'angry', 'mad',
+  'shut down', 'checked out', 'no energy', 'weak', 'inconsistent',
+  'all over the place', 'chasing',
+];
+const NEGATORS =
+  /\b(not|no|never|cannot|without|hardly|barely|wasnt|werent|isnt|arent|dont|doesnt|didnt|wont|cant|couldnt|shouldnt|wouldnt|hasnt|havent|hadnt)\b/;
+
+function wordsAdjustment(text) {
+  const t =
+    ' ' +
+    String(text || '')
+      .toLowerCase()
+      .replace(/['\u2019]/g, '')
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ') +
+    ' ';
+  if (t.trim().length < 3) return 0;
+  let net = 0;
+  const scan = (phrases, sign) => {
+    for (const p of phrases) {
+      const needle = ' ' + p + ' ';
+      let i = -1;
+      while ((i = t.indexOf(needle, i + 1)) !== -1) {
+        const before = t.slice(Math.max(0, i - 16), i);
+        net += NEGATORS.test(before) ? -sign : sign;
+      }
+    }
+  };
+  scan(WORDS_POSITIVE, 1);
+  scan(WORDS_NEGATIVE, -1);
+  return net > 0 ? 0.5 : net < 0 ? -0.5 : 0;
+}
+
+function scoreBreakdown(feel, confidence, focus, difficulty, notesText) {
+  const base = Math.round(((feel + confidence + focus) / 3) * 10) / 10;
+  const d = difficulty == null ? 5 : difficulty;
+  const grind = Math.round(Math.max(-1, Math.min(1, (d - 5) * 0.2)) * 10) / 10;
+  const words = wordsAdjustment(notesText);
+  const total = Math.round(Math.min(10, Math.max(1, base + grind + words)) * 10) / 10;
+  return { base, grind, words, total };
+}
+
 function parseDrillsDone(raw) {
   // Form sends one text field; multiple drills are comma-separated.
   // Also accepts a JSON array string (API-style input).
@@ -269,6 +330,13 @@ app.get('/checkin/score/:id', requireLogin, (req, res) => {
     .prepare('SELECT * FROM checkins WHERE id = ? AND user_id = ?')
     .get(req.params.id, req.user.id);
   if (!row) return res.status(404).send('Check-in not found.');
+  row.score_breakdown = scoreBreakdown(
+    row.feel,
+    row.confidence,
+    row.focus,
+    row.difficulty,
+    `${row.session_notes || ''} ${row.what_worked || ''}`
+  );
   res.send(views.scorePage(req.user, row));
 });
 
@@ -282,8 +350,9 @@ app.post('/checkin', requireLogin, (req, res) => {
   const feel = parseRating(b.feel);
   const confidence = parseRating(b.confidence);
   const focus = parseRating(b.focus);
-  if (feel === null || confidence === null || focus === null) {
-    return fail('Rate feel, confidence, and focus from 1 to 10.');
+  const difficulty = parseRating(b.difficulty);
+  if (feel === null || confidence === null || focus === null || difficulty === null) {
+    return fail('Rate feel, confidence, focus, and difficulty from 1 to 10.');
   }
   const didDrills = b.did_drills;
   if (didDrills !== 'yes' && didDrills !== 'no') {
@@ -293,14 +362,20 @@ app.post('/checkin', requireLogin, (req, res) => {
   if (didDrills === 'yes' && !drills.length) {
     return fail('You did drills — which ones?');
   }
-  const sessionScore = Math.round(((feel + confidence + focus) / 3) * 10) / 10;
+  const sessionScore = scoreBreakdown(
+    feel,
+    confidence,
+    focus,
+    difficulty,
+    `${b.session_notes || ''} ${b.what_worked || ''}`
+  ).total;
   const tier = scoreTier(sessionScore);
   const info = db
     .prepare(
       `INSERT INTO checkins
        (user_id, athlete_name, created_at, environment, drills_done, feel, confidence, focus,
-        session_score, score_tier, session_notes, what_worked, whats_next)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        difficulty, session_score, score_tier, session_notes, what_worked, whats_next)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       req.user.id,
@@ -311,6 +386,7 @@ app.post('/checkin', requireLogin, (req, res) => {
       feel,
       confidence,
       focus,
+      difficulty,
       sessionScore,
       tier,
       (b.session_notes || '').trim(),
@@ -387,7 +463,7 @@ app.get('/coach/export', requireCoach, (req, res) => {
 // ordered oldest-first.
 
 const CHECKIN_COLS =
-  'c.id, c.athlete_name, u.email, c.created_at, c.environment, c.drills_done, c.feel, c.confidence, c.focus, c.session_score, c.score_tier, c.session_notes, c.what_worked, c.whats_next, c.skip_journal_score, c.skip_journal_note, c.skip_rated_at';
+  'c.id, c.athlete_name, u.email, c.created_at, c.environment, c.drills_done, c.feel, c.confidence, c.focus, c.difficulty, c.session_score, c.score_tier, c.session_notes, c.what_worked, c.whats_next, c.skip_journal_score, c.skip_journal_note, c.skip_rated_at';
 
 function safeParseDrills(raw) {
   try {
@@ -512,7 +588,7 @@ RULES:
 function hitterSnapshot(userId) {
   const rows = db
     .prepare(
-      `SELECT created_at, environment, drills_done, feel, confidence, focus,
+      `SELECT created_at, environment, drills_done, feel, confidence, focus, difficulty,
               session_score, score_tier, session_notes, what_worked, whats_next
        FROM checkins WHERE user_id = ? ORDER BY created_at DESC LIMIT 8`
     )
@@ -523,7 +599,7 @@ function hitterSnapshot(userId) {
     const bits = [
       `${String(r.created_at).slice(0, 10)} · ${r.environment}`,
       r.session_score != null ? `Score ${r.session_score} (${r.score_tier})` : 'Unscored',
-      `Feel ${r.feel} Conf ${r.confidence} Focus ${r.focus}`,
+      `Feel ${r.feel} Conf ${r.confidence} Focus ${r.focus}${r.difficulty != null ? ` Difficulty ${r.difficulty}` : ''}`,
       drills.length ? `Drills: ${drills.join(', ')}` : null,
       r.session_notes ? `Notes: "${String(r.session_notes).slice(0, 200)}"` : null,
       r.what_worked ? `What worked: "${String(r.what_worked).slice(0, 200)}"` : null,

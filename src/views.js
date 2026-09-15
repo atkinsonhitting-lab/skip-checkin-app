@@ -142,15 +142,17 @@ function whatWorksSection(stats, avgScore, checkinCount) {
 
 const ENVIRONMENTS = ['Game', 'Cage', 'Live BP', 'Tee Work', 'Other'];
 
-function sliderField(name, label, question, value) {
+function sliderField(name, label, question, value, ends) {
   const v = Math.min(10, Math.max(1, Number(value) || 7));
+  const lo = (ends && ends[0]) || '1';
+  const hi = (ends && ends[1]) || '10';
   return `<div class="slider-block">
     <div class="field-label">${esc(label)} <span class="hint-inline">${esc(question)}</span></div>
     <div class="slider-row">
       <input type="range" name="${name}" min="1" max="10" step="1" value="${v}" class="slider" data-out="${name}-out" aria-label="${esc(label)}">
       <span class="slider-val" id="${name}-out">${v}</span>
     </div>
-    <div class="slider-ends"><span>1</span><span>10</span></div>
+    <div class="slider-ends"><span>${esc(lo)}</span><span>${esc(hi)}</span></div>
   </div>`;
 }
 
@@ -175,6 +177,7 @@ function checkinForm(user, error, values, drillNames) {
       ${sliderField('feel', 'Feel', 'How good did you feel?', v.feel)}
       ${sliderField('confidence', 'Confidence', 'How confident did you feel?', v.confidence)}
       ${sliderField('focus', 'Focus', 'How locked in was your focus?', v.focus)}
+      ${sliderField('difficulty', 'Difficulty', 'How hard was the training?', v.difficulty, ['Easy', 'Brutal'])}
       <label>Session notes <span class="hint-inline">(don't hold back — what you felt, what you saw, what was off)</span><textarea name="session_notes" rows="4" placeholder="How did it go? What did you feel?">${esc(v.session_notes || '')}</textarea></label>
       <label>What worked <span class="hint-inline">(be specific — the exact drill, cue, or feel)</span><textarea name="what_worked" rows="2" placeholder="What clicked today?">${esc(v.what_worked || '')}</textarea></label>
       <div class="field-label">Did you do any drills?</div>
@@ -209,6 +212,8 @@ function tierBadgeClass(tier) {
 
 function scorePage(user, c) {
   const scoreStr = Number(c.session_score).toFixed(1);
+  const bd = c.score_breakdown;
+  const signed = (n) => (n > 0 ? `+${n.toFixed(1)}` : n.toFixed(1));
   return layout({
     title: "Skip's Session Score",
     user,
@@ -222,7 +227,9 @@ function scorePage(user, c) {
         <div><span class="label">Feel</span><strong>${esc(c.feel)}</strong></div>
         <div><span class="label">Confidence</span><strong>${esc(c.confidence)}</strong></div>
         <div><span class="label">Focus</span><strong>${esc(c.focus)}</strong></div>
+        ${c.difficulty != null ? `<div><span class="label">Difficulty</span><strong>${esc(c.difficulty)}</strong></div>` : ''}
       </div>
+      ${bd ? `<p class="hint score-formula">Base ${bd.base.toFixed(1)} · Grind ${signed(bd.grind)} · Your words ${signed(bd.words)}</p>` : ''}
       ${skipReadBlock(c)}
       <div class="score-actions">
         <a href="/history" class="btn-primary">See your history</a>
@@ -267,7 +274,7 @@ function checkinCard(c) {
     ${c.session_score != null ? `<div class="checkin-score">
       <span class="score-inline-lg">${esc(c.session_score)}</span>
       <span class="badge ${tierBadgeClass(c.score_tier)}">${esc(c.score_tier)}</span>
-      <span class="hint-inline">Feel ${esc(c.feel)} · Conf ${esc(c.confidence)} · Focus ${esc(c.focus)}</span>
+      <span class="hint-inline">Feel ${esc(c.feel)} · Conf ${esc(c.confidence)} · Focus ${esc(c.focus)}${c.difficulty != null ? ` · Difficulty ${esc(c.difficulty)}` : ''}</span>
     </div>` : ''}
     ${drills.length ? `<div class="drill-chips">${drills.map((d) => `<span class="chip">${esc(d)}</span>`).join('')}</div>` : ''}
     ${skipReadBlock(c)}

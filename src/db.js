@@ -86,6 +86,13 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 CREATE INDEX IF NOT EXISTS idx_chat_user_time ON chat_messages(user_id, created_at);
 `);
 
+// Migration: session difficulty (1-10, how hard the training was). Older
+// check-ins predate it; NULL difficulty is treated as neutral (5).
+const checkinCols = db.prepare('PRAGMA table_info(checkins)').all().map((c) => c.name);
+if (!checkinCols.includes('difficulty')) {
+  db.exec('ALTER TABLE checkins ADD COLUMN difficulty INTEGER;');
+}
+
 // Password resets: single-use tokens, SHA-256 hashed, 1-hour expiry.
 db.exec(`
 CREATE TABLE IF NOT EXISTS password_reset_tokens (
