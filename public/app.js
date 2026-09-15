@@ -25,55 +25,7 @@
     const log = document.getElementById('chat-log');
     const input = document.getElementById('chat-input');
     function scroll() { log.scrollTop = log.scrollHeight; }
-    let currentAudio = null;
-    let currentBtn = null;
-    function stopAudio() {
-      if (currentAudio) { try { currentAudio.pause(); } catch (e) { /* noop */ } currentAudio = null; }
-      if (currentBtn) { currentBtn.classList.remove('playing'); currentBtn = null; }
-    }
-    async function speak(text, btn) {
-      if (currentBtn === btn && currentAudio) { stopAudio(); return; }
-      stopAudio();
-      btn.classList.add('loading');
-      try {
-        const resp = await fetch('/api/speak', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text }),
-        });
-        if (!resp.ok) throw new Error('voice failed');
-        const blob = await resp.blob();
-        const url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-        currentAudio = audio;
-        currentBtn = btn;
-        btn.classList.remove('loading');
-        btn.classList.add('playing');
-        audio.onended = () => { stopAudio(); URL.revokeObjectURL(url); };
-        audio.onerror = () => { stopAudio(); URL.revokeObjectURL(url); };
-        await audio.play();
-      } catch (err) {
-        btn.classList.remove('loading');
-        btn.classList.add('denied');
-        btn.title = 'Voice unavailable right now — try again later';
-        setTimeout(() => btn.classList.remove('denied'), 2500);
-      }
-    }
-    const SPEAKER_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>';
-    function attachSpeak(msgDiv) {
-      const bubble = msgDiv.querySelector('.msg-bubble');
-      if (!bubble || msgDiv.querySelector('.speak-btn')) return;
-      const text = bubble.textContent.trim();
-      if (!text) return;
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'speak-btn';
-      btn.setAttribute('aria-label', 'Hear Skip say this');
-      btn.title = 'Hear it';
-      btn.innerHTML = SPEAKER_SVG;
-      btn.addEventListener('click', (e) => { e.preventDefault(); speak(text, btn); });
-      msgDiv.appendChild(btn);
-    }
+    // (Speaker button removed Sep 15 2026 — text only.)
     function addMsg(role, text, speakable) {
       const d = document.createElement('div');
       d.className = 'msg ' + (role === 'user' ? 'msg-user' : 'msg-skip');
@@ -89,11 +41,8 @@
       b.textContent = text;
       d.appendChild(b);
       log.appendChild(d);
-      if (role === 'assistant' && speakable !== false) attachSpeak(d);
       scroll();
     }
-    // Speaker buttons on history rendered by the server.
-    log.querySelectorAll('.msg-skip').forEach(attachSpeak);
     scroll();
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
