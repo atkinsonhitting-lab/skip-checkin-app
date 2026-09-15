@@ -835,7 +835,7 @@ app.post('/api/chat', requireLogin, async (req, res) => {
 
 // ---- Skip voice: speak a chat reply out loud (Gemini TTS → WAV) ----
 const TTS_MODEL = process.env.TTS_MODEL || 'gemini-2.5-flash-preview-tts';
-const TTS_VOICE = process.env.TTS_VOICE || 'Charon';
+const TTS_VOICE = process.env.TTS_VOICE || 'Fenrir';
 
 function wavHeader(dataLen, sampleRate) {
   const h = Buffer.alloc(44);

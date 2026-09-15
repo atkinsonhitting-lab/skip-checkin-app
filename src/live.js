@@ -119,7 +119,7 @@ function handleSession(client, user, opts) {
           generationConfig: {
             responseModalities: ['AUDIO'],
             speechConfig: {
-              voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Charon' } },
+              voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Fenrir' } },
             },
           },
           inputAudioTranscription: {},
