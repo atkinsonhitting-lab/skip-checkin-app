@@ -143,6 +143,7 @@ a:active { color: #ff3b30; }
 
 .error { background: rgba(243,18,96,.12); border: 1px solid var(--bad); color: #ff8fab; padding: 12px; border-radius: 8px; margin-bottom: 12px; font-size: 14px; }
 .success { background: rgba(47,191,113,.12); border: 1px solid var(--ok); color: #7ee2a8; padding: 12px; border-radius: 8px; margin-bottom: 12px; font-size: 14px; }
+.notice { background: rgba(88,166,255,.12); border: 1px solid #58a6ff; color: #a9cdfb; padding: 12px; border-radius: 8px; margin-bottom: 12px; font-size: 14px; }
 
 /* Check-ins */
 .checkin-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
@@ -264,8 +265,7 @@ a:active { color: #ff3b30; }
 }
 
 /* Voice dictation mic buttons */
-.voice-wrap { position: relative; }
-.voice-wrap input, .voice-wrap textarea { padding-right: 48px; }
+.voice-wrap { position: relative; }.voice-wrap input, .voice-wrap textarea { padding-right: 48px; }
 .mic-btn {
   position: absolute; right: 8px; top: 50%; margin-top: -17px;
   width: 34px; height: 34px; border-radius: 50%; padding: 0;
@@ -306,6 +306,18 @@ a:active { color: #ff3b30; }
 .typing span:nth-child(2) { animation-delay: 0.2s; }
 .typing span:nth-child(3) { animation-delay: 0.4s; }
 @keyframes typing-blink { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+/* Skip voice: speaker button on Skip's messages */
+.msg-skip { align-items: center; gap: 6px; }
+.speak-btn {
+  flex-shrink: 0; width: 30px; height: 30px; border-radius: 50%; padding: 0;
+  border: 1px solid var(--line); background: var(--bg2); color: var(--muted);
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.speak-btn svg { width: 15px; height: 15px; }
+.speak-btn.playing { background: var(--red); border-color: var(--red); color: #fff; }
+.speak-btn.loading { opacity: 0.5; pointer-events: none; }
+.speak-btn.denied { border-color: var(--red); color: var(--red); }
 .chat-form { display: flex; gap: 8px; align-items: center; }
 .chat-form .voice-wrap { flex: 1; display: flex; }
 .chat-form .voice-wrap input { flex: 1; width: 100%; }

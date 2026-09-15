@@ -106,6 +106,7 @@ function validEmail(v) {
 
 app.get('/login', (req, res) => {
   if (req.user) return res.redirect('/');
+  if (req.query.reset) return res.send(views.loginPage(null, 'Password reset — log in with your new password.'));
   res.send(views.loginPage(req.query.error));
 });
 
@@ -485,18 +486,24 @@ app.post('/api/checkins/:id/skip-rating', (req, res) => {
 const LLM_MODEL = process.env.LLM_MODEL || 'gemini-2.5-flash';
 const CHAT_DAILY_LIMIT = 30;
 
-const SKIP_SYSTEM = `You are Skip, the AI hitting coach inside The Dugout, a session check-in app for baseball and softball hitters. Hitters check in after sessions and talk to you when they need coaching.
+const SKIP_SYSTEM = `You are Skip, the AI hitting coach inside The Dugout, a session check-in app for baseball and softball hitters. Hitters check in after sessions and talk to you when they need coaching. You coach the way Bobby Atkinson coaches — his brain is your brain.
 
-Voice: direct, no fluff. Talk like a good hitting coach — straight answers, specific fixes, zero motivational-poster talk. Short messages. Never lecture, never pad.
+VOICE: Direct, no fluff. Talk like a cage coach standing next to the hitter — straight answers, specific cues, zero motivational-poster talk. Short texts, not essays. Praise what's good first ("good swing, just too deep"), then give the one fix. Never lecture. Never mention you are an AI model. You are Skip.
 
-You get this hitter's check-in data below: recent sessions, scores, what they wrote, and which drills line up with their best days. Use it. When they're struggling, get them back on track by pointing at what actually worked on THEIR good days — specific drills, routines, feels — not generic advice.
+MENTAL BEFORE MECHANICS — your most important rule: when a hitter talks about real at-bats or games, ALWAYS check the mental side before touching mechanics. Ask about or infer from their words: did they go to the plate with a simple plan? Were they ready early and deciding late? Committed 100% to one thing, or thinking about three things at once? Slumps get fixed by simplifying the thought, not rebuilding the swing — Bobby's own locked-in cue was "hit a line drive and take off the shortstop's hat." When their head is crowded, hand them one of his simple approaches: Pick a Spot (one field target, for overthinkers), Pick a Speed (fully commit to fastball or off-speed timing), Pick a Zone (hunt one area, stay on heater timing), or Dead Red Middle (sit heater, middle of the plate). "Simple plan. Clear intent. Full commitment." Cage problems get mechanics and feels; game problems get approach and mindset first.
 
-Rules:
-- Keep replies short: a few sentences, or a short list when giving a plan. This is a phone chat, not an essay.
-- Be specific to THEIR data. Reference their drills, their scores, their own words.
-- If they ask about something outside hitting and training, answer briefly and steer back to the plate.
-- Never mention you are an AI model. You are Skip.
-- No medical advice. If something sounds like pain or injury, tell them to get it checked by a trainer and stick to swing talk.`;
+COACH OFF THEIR DATA: you get this hitter's check-in data below — recent sessions, scores, their words, drills tied to their best days. Use it like film. Never give generic advice to a struggling hitter — pull up a specific locked-in session ("on the 12th you were Locked In at a 9 and wrote that flat bat side flips got you behind the ball — go back to that"). Name their drills, their scores, their phrases. Trend dropping? Say so plainly and anchor them to what worked. A drill tied to their best days beats a new drill every time.
+
+BOBBY'S CUES — use his actual language when it fits: "Swing down the line — let the barrel trace that line" (spinny, no direction). "Drive the back elbow" (handsy, arms long early). "Let it happen behind you" (choppers/weak flares vs velo). "Load down, not back" (swaying in the load). "Eyes behind your barrel" (standing up on breakers). "Hands above it, chest square" (top-zone heat). "Don't shift — feel behind as the foot lands" (barrel drag). "Waiting, waiting, waiting, go" (timing). "Let the barrel outrace the hands" (pushy, stuck behind). Missing under balls in games = BP angle too steep — line drives and seated darts, not launch angle.
+
+DIAGNOSING FROM THEIR WORDS: read the miss the way Bobby does. Rolling over / topspin pull-side = bat wrapped around the head at launch. Flaring oppo = cutting across. "Stuck and pushy" = stance too wide, reaching. "Can't catch up to heat" = not ready early — check plate position and approach before mechanics. "Good in the cage, bad in games" = practicing mechanics, not decisions — challenge the environment, give them a box plan.
+
+RULES:
+- 2-4 sentences, conversational, like a text from their coach. End with ONE good follow-up question that moves them forward.
+- One fix at a time. Never dump three mechanical changes in one message.
+- Be specific to THEIR data: their drills, their scores, their own words.
+- Off-topic questions: answer briefly, steer back to the plate.
+- No medical advice. Pain or injury: get it checked by a trainer, stick to swing talk.`;
 
 function hitterSnapshot(userId) {
   const rows = db
@@ -647,8 +654,188 @@ app.post('/api/chat', requireLogin, async (req, res) => {
   }
 });
 
-// ---- Boot ----
+// ---- Skip voice: speak a chat reply out loud (Gemini TTS → WAV) ----
+const TTS_MODEL = process.env.TTS_MODEL || 'gemini-2.5-flash-preview-tts';
+const TTS_VOICE = process.env.TTS_VOICE || 'Charon';
 
+function wavHeader(dataLen, sampleRate) {
+  const h = Buffer.alloc(44);
+  h.write('RIFF', 0);
+  h.writeUInt32LE(36 + dataLen, 4);
+  h.write('WAVE', 8);
+  h.write('fmt ', 12);
+  h.writeUInt32LE(16, 16);
+  h.writeUInt16LE(1, 20); // PCM
+  h.writeUInt16LE(1, 22); // mono
+  h.writeUInt32LE(sampleRate, 24);
+  h.writeUInt32LE(sampleRate * 2, 28);
+  h.writeUInt16LE(2, 32);
+  h.writeUInt16LE(16, 34);
+  h.write('data', 36);
+  h.writeUInt32LE(dataLen, 40);
+  return h;
+}
+
+app.post('/api/speak', requireLogin, async (req, res) => {
+  const apiKey = process.env.LLM_API_KEY;
+  const text = typeof req.body.text === 'string' ? req.body.text.trim().slice(0, 1200) : '';
+  if (!apiKey) return res.status(503).json({ error: "Voice isn't switched on yet." });
+  if (!text) return res.status(400).json({ error: 'Nothing to say.' });
+  try {
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(TTS_MODEL)}:generateContent`,
+      {
+        method: 'POST',
+        headers: { 'x-goog-api-key': apiKey, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                {
+                  text: `Say in the tone of a direct, no-fluff baseball hitting coach talking to his hitter — firm, plain-spoken, encouraging:\n\n${text}`,
+                },
+              ],
+            },
+          ],
+          generationConfig: {
+            responseModalities: ['AUDIO'],
+            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: TTS_VOICE } } },
+          },
+        }),
+      }
+    );
+    if (!resp.ok) throw new Error('tts_http_' + resp.status);
+    const data = await resp.json();
+    const parts = (((data.candidates || [])[0] || {}).content || {}).parts || [];
+    const inline = parts.map((p) => p.inlineData).find((d) => d && d.data);
+    if (!inline) throw new Error('tts_empty');
+    const pcm = Buffer.from(inline.data, 'base64');
+    const wav = Buffer.concat([wavHeader(pcm.length, 24000), pcm]);
+    res.set('Content-Type', 'audio/wav');
+    res.set('Content-Length', String(wav.length));
+    res.send(wav);
+  } catch (err) {
+    console.error('speak error:', err.message);
+    res.status(502).json({ error: 'Voice is having trouble right now.' });
+  }
+});
+
+// ---- Password reset via emailed link ----
+const crypto = require('crypto');
+const nodemailer = require('nodemailer');
+
+function mailer() {
+  const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM } = process.env;
+  if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS) return null;
+  const transport = nodemailer.createTransport({
+    host: SMTP_HOST,
+    port: Number(SMTP_PORT || 587),
+    secure: Number(SMTP_PORT) === 465,
+    auth: { user: SMTP_USER, pass: SMTP_PASS },
+  });
+  return { transport, from: SMTP_FROM || SMTP_USER };
+}
+
+function resetTokenHash(t) {
+  return crypto.createHash('sha256').update(t).digest('hex');
+}
+
+async function sendResetEmail(to, link) {
+  const m = mailer();
+  if (!m) {
+    console.warn('PASSWORD RESET (no SMTP configured):', link);
+    return false;
+  }
+  await m.transport.sendMail({
+    from: m.from,
+    to,
+    subject: 'Reset your Dugout password',
+    text:
+      `Someone requested a password reset for your Dugout account.\n\n` +
+      `Reset it here (expires in 1 hour):\n${link}\n\n` +
+      `If that wasn't you, ignore this email.`,
+    html:
+      `<p>Someone requested a password reset for your Dugout account.</p>` +
+      `<p><a href="${link}">Reset your password</a> (expires in 1 hour).</p>` +
+      `<p>If that wasn't you, ignore this email.</p>`,
+  });
+  return true;
+}
+
+function publicBaseUrl(req) {
+  return (process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+}
+
+app.get('/forgot-password', (req, res) => {
+  if (req.user) return res.redirect('/');
+  res.send(views.forgotPasswordPage());
+});
+
+app.post('/forgot-password', async (req, res) => {
+  const email = String(req.body.email || '').trim().toLowerCase();
+  const user = db.prepare('SELECT id, email FROM users WHERE email = ?').get(email);
+  // Always respond the same way so account emails can't be enumerated.
+  if (user) {
+    const token = crypto.randomBytes(32).toString('hex');
+    const hash = resetTokenHash(token);
+    const expires = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    db.prepare(
+      'INSERT INTO password_reset_tokens (user_id, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?)'
+    ).run(user.id, hash, expires, new Date().toISOString());
+    db.prepare(
+      "UPDATE password_reset_tokens SET used_at = datetime('now') WHERE user_id = ? AND used_at IS NULL AND token_hash != ?"
+    ).run(user.id, hash);
+    const link = `${publicBaseUrl(req)}/reset-password?token=${token}`;
+    try {
+      await sendResetEmail(user.email, link);
+    } catch (err) {
+      console.error('reset email failed:', err.message);
+    }
+  }
+  res.send(
+    views.forgotPasswordPage(
+      'If an account uses that email, a reset link is on its way. Check your inbox (and spam).'
+    )
+  );
+});
+
+function validResetToken(token) {
+  if (!token || typeof token !== 'string') return null;
+  const row = db
+    .prepare(
+      `SELECT t.*, u.email AS email FROM password_reset_tokens t
+       JOIN users u ON u.id = t.user_id
+       WHERE t.token_hash = ? AND t.used_at IS NULL`
+    )
+    .get(resetTokenHash(token));
+  if (!row) return null;
+  if (new Date(row.expires_at).getTime() < Date.now()) return null;
+  return row;
+}
+
+app.get('/reset-password', (req, res) => {
+  const row = validResetToken(req.query.token);
+  if (!row)
+    return res.send(views.resetPasswordPage(null, 'That link is invalid or expired. Request a new one.'));
+  res.send(views.resetPasswordPage(req.query.token));
+});
+
+app.post('/reset-password', (req, res) => {
+  const token = req.body.token;
+  const row = validResetToken(token);
+  if (!row)
+    return res.send(views.resetPasswordPage(null, 'That link is invalid or expired. Request a new one.'));
+  const pw = String(req.body.password || '');
+  const pw2 = String(req.body.confirm_password || '');
+  if (pw.length < 8)
+    return res.send(views.resetPasswordPage(token, 'Password must be at least 8 characters.'));
+  if (pw !== pw2) return res.send(views.resetPasswordPage(token, 'Passwords do not match.'));
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(pw, 12), row.user_id);
+  db.prepare("UPDATE password_reset_tokens SET used_at = datetime('now') WHERE id = ?").run(row.id);
+  res.redirect('/login?reset=1');
+});
+
+// ---- Boot ----
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Skip listening on port ${PORT}`);

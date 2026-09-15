@@ -54,7 +54,7 @@ function coachTabs(active) {
 
 // ---------- Pages ----------
 
-function loginPage(error) {
+function loginPage(error, notice) {
   return layout({
     title: 'Log in',
     user: null,
@@ -63,11 +63,13 @@ function loginPage(error) {
       <h1>The Dugout</h1>
       <p class="hint">Step into The Dugout. Skip scores your sessions and learns what your best days look like.</p>
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
+      ${notice ? `<div class="notice">${esc(notice)}</div>` : ''}
       <form method="post" action="/login" class="form">
         <label>Email<input type="email" name="email" autocomplete="email" required></label>
         <label>Password<input type="password" name="password" autocomplete="current-password" required></label>
         <button type="submit" class="btn-primary">Log in</button>
       </form>
+      <p class="hint" style="text-align:center"><a href="/forgot-password">Forgot password?</a></p>
       <p class="hint" style="text-align:center">New here? <a href="/register">Create an account</a> — it's free.</p>
     </div>`,
   });
@@ -349,6 +351,46 @@ function coachUser(user, name, checkins, stats) {
   });
 }
 
+function forgotPasswordPage(sent) {
+  return layout({
+    title: 'Forgot password',
+    user: null,
+    tabs: [],
+    body: `<div class="login-card card">
+      <h1>Reset password</h1>
+      <p class="hint">Enter your account email and we'll send you a reset link.</p>
+      ${sent ? `<div class="notice">${esc(sent)}</div>` : ''}
+      <form method="post" action="/forgot-password" class="form">
+        <label>Email<input type="email" name="email" autocomplete="email" required></label>
+        <button type="submit" class="btn-primary">Send reset link</button>
+      </form>
+      <p class="hint" style="text-align:center"><a href="/login">Back to log in</a></p>
+    </div>`,
+  });
+}
+
+function resetPasswordPage(token, error) {
+  return layout({
+    title: 'Set a new password',
+    user: null,
+    tabs: [],
+    body: `<div class="login-card card">
+      <h1>New password</h1>
+      ${error ? `<div class="error">${esc(error)}</div>` : ''}
+      ${token ? `<form method="post" action="/reset-password" class="form">
+        <input type="hidden" name="token" value="${esc(token)}">
+        <label>New password <span class="hint-inline">(8+ characters)</span>
+          <input type="password" name="password" autocomplete="new-password" required minlength="8">
+        </label>
+        <label>Confirm new password
+          <input type="password" name="confirm_password" autocomplete="new-password" required minlength="8">
+        </label>
+        <button type="submit" class="btn-primary">Set password</button>
+      </form>` : `<p class="hint" style="text-align:center"><a href="/forgot-password">Request a new link</a></p>`}
+    </div>`,
+  });
+}
+
 module.exports = {
   layout,
   userTabs,
@@ -362,5 +404,7 @@ module.exports = {
   chatPage,
   coachDashboard,
   coachUser,
+  forgotPasswordPage,
+  resetPasswordPage,
   esc,
 };

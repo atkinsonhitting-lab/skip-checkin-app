@@ -86,4 +86,17 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 CREATE INDEX IF NOT EXISTS idx_chat_user_time ON chat_messages(user_id, created_at);
 `);
 
+// Password resets: single-use tokens, SHA-256 hashed, 1-hour expiry.
+db.exec(`
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TEXT NOT NULL,
+  used_at TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_reset_user ON password_reset_tokens(user_id);
+`);
+
 module.exports = db;
