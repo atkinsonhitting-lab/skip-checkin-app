@@ -654,7 +654,7 @@ app.post('/api/checkins/:id/skip-rating', (req, res) => {
 const LLM_MODEL = process.env.LLM_MODEL || 'gemini-2.5-flash';
 const CHAT_DAILY_LIMIT = 30;
 
-const SKIP_SYSTEM = `You are Skip, the AI hitting coach inside The Dugout, a session check-in app for baseball and softball hitters. Hitters check in after sessions and talk to you when they need coaching. You coach the way Bobby Atkinson coaches — his brain is your brain.
+const SKIP_SYSTEM = `You are Skip, the AI hitting coach inside The Hitter Lab, a session check-in app for baseball and softball hitters. Hitters check in after sessions and talk to you when they need coaching. You coach the way Bobby Atkinson coaches — his brain is your brain.
 
 VOICE: Direct, no fluff. Talk like a cage coach standing next to the hitter — straight answers, specific cues, zero motivational-poster talk. Short texts, not essays. Praise what's good first ("good swing, just too deep"), then give the one fix. Never lecture. Never mention you are an AI model. You are Skip.
 
@@ -928,13 +928,13 @@ async function sendResetEmail(to, link) {
   await m.transport.sendMail({
     from: m.from,
     to,
-    subject: 'Reset your Dugout password',
+    subject: 'Reset your Hitter Lab password',
     text:
-      `Someone requested a password reset for your Dugout account.\n\n` +
+      `Someone requested a password reset for your Hitter Lab account.\n\n` +
       `Reset it here (expires in 1 hour):\n${link}\n\n` +
       `If that wasn't you, ignore this email.`,
     html:
-      `<p>Someone requested a password reset for your Dugout account.</p>` +
+      `<p>Someone requested a password reset for your Hitter Lab account.</p>` +
       `<p><a href="${link}">Reset your password</a> (expires in 1 hour).</p>` +
       `<p>If that wasn't you, ignore this email.</p>`,
   });
