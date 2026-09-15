@@ -696,21 +696,97 @@ function programPage(user, p) {
     .map(([k, v]) => `<div class="cue-row"><span class="cue-label">${esc(k)}</span><span>${esc(v)}</span></div>`)
     .join('');
   const routine = Array.isArray(prog.routine) ? prog.routine : [];
-  const routineHtml = routine
-    .map(
-      (c) => `<details class="card routine-group" open><summary class="routine-summary"><span class="routine-station">${esc(c.category || '')}</span></summary>
-        ${(c.items || [])
-          .map(
-            (it) => `<div class="routine-row"><span class="routine-name">${esc(it.drill || '')}</span>${
-              it.volume ? `<span class="hint-inline">${esc(it.volume)}</span>` : ''
-            }</div>`
-          )
-          .join('')}</details>`
-    )
-    .join('');
+  const sectionCard = (name, items) => {
+    const rows = (items || [])
+      .map(
+        (it) => `<div class="routine-row"><span class="routine-name">${esc(it.drill || '')}</span>${
+          it.volume ? `<span class="hint-inline">${esc(it.volume)}</span>` : ''
+        }</div>`
+      )
+      .join('');
+    return `<details class="card routine-group" open><summary class="routine-summary"><span class="routine-station">${esc(name || 'Training')}</span></summary>${rows}</details>`;
+  };
+  const routineHtml = routine.map((c) => sectionCard(c.category, c.items)).join('');
   const schedMap = {};
   for (const pair of Array.isArray(prog.schedule) ? prog.schedule : []) {
     if (Array.isArray(pair) && pair[0]) schedMap[String(pair[0])] = String(pair[1] || '');
+  }
+  // ---- Day-based training navigator ----
+  // Blocks are grouped by day label ("Day 1 — Med Ball"). The hitter picks a
+  // weekday (Mon–Fri, defaulting to today) and sees that whole day in one spot.
+  const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+  const dayLabelRe = /^(Day \d+)(?:\s*[\u2014\u2013-]\s*(.+))?$/i;
+  const everyDayBlocks = [];
+  const daySections = {};
+  const flatBlocks = [];
+  for (const c of routine) {
+    const cat = String(c.category || '');
+    if (/^daily routine/i.test(cat) || /^mobility/i.test(cat)) {
+      everyDayBlocks.push(c);
+      continue;
+    }
+    const m = cat.match(dayLabelRe);
+    if (m) {
+      const lbl = 'Day ' + m[1].replace(/\D+/g, '');
+      (daySections[lbl] = daySections[lbl] || []).push({ section: (m[2] || '').trim(), items: c.items || [] });
+      continue;
+    }
+    flatBlocks.push(c);
+  }
+  const dayLabels = Object.keys(daySections).sort(
+    (a, b) => parseInt(a.replace(/\D+/g, ''), 10) - parseInt(b.replace(/\D+/g, ''), 10)
+  );
+  const hasWeekdaySched = WEEKDAYS.some((d) => schedMap[d]);
+  const trainMode = hasWeekdaySched ? 'week' : dayLabels.length ? 'labels' : 'flat';
+  const panelForLabel = (label) => {
+    if (/^off$/i.test(String(label || '').trim())) {
+      return `<div class="card"><p style="margin:0">OFF — rest up.</p></div>`;
+    }
+    const cards = [];
+    for (const c of everyDayBlocks) cards.push(sectionCard(c.category, c.items));
+    const dm = String(label || '').match(/^day\s*(\d+)$/i);
+    if (dm) {
+      for (const sec of daySections['Day ' + dm[1]] || []) {
+        cards.push(sectionCard(sec.section || 'Day ' + dm[1], sec.items));
+      }
+    }
+    for (const c of flatBlocks) cards.push(sectionCard(c.category, c.items));
+    if (!cards.length) return `<div class="card empty">Nothing scheduled for this day.</div>`;
+    return cards.join('');
+  };
+  let trainingNav = '';
+  if (trainMode === 'flat') {
+    trainingNav = routine.length ? `<div id="training" class="prog-anchor">${routineHtml}</div>` : '';
+  } else {
+    const pillDays = trainMode === 'week' ? WEEKDAYS : dayLabels;
+    const pillHtml = pillDays
+      .map((d) => `<button type="button" class="day-pill" data-daypill="${esc(d)}">${esc(trainMode === 'week' ? d.slice(0, 3) : d)}</button>`)
+      .join('');
+    const panelHtml = pillDays
+      .map((d) => {
+        const label = trainMode === 'week' ? schedMap[d] || '' : d;
+        const head = trainMode === 'week' ? `${esc(d)}${label ? ` <span class="hint-inline">· ${esc(label)}</span>` : ''}` : esc(label);
+        return `<div data-daypanel="${esc(d)}" hidden><div class="prog-day-head">${head}</div>${panelForLabel(label)}</div>`;
+      })
+      .join('');
+    trainingNav = `<div id="training" class="prog-anchor">
+      <div class="day-pills">${pillHtml}</div>
+      ${panelHtml}
+      <script>(function(){
+        var pills = document.querySelectorAll('[data-daypill]');
+        var panels = document.querySelectorAll('[data-daypanel]');
+        function show(day){
+          pills.forEach(function(p){ p.classList.toggle('active', p.getAttribute('data-daypill') === day); });
+          panels.forEach(function(p){ p.hidden = p.getAttribute('data-daypanel') !== day; });
+        }
+        pills.forEach(function(p){ p.addEventListener('click', function(){ show(p.getAttribute('data-daypill')); }); });
+        var names = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+        var want = names[new Date().getDay()];
+        var pillDays = Array.prototype.map.call(pills, function(p){ return p.getAttribute('data-daypill'); });
+        if (pillDays.indexOf(want) === -1) want = pillDays[0];
+        if (want) show(want);
+      })();</script>
+    </div>`;
   }
   const schedRows = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
     .filter((d) => schedMap[d])
@@ -728,7 +804,7 @@ function programPage(user, p) {
     ['cues', 'Cues', !!cueRows],
     ['training', 'Training', routine.length > 0],
     ['mindset', 'Mindset', !!prog.mental_framework],
-    ['schedule', 'Schedule', !!schedRows],
+    ['schedule', 'Schedule', trainMode === 'flat' && !!schedRows],
     ['notes', 'Notes', progNotes.length > 0],
   ].filter(([, , show]) => show);
   const navHtml = nav.length
@@ -749,9 +825,9 @@ function programPage(user, p) {
       'strengths'
     )}
     ${programSection('Cues', cueRows ? `<div class="cue-list">${cueRows}</div>` : '', 'cues')}
-    ${routine.length ? `<div id="training" class="prog-anchor">${routineHtml}</div>` : ''}
+    ${trainingNav}
     ${programSection('Mental framework', prog.mental_framework ? `<p>${esc(prog.mental_framework)}</p>` : '', 'mindset')}
-    ${programSection('Schedule', schedRows ? `<div class="cue-list">${schedRows}</div>` : '', 'schedule')}
+    ${trainMode === 'flat' ? programSection('Schedule', schedRows ? `<div class="cue-list">${schedRows}</div>` : '', 'schedule') : ''}
     ${programSection(
       'Notes',
       progNotes.length ? `<ul class="works-list">${progNotes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '',

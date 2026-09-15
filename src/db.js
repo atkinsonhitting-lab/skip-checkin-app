@@ -181,7 +181,7 @@ db.exec(`CREATE TABLE IF NOT EXISTS remote_programs (
       }
       if (Array.isArray(p.days)) {
         for (const d of p.days) {
-          const title = [d.title, d.section].filter(Boolean).join(' \u2014 ');
+          const title = [d.title, d.section || d.category].filter(Boolean).join(' \u2014 ');
           const items = normItems(d.items);
           if (title || items.length) blocks.push({ category: title || 'Training Day', items });
         }
@@ -205,6 +205,47 @@ db.exec(`CREATE TABLE IF NOT EXISTS remote_programs (
         if (name) ins.run(name, JSON.stringify(prog), new Date().toISOString());
       } catch (e) { console.warn('program seed skipped', f, e.message); }
     }
+  }
+  // One-time repair: Dylan's seed lost section names ("Day 1" x4 instead of
+  // "Day 1 \u2014 Tee" etc.) because the normalizer ignored d.category.
+  {
+    const fs = require('fs');
+    const path = require('path');
+    try {
+      const row = db
+        .prepare("SELECT id, program_json FROM remote_programs WHERE lower(athlete_name) = 'dylan kakuda'")
+        .get();
+      if (row) {
+        const seed = JSON.parse(
+          fs.readFileSync(path.join(__dirname, 'seed_programs', 'dylan_kakuda.json'), 'utf8')
+        );
+        const seedDays = ((seed.program || seed).days || []);
+        const prog = JSON.parse(row.program_json || '{}');
+        const blocks = Array.isArray(prog.routine) ? prog.routine : [];
+        // Only the day blocks are repaired (Daily Routine etc. are untouched).
+        const dayIdx = [];
+        for (let i = 0; i < blocks.length; i++) {
+          if (/^Day \d+$/.test(String(blocks[i].category || '').trim())) dayIdx.push(i);
+        }
+        let untouched = dayIdx.length === seedDays.length && dayIdx.length > 0;
+        if (untouched) {
+          for (let k = 0; k < dayIdx.length; k++) {
+            const a = (blocks[dayIdx[k]].items || []).map((it) => it.drill);
+            const b = (seedDays[k].items || []).map((it) => it.drill);
+            if (JSON.stringify(a) !== JSON.stringify(b)) { untouched = false; break; }
+          }
+        }
+        if (untouched) {
+          for (let k = 0; k < dayIdx.length; k++) {
+            const sd = seedDays[k];
+            const title = [sd.title, sd.section || sd.category].filter(Boolean).join(' \u2014 ');
+            if (title) blocks[dayIdx[k]].category = title;
+          }
+          prog.routine = blocks;
+          db.prepare('UPDATE remote_programs SET program_json = ? WHERE id = ?').run(JSON.stringify(prog), row.id);
+        }
+      }
+    } catch (e) { /* leave the program as-is */ }
   }
   // Backfill: match accounts by full name, honoring aliases
   // (runs every boot; idempotent).
