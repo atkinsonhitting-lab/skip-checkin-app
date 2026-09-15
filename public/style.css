@@ -66,6 +66,14 @@ a:active { color: #ff3b30; }
   color: var(--muted); font-weight: 600; font-size: 14px;
 }
 .tab.active { background: var(--red); color: #fff; }
+.tab-badge {
+  display: inline-block; min-width: 20px; padding: 2px 7px; margin-left: 6px;
+  background: var(--red); color: #fff; border-radius: 999px;
+  font-size: 12px; font-weight: 800; line-height: 1.5;
+}
+.tab.active .tab-badge { background: #fff; color: var(--red); }
+/* Coach approvals nudge on the dashboard */
+.approval-nudge { display: block; text-decoration: none; border-color: var(--red); font-weight: 700; margin-top: 12px; }
 
 .wrap { max-width: 760px; margin: 0 auto; padding: 16px 14px calc(60px + env(safe-area-inset-bottom)); }
 .page-title { font-size: 24px; margin: 4px 0 12px; }
@@ -146,6 +154,17 @@ a:active { color: #ff3b30; }
 }
 .btn-ghost:active { border-color: var(--red); color: var(--red); }
 .btn-sm { font-size: 13px; padding: 6px 12px; margin-top: 0; }
+/* Voice dictation on check-in textareas */
+.talk-wrap { position: relative; display: block; }
+.talk-wrap textarea { padding-right: 54px; }
+.mic-btn {
+  position: absolute; right: 8px; bottom: 8px;
+  width: 40px; height: 40px; border-radius: 50%;
+  background: var(--bg2); border: 1px solid var(--line);
+  font-size: 18px; line-height: 1; cursor: pointer; color: var(--text);
+}
+.mic-btn.listening { background: var(--red); border-color: var(--red); animation: micpulse 1.2s infinite; }
+@keyframes micpulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.14); } }
 /* Daily routine page */
 .routine-station { font-size: 17px; font-weight: 800; margin: 0 0 8px; color: var(--red); }
 .routine-row {

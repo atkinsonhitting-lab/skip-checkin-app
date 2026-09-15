@@ -17,7 +17,7 @@ function fmtDate(iso) {
 
 function layout({ title, user, tabs, body }) {
   const tabHtml = (tabs || [])
-    .map((t) => `<a href="${t.href}" class="tab${t.active ? ' active' : ''}">${esc(t.label)}</a>`)
+    .map((t) => `<a href="${t.href}" class="tab${t.active ? ' active' : ''}">${esc(t.label)}${t.badge ? `<span class="tab-badge">${esc(t.badge)}</span>` : ''}</a>`)
     .join('');
   return `<!doctype html>
 <html lang="en">
@@ -59,9 +59,10 @@ function userTabs(active) {
   ];
 }
 
-function coachTabs(active) {
+function coachTabs(active, approvalCount) {
   return [
     { href: '/coach', label: 'Dashboard', active: active === 'dashboard' },
+    { href: '/coach/approvals', label: 'Approvals', active: active === 'approvals', badge: approvalCount > 0 ? String(approvalCount) : null },
     { href: '/coach/skip', label: 'Train Skip', active: active === 'skip' },
   ];
 }
@@ -231,8 +232,8 @@ function checkinForm(user, error, values, drillNames, routine) {
       ${sliderField('focus', 'Focus', 'How locked in was your focus?', v.focus)}
       ${sliderField('difficulty', 'Difficulty', 'How hard was the training?', v.difficulty, ['Easy', 'Brutal'], true)}
       <script src="/checkin.js"></script>
-      <label>Session notes <span class="hint-inline">(don't hold back — what you felt, what you saw, what was off)</span><textarea name="session_notes" rows="4" placeholder="How did it go? What did you feel?">${esc(v.session_notes || '')}</textarea></label>
-      <label>What worked <span class="hint-inline">(be specific — the exact drill, cue, or feel)</span><textarea name="what_worked" rows="2" placeholder="What clicked today?">${esc(v.what_worked || '')}</textarea></label>
+      <label>Session notes <span class="hint-inline">(don't hold back — what you felt, what you saw, what was off)</span><span class="talk-wrap"><textarea id="session_notes" name="session_notes" rows="4" placeholder="How did it go? What did you feel?">${esc(v.session_notes || '')}</textarea><button type="button" class="mic-btn" data-target="session_notes" aria-label="Dictate instead of typing">🎙</button></span></label>
+      <label>What worked <span class="hint-inline">(be specific — the exact drill, cue, or feel)</span><span class="talk-wrap"><textarea id="what_worked" name="what_worked" rows="2" placeholder="What clicked today?">${esc(v.what_worked || '')}</textarea><button type="button" class="mic-btn" data-target="what_worked" aria-label="Dictate instead of typing">🎙</button></span></label>
       <div class="field-label">Did you do any drills?</div>
       <div class="pills">
         <label class="pill"><input type="radio" name="did_drills" value="yes"${v.did_drills === 'yes' ? ' checked' : ''} required><span>Yes</span></label>
@@ -434,21 +435,8 @@ function chatPage(user, messages, chatEnabled) {
   });
 }
 
-function coachDashboard(user, userStats, latest, pending) {
-  const totalCheckins = userStats.reduce((s, u) => s + u.total, 0);
-  const cards = userStats
-    .map(
-      (a) => `<a class="card athlete-card" href="/coach/user/${encodeURIComponent(a.email)}">
-        <div class="athlete-card-name">${esc(a.name)}</div>
-        <div class="athlete-card-email">${esc(a.email)}</div>
-        <div class="athlete-card-meta">${a.total} check-in${a.total === 1 ? '' : 's'}${a.last ? ` · last ${fmtDate(a.last)}` : ' · none yet'}</div>
-      </a>`
-    )
-    .join('');
-  const feed = latest.length
-    ? latest.map((c) => checkinCard({ ...c, showAthlete: true })).join('')
-    : '<div class="card empty">No check-ins yet.</div>';
-  const pendingCards = (pending || [])
+function pendingApprovalCards(pending) {
+  return (pending || [])
     .map(
       (p) => `<div class="card athlete-card">
         <div class="athlete-card-name">${esc(p.name)}</div>
@@ -465,20 +453,47 @@ function coachDashboard(user, userStats, latest, pending) {
       </div>`
     )
     .join('');
-  const pendingSection = pending && pending.length
-    ? `<h2 class="section-head">Waiting for approval (${pending.length})</h2>
-    <div class="athlete-grid">${pendingCards}</div>`
+}
+
+function coachApprovalsPage(user, pending) {
+  const n = (pending || []).length;
+  return layout({
+    title: 'Approvals',
+    user,
+    tabs: coachTabs('approvals', user.approvalCount),
+    body: `<h1 class="page-title">Approvals</h1>
+    <p class="hint">Every new account waits here until you approve it. Approved hitters can log in right away.</p>
+    ${n ? `<div class="athlete-grid">${pendingApprovalCards(pending)}</div>` : `<div class="card empty">Nobody waiting — you're all caught up.</div>`}`,
+  });
+}
+
+function coachDashboard(user, userStats, latest, pending) {
+  const totalCheckins = userStats.reduce((s, u) => s + u.total, 0);
+  const cards = userStats
+    .map(
+      (a) => `<a class="card athlete-card" href="/coach/user/${encodeURIComponent(a.email)}">
+        <div class="athlete-card-name">${esc(a.name)}</div>
+        <div class="athlete-card-email">${esc(a.email)}</div>
+        <div class="athlete-card-meta">${a.total} check-in${a.total === 1 ? '' : 's'}${a.last ? ` · last ${fmtDate(a.last)}` : ' · none yet'}</div>
+      </a>`
+    )
+    .join('');
+  const feed = latest.length
+    ? latest.map((c) => checkinCard({ ...c, showAthlete: true })).join('')
+    : '<div class="card empty">No check-ins yet.</div>';
+  const approvalNudge = pending && pending.length
+    ? `<a class="card approval-nudge" href="/coach/approvals">${pending.length} hitter${pending.length === 1 ? '' : 's'} waiting for approval →</a>`
     : '';
   return layout({
     title: 'Coach Dashboard',
     user,
-    tabs: coachTabs('dashboard'),
+    tabs: coachTabs('dashboard', user.approvalCount),
     body: `<h1 class="page-title">Skip Dashboard</h1>
     <div class="stat-row">
       <div class="card stat"><div class="stat-num">${userStats.length}</div><div class="stat-label">hitters</div></div>
       <div class="card stat"><div class="stat-num">${totalCheckins}</div><div class="stat-label">check-ins</div></div>
     </div>
-    ${pendingSection}
+    ${approvalNudge}
     <h2 class="section-head">Hitters</h2>
     <div class="athlete-grid">${cards || '<div class="card empty">Nobody has signed up yet.</div>'}</div>
     <h2 class="section-head">Latest check-ins</h2>
@@ -503,7 +518,7 @@ function coachUser(user, name, checkins, stats, thoughts, thread, email) {
   return layout({
     title: name,
     user,
-    tabs: coachTabs('dashboard'),
+    tabs: coachTabs('dashboard', user.approvalCount),
     body: `<h1 class="page-title">${esc(name)}</h1>
     <p><a href="/coach">← Back to dashboard</a></p>
     ${whatWorksSection(stats || [], thoughts || [], null, 0)}
@@ -518,7 +533,7 @@ function coachDeleteHitterPage(user, hitter, name, checkinCount) {
   return layout({
     title: 'Delete hitter',
     user,
-    tabs: coachTabs('dashboard'),
+    tabs: coachTabs('dashboard', user.approvalCount),
     body: `<h1 class="page-title">Delete hitter?</h1>
     <div class="card">
       <p>This will permanently remove <strong>${esc(name)}</strong> (${esc(hitter.email)}) from The Daily Hitter — their account, ${checkinCount} check-in${checkinCount === 1 ? '' : 's'}, chat history, and routine.</p>
@@ -565,7 +580,7 @@ function coachSkipPage(user, notes, hitters, thread, chatEnabled, saved) {
   return layout({
     title: 'Train Skip',
     user,
-    tabs: coachTabs('skip'),
+    tabs: coachTabs('skip', user.approvalCount),
     body: `<h1 class="page-title">Train Skip</h1>
     <p class="hint">Talk to Skip directly to train him. What you tell him shapes this conversation — <strong>save it in your coaching notes</strong> and he'll apply it to every hitter.</p>
     ${saved ? '<div class="notice">Coaching notes saved — Skip is using them with every hitter now.</div>' : ''}
@@ -652,6 +667,7 @@ module.exports = {
   historyPage,
   chatPage,
   coachDashboard,
+  coachApprovalsPage,
   coachUser,
   coachDeleteHitterPage,
   coachSkipPage,

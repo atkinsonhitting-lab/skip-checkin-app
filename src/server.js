@@ -639,7 +639,30 @@ app.get('/history', requireLogin, (req, res) => {
 
 // ---- Coach routes ----
 
+// Hitters waiting for Bobby's approval, oldest first.
+function pendingList() {
+  return db
+    .prepare("SELECT id, email, athlete_name, first_name, last_name, created_at FROM users WHERE role = 'athlete' AND status = 'pending' ORDER BY created_at ASC")
+    .all()
+    .map((u) => ({
+      ...u,
+      name: [u.first_name, u.last_name].filter(Boolean).join(' ') || u.athlete_name || u.email,
+    }));
+}
+
+// Number on the Approvals tab badge.
+function setApprovalCount(req) {
+  try {
+    req.user.approvalCount = db
+      .prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'athlete' AND status = 'pending'")
+      .get().n;
+  } catch {
+    req.user.approvalCount = 0;
+  }
+}
+
 app.get('/coach', requireCoach, (req, res) => {
+  setApprovalCount(req);
   const users = db
     .prepare("SELECT id, email, athlete_name, first_name, last_name, created_at FROM users WHERE role != 'coach' AND status = 'approved' ORDER BY created_at ASC")
     .all();
@@ -653,14 +676,14 @@ app.get('/coach', requireCoach, (req, res) => {
   const latest = db
     .prepare('SELECT * FROM checkins ORDER BY created_at DESC LIMIT 20')
     .all();
-  const pending = db
-    .prepare("SELECT id, email, athlete_name, first_name, last_name, created_at FROM users WHERE role = 'athlete' AND status = 'pending' ORDER BY created_at ASC")
-    .all()
-    .map((u) => ({
-      ...u,
-      name: [u.first_name, u.last_name].filter(Boolean).join(' ') || u.athlete_name || u.email,
-    }));
+  const pending = pendingList();
   res.send(views.coachDashboard(req.user, stats, latest, pending));
+});
+
+// Approvals tab: approve or decline waiting hitters right here.
+app.get('/coach/approvals', requireCoach, (req, res) => {
+  setApprovalCount(req);
+  res.send(views.coachApprovalsPage(req.user, pendingList()));
 });
 
 // Approve a waiting hitter — they can log in from here on.
@@ -675,7 +698,7 @@ app.post('/coach/approve/:id', requireCoach, (req, res) => {
       console.warn('approval email failed:', e.message)
     );
   }
-  res.redirect('/coach');
+  res.redirect('/coach/approvals');
 });
 
 // Decline a waiting hitter — removes the signup entirely.
@@ -684,10 +707,11 @@ app.post('/coach/decline/:id', requireCoach, (req, res) => {
     .prepare("SELECT id FROM users WHERE id = ? AND role = 'athlete' AND status = 'pending'")
     .get(req.params.id);
   if (u) deleteHitter(u.id);
-  res.redirect('/coach');
+  res.redirect('/coach/approvals');
 });
 
 app.get('/coach/user/:email', requireCoach, (req, res) => {
+  setApprovalCount(req);
   const em = (req.params.email || '').toLowerCase();
   const user = db
     .prepare("SELECT id, email, athlete_name, first_name, last_name FROM users WHERE email = ? AND role != 'coach'")
@@ -705,6 +729,7 @@ app.get('/coach/user/:email', requireCoach, (req, res) => {
 
 // Delete a hitter from the platform: confirm page first, then the delete.
 app.get('/coach/user/:email/delete', requireCoach, (req, res) => {
+  setApprovalCount(req);
   const em = (req.params.email || '').toLowerCase();
   const user = db
     .prepare("SELECT id, email, athlete_name, first_name, last_name FROM users WHERE email = ? AND role != 'coach'")
@@ -753,6 +778,7 @@ app.get('/coach/export', requireCoach, (req, res) => {  const rows = db
 // with each hitter.
 
 app.get('/coach/skip', requireCoach, (req, res) => {
+  setApprovalCount(req);
   const notes = getSetting('coach_notes');
   const hitters = db
     .prepare(
