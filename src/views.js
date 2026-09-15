@@ -217,12 +217,11 @@ function whatWorksSection(data, opts) {
           <input type="hidden" name="drills" value="${esc(JSON.stringify(d.suggestedRoutine.map((x) => ({ name: x.name, station: x.station }))))}">
           <button type="submit" class="btn-primary">Save as my daily routine</button>
         </form>`;
-    suggested = `<div class="works-sub">No routine yet \u2014 start with this</div>
-      <div class="works-rows"><div class="works-row">
-        <div class="works-line">Built from the drills in your best sessions:</div>
+    suggested = `<details class="works-details">
+        <summary>No routine? No problem \u2014 but if you ever want one, here's a starting point from your best days.</summary>
         <ul class="works-list">${items}</ul>
         ${adopt}
-      </div></div>`;
+      </details>`;
   }
 
   let addable = '';

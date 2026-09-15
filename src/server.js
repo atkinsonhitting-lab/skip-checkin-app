@@ -585,7 +585,11 @@ function whatWorksData(athleteName, userId) {
       const matched = drills.filter((d) => routineNames.has(d.name.toLowerCase())).length;
       (matched >= Math.ceil(routine.length / 2) ? rDays : oDays).push(c.session_score);
     }
-    if (rDays.length >= 2 && oDays.length >= 2) {
+    // Only call it if both kinds of days actually happen — if the hitter
+    // only ever does their routine (or only ever freelances), there is no
+    // comparison to make.
+    const minorityShare = Math.min(rDays.length, oDays.length) / scored.length;
+    if (rDays.length >= 2 && oDays.length >= 2 && minorityShare >= 0.25) {
       const rAvg = round1(avg(rDays));
       const oAvg = round1(avg(oDays));
       const diff = rAvg - oAvg;

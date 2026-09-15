@@ -319,6 +319,10 @@ a:active { color: #ff3b30; }
 .works-list li { margin: 4px 0; }
 .works-adopt { margin-top: 10px; }
 .works-add { margin-top: 6px; }
+.works-details { margin-top: 10px; }
+.works-details summary { cursor: pointer; font-size: 14px; color: var(--muted); }
+.works-details summary:hover { color: var(--text); }
+.works-details .works-list { margin-top: 8px; }
 
 /* Library */
 .searchbar { display: flex; gap: 8px; margin-bottom: 14px; }
