@@ -407,15 +407,6 @@ CREATE TABLE IF NOT EXISTS study_players (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_players_user_time ON study_players(user_id, created_at);
-CREATE TABLE IF NOT EXISTS drill_insights (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL REFERENCES users(id),
-  drill TEXT NOT NULL,
-  issue TEXT NOT NULL DEFAULT '',
-  why_it_helps TEXT NOT NULL DEFAULT '',
-  created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_drill_insights_drill ON drill_insights(drill);
 CREATE TABLE IF NOT EXISTS mental_baseline (
   user_id INTEGER PRIMARY KEY REFERENCES users(id),
   pregame_routine TEXT NOT NULL DEFAULT '',
