@@ -424,6 +424,17 @@ function thoughtStats(athleteName) {
       g.count += 1;
     }
   }
+  // External cues (target/outcome outside the body) rank before internal
+  // cues (body-part instructions) — Bobby's rule.
+  const INTERNAL_WORDS = [
+    'hand', 'wrist', 'elbow', 'shoulder', 'hip', 'knee', 'ankle',
+    'foot', 'feet', 'leg', 'head', 'eye', 'back', 'chest', 'body',
+    'stride', 'load', 'barrel',
+  ];
+  const isInternal = (t) => {
+    const words = t.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/);
+    return words.some((w) => INTERNAL_WORDS.includes(w));
+  };
   return groups
     .filter((g) => g.count >= 2)
     .map((g) => {
@@ -433,9 +444,13 @@ function thoughtStats(athleteName) {
         text: display,
         avg: Math.round((g.total / g.count) * 10) / 10,
         count: g.count,
+        external: !isInternal(display),
       };
     })
-    .sort((a, b) => b.avg - a.avg || b.count - a.count)
+    .sort(
+      (a, b) =>
+        (b.external - a.external || b.avg - a.avg || b.count - a.count)
+    )
     .slice(0, 5);
 }
 
