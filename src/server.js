@@ -1126,6 +1126,35 @@ app.post('/api/library/sync', (req, res) => {
   res.json({ ok: true, count: ids.length });
 });
 
+// Brain entries endpoint for the VM agent — guarded by shared secret.
+// POST { secret, entries: [{ type, title, body, tags }] } — upserts by title.
+app.post('/api/library/entries', (req, res) => {
+  const secret = process.env.LIBRARY_SYNC_SECRET;
+  if (!secret || req.body.secret !== secret) return res.status(403).json({ ok: false });
+  const entries = Array.isArray(req.body.entries) ? req.body.entries : [];
+  if (!entries.length) return res.status(400).json({ ok: false, error: 'empty list — refusing no-op' });
+  const results = [];
+  for (const e of entries) {
+    try {
+      const title = String((e && e.title) || '').trim().slice(0, 120);
+      const body = String((e && e.body) || '').trim().slice(0, 2000);
+      const tags = String((e && e.tags) || '').trim().slice(0, 200);
+      if (!title || !body) { results.push({ title, ok: false, error: 'missing title/body' }); continue; }
+      const existing = db.prepare('SELECT id FROM skip_library WHERE title = ?').get(title);
+      if (existing) {
+        brain.updateEntry(db, existing.id, { title, body, tags });
+        results.push({ title, ok: true, action: 'updated', id: existing.id });
+      } else {
+        const r = brain.addEntry(db, { type: e.type, title, body, tags });
+        results.push({ title, ok: true, action: 'inserted', id: Number(r.lastInsertRowid) });
+      }
+    } catch (err) {
+      results.push({ title: String((e && e.title) || ''), ok: false, error: err.message });
+    }
+  }
+  res.json({ ok: true, results });
+});
+
 app.get('/videos', requireLogin, requireRemote, (req, res) => {
   const cats = db
     .prepare(
