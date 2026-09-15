@@ -433,7 +433,9 @@ function thoughtStats(athleteName) {
   ];
   const isInternal = (t) => {
     const words = t.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/);
-    return words.some((w) => INTERNAL_WORDS.includes(w));
+    return words.some((w) =>
+      INTERNAL_WORDS.some((iw) => w === iw || w === iw + 's' || w === iw + 'es')
+    );
   };
   return groups
     .filter((g) => g.count >= 2)
