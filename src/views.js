@@ -172,15 +172,22 @@ function checkinForm(user, error, values, drillNames) {
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
       <div class="field-label">Where were you?</div>
       <div class="pills">${envPills}</div>
-      <label>What drills did you do today? <span class="hint-inline">(separate with commas)</span>
-        <input name="drills_done" list="drill-list" placeholder="e.g. Deep Tee Drill, Walk In Drill" value="${esc(v.drills_done || '')}" required>
-      </label>
-      <datalist id="drill-list">${datalist}</datalist>
       ${sliderField('feel', 'Feel', 'How good did you feel?', v.feel)}
       ${sliderField('confidence', 'Confidence', 'How confident did you feel?', v.confidence)}
       ${sliderField('focus', 'Focus', 'How locked in was your focus?', v.focus)}
       <label>Session notes <span class="hint-inline">(don't hold back — what you felt, what you saw, what was off)</span><textarea name="session_notes" rows="4" placeholder="How did it go? What did you feel?">${esc(v.session_notes || '')}</textarea></label>
       <label>What worked <span class="hint-inline">(be specific — the exact drill, cue, or feel)</span><textarea name="what_worked" rows="2" placeholder="What clicked today?">${esc(v.what_worked || '')}</textarea></label>
+      <div class="field-label">Did you do any drills?</div>
+      <div class="pills">
+        <label class="pill"><input type="radio" name="did_drills" value="yes"${v.did_drills === 'yes' ? ' checked' : ''} required><span>Yes</span></label>
+        <label class="pill"><input type="radio" name="did_drills" value="no"${v.did_drills === 'no' ? ' checked' : ''} required><span>No</span></label>
+      </div>
+      <div id="drill-names"${v.did_drills === 'yes' ? '' : ' hidden'}>
+        <label>What ones? <span class="hint-inline">(separate with commas)</span>
+          <input name="drills_done" list="drill-list" placeholder="e.g. Deep Tee Drill, Walk In Drill" value="${esc(v.drills_done || '')}">
+        </label>
+      </div>
+      <datalist id="drill-list">${datalist}</datalist>
       <button type="submit" class="btn-primary">Submit check-in</button>
     </form></div>`,
   });

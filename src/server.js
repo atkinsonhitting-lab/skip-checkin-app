@@ -285,9 +285,13 @@ app.post('/checkin', requireLogin, (req, res) => {
   if (feel === null || confidence === null || focus === null) {
     return fail('Rate feel, confidence, and focus from 1 to 10.');
   }
+  const didDrills = b.did_drills;
+  if (didDrills !== 'yes' && didDrills !== 'no') {
+    return fail('Tell Skip whether you did any drills.');
+  }
   const drills = parseDrillsDone(b.drills_done);
-  if (!drills.length) {
-    return fail('Tell Skip what drills you did today.');
+  if (didDrills === 'yes' && !drills.length) {
+    return fail('You did drills — which ones?');
   }
   const sessionScore = Math.round(((feel + confidence + focus) / 3) * 10) / 10;
   const tier = scoreTier(sessionScore);

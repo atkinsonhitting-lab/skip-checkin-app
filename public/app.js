@@ -215,3 +215,15 @@
     });
   })();
 })();
+
+  // ---- Check-in: show "What ones?" only when drills = yes ----
+  (function drillToggle() {
+    const wrap = document.getElementById('drill-names');
+    if (!wrap) return;
+    const sync = () => {
+      const sel = document.querySelector('input[name="did_drills"]:checked');
+      wrap.hidden = !sel || sel.value !== 'yes';
+    };
+    document.querySelectorAll('input[name="did_drills"]').forEach((r) => r.addEventListener('change', sync));
+    sync();
+  })();
