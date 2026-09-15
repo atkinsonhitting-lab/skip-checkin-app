@@ -190,15 +190,9 @@ function whatWorksSection(data, opts) {
   let verdict = '';
   const v = d.routineVerdict;
   if (v) {
-    const line =
-      v.kind === 'routine'
-        ? "You're better when you go through your routine."
-        : v.kind === 'freelance'
-          ? "You're actually better when you skip the routine \u2014 it might need a rethink."
-          : 'No real difference between routine days and other days.';
     verdict = `<div class="works-sub">Your routine</div>
       <div class="works-rows"><div class="works-row">
-        <div class="works-drill">${line}</div>
+        <div class="works-drill">You're better when you go through your routine.</div>
         <div class="works-line">Routine days <span class="hint-inline">(${v.routineN})</span>${levelLine(v.routineAvg)}</div>
         <div class="works-line">Other days <span class="hint-inline">(${v.otherN})</span>${levelLine(v.otherAvg)}</div>
       </div></div>`;

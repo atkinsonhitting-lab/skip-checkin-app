@@ -592,14 +592,16 @@ function whatWorksData(athleteName, userId) {
     if (rDays.length >= 2 && oDays.length >= 2 && minorityShare >= 0.25) {
       const rAvg = round1(avg(rDays));
       const oAvg = round1(avg(oDays));
-      const diff = rAvg - oAvg;
-      data.routineVerdict = {
-        kind: diff >= 0.5 ? 'routine' : diff <= -0.5 ? 'freelance' : 'tie',
-        routineAvg: rAvg,
-        otherAvg: oAvg,
-        routineN: rDays.length,
-        otherN: oDays.length,
-      };
+      // Only say it when routine days are heavily better — never talk a
+      // hitter out of having a routine.
+      if (rAvg - oAvg >= 1.5) {
+        data.routineVerdict = {
+          routineAvg: rAvg,
+          otherAvg: oAvg,
+          routineN: rDays.length,
+          otherN: oDays.length,
+        };
+      }
     }
     // Good-day drills that are NOT in the routine — candidates to add.
     data.drillSuggestions = tally()
