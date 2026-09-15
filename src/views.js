@@ -672,9 +672,9 @@ function coachDashboard(user, userStats, latest, pending, remotePrograms, librar
 
 // ---- Remote programs ----
 
-function programSection(title, inner) {
+function programSection(title, inner, id) {
   return inner
-    ? `<div class="card routine-group"><h2 class="routine-station">${esc(title)}</h2>${inner}</div>`
+    ? `<div class="card routine-group"${id ? ` id="${id}"` : ''}><h2 class="routine-station">${esc(title)}</h2>${inner}</div>`
     : '';
 }
 
@@ -698,14 +698,14 @@ function programPage(user, p) {
   const routine = Array.isArray(prog.routine) ? prog.routine : [];
   const routineHtml = routine
     .map(
-      (c) => `<div class="card routine-group"><h2 class="routine-station">${esc(c.category || '')}</h2>
+      (c) => `<details class="card routine-group" open><summary class="routine-summary"><span class="routine-station">${esc(c.category || '')}</span></summary>
         ${(c.items || [])
           .map(
             (it) => `<div class="routine-row"><span class="routine-name">${esc(it.drill || '')}</span>${
               it.volume ? `<span class="hint-inline">${esc(it.volume)}</span>` : ''
             }</div>`
           )
-          .join('')}</div>`
+          .join('')}</details>`
     )
     .join('');
   const schedMap = {};
@@ -721,25 +721,41 @@ function programPage(user, p) {
     .join('');
   const progNotes = Array.isArray(prog.notes) ? prog.notes.filter(Boolean) : [];
   const meta = [prog.date_range, prog.phase_emphasis].filter(Boolean).map(esc).join(' · ');
+  const nav = [
+    ['focus', 'Focus', !!prog.adjustment],
+    ['grades', 'Grades', !!gradeChips],
+    ['strengths', 'Strengths', strengths.length > 0],
+    ['cues', 'Cues', !!cueRows],
+    ['training', 'Training', routine.length > 0],
+    ['mindset', 'Mindset', !!prog.mental_framework],
+    ['schedule', 'Schedule', !!schedRows],
+    ['notes', 'Notes', progNotes.length > 0],
+  ].filter(([, , show]) => show);
+  const navHtml = nav.length
+    ? `<nav class="prog-nav">${nav.map(([id, label]) => `<a href="#${id}">${esc(label)}</a>`).join('')}</nav>`
+    : '';
   return layout({
     title: 'Your Program',
     user,
     tabs: userTabs('program', user),
     body: `<h1 class="page-title">Your Program</h1>
     ${meta ? `<p class="lede">${meta}</p>` : ''}
-    ${programSection('The focus', prog.adjustment ? `<p>${esc(prog.adjustment)}</p>` : '')}
-    ${programSection('Grades', gradeChips ? `<div class="grade-row">${gradeChips}</div>` : '')}
+    ${navHtml}
+    ${programSection('The focus', prog.adjustment ? `<p>${esc(prog.adjustment)}</p>` : '', 'focus')}
+    ${programSection('Grades', gradeChips ? `<div class="grade-row">${gradeChips}</div>` : '', 'grades')}
     ${programSection(
       'Strengths',
-      strengths.length ? `<ul class="works-list">${strengths.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''
+      strengths.length ? `<ul class="works-list">${strengths.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '',
+      'strengths'
     )}
-    ${programSection('Cues', cueRows ? `<div class="cue-list">${cueRows}</div>` : '')}
-    ${routineHtml}
-    ${programSection('Mental framework', prog.mental_framework ? `<p>${esc(prog.mental_framework)}</p>` : '')}
-    ${programSection('Schedule', schedRows ? `<div class="cue-list">${schedRows}</div>` : '')}
+    ${programSection('Cues', cueRows ? `<div class="cue-list">${cueRows}</div>` : '', 'cues')}
+    ${routine.length ? `<div id="training" class="prog-anchor">${routineHtml}</div>` : ''}
+    ${programSection('Mental framework', prog.mental_framework ? `<p>${esc(prog.mental_framework)}</p>` : '', 'mindset')}
+    ${programSection('Schedule', schedRows ? `<div class="cue-list">${schedRows}</div>` : '', 'schedule')}
     ${programSection(
       'Notes',
-      progNotes.length ? `<ul class="works-list">${progNotes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''
+      progNotes.length ? `<ul class="works-list">${progNotes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '',
+      'notes'
     )}`,
   });
 }

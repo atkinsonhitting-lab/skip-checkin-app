@@ -500,3 +500,15 @@ a:active { color: #ff3b30; }
 /* ---- View-as-hitter preview banner ---- */
 .viewas-banner { background: #3a2b00; color: #ffd970; text-align: center; padding: 10px 12px; font-size: 14px; border-bottom: 1px solid #6b5310; }
 .viewas-exit { background: #ffd970; color: #111; border: none; border-radius: 6px; padding: 4px 12px; font-weight: 700; cursor: pointer; margin-left: 8px; }
+
+/* ---- Program page navigation ---- */
+.prog-nav { position: sticky; top: 0; z-index: 30; display: flex; gap: 8px; overflow-x: auto; padding: 10px 2px; background: var(--bg); scrollbar-width: none; }
+.prog-nav::-webkit-scrollbar { display: none; }
+.prog-nav a { flex-shrink: 0; background: var(--bg2); border: 1px solid var(--line); color: var(--text); border-radius: 999px; padding: 8px 14px; font-size: 14px; font-weight: 700; text-decoration: none; }
+.prog-nav a:active { border-color: var(--red); color: var(--red); }
+.prog-anchor, .routine-group[id] { scroll-margin-top: 60px; }
+.routine-summary { cursor: pointer; list-style: none; display: flex; align-items: center; justify-content: space-between; }
+.routine-summary::-webkit-details-marker { display: none; }
+.routine-summary::after { content: '\25BE'; color: var(--muted); font-size: 18px; margin-left: 8px; }
+details[open] > .routine-summary::after { content: '\25B4'; }
+.routine-summary .routine-station { margin: 0; }
