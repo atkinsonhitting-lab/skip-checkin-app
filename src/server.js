@@ -15,6 +15,7 @@ const db = require('./db');
 const SQLiteStore = require('./store');
 const data = require('./data');
 const views = require('./views');
+const brain = require('./brain');
 const { seedUsers, writeCredentialsFile, userCount } = require('./seed');
 
 const app = express();
@@ -106,6 +107,10 @@ function setSetting(key, value) {
   db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
     .run(key, value);
 }
+
+// Skip's Brain v2: structured coaching library (see src/brain.js). Seeds the
+// library on first boot and migrates any legacy free-text coaching notes.
+brain.ensureBrain(db, getSetting, setSetting);
 
 // Extract the express-session id from a WebSocket upgrade request's cookies.
 function getWsSessionId(req) {
@@ -724,7 +729,22 @@ app.get('/coach/user/:email', requireCoach, (req, res) => {
   const thread = db
     .prepare('SELECT role, content, created_at FROM chat_messages WHERE user_id = ? ORDER BY created_at ASC LIMIT 200')
     .all(user.id);
-  res.send(views.coachUser(req.user, name, rows, drillStats(name), thoughtStats(name), thread, user.email));
+  res.send(views.coachUser(req.user, name, rows, drillStats(name), thoughtStats(name), thread, user.email, brain.listMemory(db, user.id)));
+});
+
+// Skip's memory of a hitter: Bobby's durable notes on what works for them.
+app.post('/coach/user/:email/memory', requireCoach, (req, res) => {
+  const em = (req.params.email || '').toLowerCase();
+  const user = db
+    .prepare("SELECT id FROM users WHERE email = ? AND role != 'coach'")
+    .get(em);
+  if (user) brain.addMemory(db, user.id, req.body.fact);
+  res.redirect(`/coach/user/${encodeURIComponent(em)}`);
+});
+app.post('/coach/user/:email/memory/:id/delete', requireCoach, (req, res) => {
+  brain.deleteMemory(db, Number(req.params.id));
+  const em = (req.params.email || '').toLowerCase();
+  res.redirect(`/coach/user/${encodeURIComponent(em)}`);
 });
 
 // Delete a hitter from the platform: confirm page first, then the delete.
@@ -751,7 +771,7 @@ app.post('/coach/user/:email/delete', requireCoach, (req, res) => {
 
 // Remove a hitter and everything they created: check-ins, chats, routine, tokens.
 function deleteHitter(userId) {
-  for (const t of ['chat_messages', 'checkins', 'routine_drills', 'password_reset_tokens']) {
+  for (const t of ['chat_messages', 'checkins', 'routine_drills', 'password_reset_tokens', 'hitter_memory']) {
     db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(userId);
   }
   db.prepare('DELETE FROM users WHERE id = ?').run(userId);
@@ -779,7 +799,7 @@ app.get('/coach/export', requireCoach, (req, res) => {  const rows = db
 
 app.get('/coach/skip', requireCoach, (req, res) => {
   setApprovalCount(req);
-  const notes = getSetting('coach_notes');
+  const entries = brain.listEntries(db);
   const hitters = db
     .prepare(
       `SELECT u.id, u.email, u.first_name, u.last_name, u.athlete_name,
@@ -803,12 +823,50 @@ app.get('/coach/skip', requireCoach, (req, res) => {
   const thread = db
     .prepare('SELECT role, content, created_at FROM chat_messages WHERE user_id = ? ORDER BY created_at ASC LIMIT 100')
     .all(req.user.id);
-  res.send(views.coachSkipPage(req.user, notes, hitters, thread, !!process.env.LLM_API_KEY, req.query.saved === '1'));
+  res.send(views.coachSkipPage(req.user, entries, hitters, thread, !!process.env.LLM_API_KEY, req.query.saved === '1'));
 });
 
-app.post('/coach/skip/notes', requireCoach, (req, res) => {
-  const notes = typeof req.body.notes === 'string' ? req.body.notes.trim().slice(0, 8000) : '';
-  setSetting('coach_notes', notes);
+// ---- Skip's Brain: Bobby's structured coaching library ----
+// Add a new brain entry (rule, approach, cue, diagnosis, example, note).
+app.post('/coach/skip/brain', requireCoach, (req, res) => {
+  try {
+    brain.addEntry(db, {
+      type: req.body.type,
+      title: req.body.title,
+      body: req.body.body,
+      tags: req.body.tags,
+    });
+  } catch (e) { /* bad type — ignore, stay on the page */ }
+  res.redirect('/coach/skip?saved=1');
+});
+
+// Edit an entry's title/body/tags.
+app.post('/coach/skip/brain/:id', requireCoach, (req, res) => {
+  brain.updateEntry(db, Number(req.params.id), {
+    title: req.body.title,
+    body: req.body.body,
+    tags: req.body.tags,
+  });
+  res.redirect('/coach/skip?saved=1');
+});
+
+// Archive or restore an entry (archived entries are never injected).
+app.post('/coach/skip/brain/:id/archive', requireCoach, (req, res) => {
+  brain.setEntryActive(db, Number(req.params.id), req.body.active === '1');
+  res.redirect('/coach/skip?saved=1');
+});
+
+// Log a correction: what the hitter said, what Skip got wrong, what he
+// should have said. Saved as an example entry so the fix sticks.
+app.post('/coach/skip/correction', requireCoach, (req, res) => {
+  const hitter = (req.body.hitter_said || '').trim().slice(0, 500);
+  const wrong = (req.body.skip_said || '').trim().slice(0, 500);
+  const right = (req.body.should_say || '').trim().slice(0, 1000);
+  if (right) {
+    const title = (hitter || 'Correction').slice(0, 80);
+    const body = `Hitter: "${hitter || '(not specified)'}"\nWrong: "${wrong || '(not specified)'}"\nRight: "${right}"`;
+    brain.addEntry(db, { type: 'example', title, body, tags: 'correction' });
+  }
   res.redirect('/coach/skip?saved=1');
 });
 
@@ -951,28 +1009,16 @@ app.post('/api/checkins/:id/skip-rating', (req, res) => {
 
 const LLM_MODEL = process.env.LLM_MODEL || 'gemini-2.5-flash';
 
-const SKIP_SYSTEM = `You are Skip, the AI hitting coach inside The Daily Hitter, a session check-in app for baseball and softball hitters. Hitters check in after sessions and talk to you when they need coaching. You coach the way Bobby Atkinson coaches — his brain is your brain.
+const SKIP_CORE = `You are Skip, the AI hitting coach inside The Daily Hitter, a session check-in app for baseball and softball hitters. Hitters check in after sessions and talk to you when they need coaching. You coach the way Bobby Atkinson coaches — his brain is your brain.
 
 VOICE: Direct, no fluff. Talk like a cage coach standing next to the hitter — straight answers, specific cues, zero motivational-poster talk. Short texts, not essays. Praise what's good first ("good swing, just too deep"), then give the one fix. Never lecture. Never mention you are an AI model. You are Skip.
 
-MENTAL BEFORE MECHANICS — your most important rule: when a hitter talks about real at-bats or games, ALWAYS check the mental side before touching mechanics. Ask about or infer from their words: did they go to the plate with a simple plan? Were they ready early and deciding late? Committed 100% to one thing, or thinking about three things at once? Slumps get fixed by simplifying the thought, not rebuilding the swing — Bobby's own locked-in cue was "hit a line drive and take off the shortstop's hat." When their head is crowded, hand them one of his simple approaches: Pick a Spot (one field target, for overthinkers), Pick a Speed (fully commit to fastball or off-speed timing), Pick a Zone (hunt one area, stay on heater timing), or Dead Red Middle (sit heater, middle of the plate). "Simple plan. Clear intent. Full commitment." Cage problems get mechanics and feels; game problems get approach and mindset first.
-
-COACH OFF THEIR DATA: you get this hitter's check-in data below — recent sessions, scores, their words, drills tied to their best days. Use it like film. Never give generic advice to a struggling hitter — pull up a specific locked-in session ("on the 12th you were Locked In at a 9 and wrote that flat bat side flips got you behind the ball — go back to that"). Name their drills, their scores, their phrases. Trend dropping? Say so plainly and anchor them to what worked. A drill tied to their best days beats a new drill every time.
-
-THEIR WORDS FIRST, BOBBY'S CUES LAST: most of Bobby's mechanical cues were built for left-handed hitters — do NOT lead with them. Your first and best source for cues and fixes is always the hitter themselves: their own words, their "what worked" entries, their locked-in sessions. If a hitter's own language already describes the fix ("staying inside it," "seeing it deep"), coach off THAT — a cue in their own words beats a "better" cue every time. Only reach for Bobby's cues when the hitter has no history and nothing useful in their own words, and even then prefer the mental/approach side (simple plan, one commitment) over a mechanical cue. Never force a lefty-built mechanical cue onto a hitter it doesn't fit.
-
-EXTERNAL CUES BEFORE INTERNAL: when you give a cue, lead with an external cue (a target or outcome outside the body) before an internal one (a body-part instruction). "Drive it through the shortstop" beats "extend your arms." "Knock the shortstop's hat off" beats "keep your hands through it." External cues keep the hitter's focus on the task instead of their mechanics — better movement, less overthinking. Only go internal if the external cue isn't landing and you need to isolate the body part.
-
-BOBBY'S CUES — background knowledge, mostly lefty-oriented, use sparingly and only when the hitter gives you nothing of their own: "Swing down the line — let the barrel trace that line" (spinny, no direction). "Drive the back elbow" (handsy, arms long early). "Let it happen behind you" (choppers/weak flares vs velo). "Load down, not back" (swaying in the load). "Eyes behind your barrel" (standing up on breakers). "Hands above it, chest square" (top-zone heat). "Don't shift — feel behind as the foot lands" (barrel drag). "Waiting, waiting, waiting, go" (timing). "Let the barrel outrace the hands" (pushy, stuck behind). Missing under balls in games = BP angle too steep — line drives and seated darts, not launch angle.
-
-DIAGNOSING FROM THEIR WORDS: read the miss the way Bobby does. Rolling over / topspin pull-side = bat wrapped around the head at launch. Flaring oppo = cutting across. "Stuck and pushy" = stance too wide, reaching. "Can't catch up to heat" = not ready early — check plate position and approach before mechanics. "Good in the cage, bad in games" = practicing mechanics, not decisions — challenge the environment, give them a box plan.
-
-RULES:
-- 2-4 sentences, conversational, like a text from their coach. End with ONE good follow-up question that moves them forward.
-- One fix at a time. Never dump three mechanical changes in one message.
-- Be specific to THEIR data: their drills, their scores, their own words.
-- Off-topic questions: answer briefly, steer back to the plate.
-- No medical advice. Pain or injury: get it checked by a trainer, stick to swing talk.`;
+HOW YOU COACH:
+1. LEARN HIM OVER TIME — your #1 job. Every session and chat teaches you this hitter: his words, his feels, what his best days have in common. Know what each hitter needs — no two hitters get the same coaching.
+2. GETTING HIM BACK ON TRACK — when he's struggling, work in this order: (a) his own past entries — take him back to what he was doing, feeling, and thinking on his best days, in his own words, name the date and score; (b) mental first — simple plan, clear intent, full commitment; (c) external cues — a target or outcome outside the body; (d) mechanics — needed a lot, and always fair game when the hitter brings them up. READ WHAT THE HITTER WANTS: if he's talking mechanics or asking for mechanical help, meet him there and coach mechanics directly — don't force the order on a hitter who's telling you what he needs. Never give generic advice to a hitter you have history on.
+3. Their words first — a cue in the hitter's own words beats a "better" cue every time.
+4. One fix at a time — praise what's good first, then the single fix.
+5. Bobby's playbook below overrides your defaults wherever they conflict. Use an entry only when it's relevant to what the hitter just said — never force one in.`;
 
 function hitterSnapshot(userId) {
   const rows = db
@@ -1017,11 +1063,41 @@ function hitterSnapshot(userId) {
   const top = drillStats(
     (db.prepare('SELECT athlete_name FROM users WHERE id = ?').get(userId) || {}).athlete_name
   ).slice(0, 3);
-  return { lines, avg, total, trend, top };
+  // Best-day anchor: the highest-scored session — what Skip takes the hitter
+  // back to when they're struggling. This is the #1 priority, so it gets its
+  // own explicit section in the data block.
+  const best = db
+    .prepare(
+      `SELECT created_at, environment, drills_done, feel, confidence, focus,
+              session_score, session_notes, what_worked
+       FROM checkins WHERE user_id = ? AND session_score IS NOT NULL
+       ORDER BY session_score DESC, created_at DESC LIMIT 1`
+    )
+    .get(userId);
+  let bestDay = '';
+  if (best) {
+    let drills = [];
+    try { drills = JSON.parse(best.drills_done || '[]'); } catch (e) { drills = []; }
+    const names = drills
+      .map((d) => String((d && typeof d === 'object' ? d.name : d) || '').trim())
+      .filter(Boolean);
+    const bits = [
+      `${String(best.created_at).slice(0, 10)} · ${best.environment} · Score ${best.session_score}`,
+      `Feel ${best.feel} Conf ${best.confidence} Focus ${best.focus}`,
+      names.length ? `Drills: ${names.join(', ')}` : null,
+      best.what_worked ? `What worked: "${String(best.what_worked).slice(0, 200)}"` : null,
+      best.session_notes ? `Notes: "${String(best.session_notes).slice(0, 200)}"` : null,
+    ].filter(Boolean);
+    bestDay = bits.join(' · ');
+  }
+  return { lines, avg, total, trend, top, bestDay };
 }
 
 function skipDataBlock(userId) {
   const snap = hitterSnapshot(userId);
+  const u = db.prepare('SELECT first_name FROM users WHERE id = ?').get(userId) || {};
+  const mem = brain.memoryBlock(db, userId, u.first_name);
+  const memBlock = mem ? `\n${mem}` : '';
   return snap.lines.length
     ? `HITTER DATA (newest first):\n${snap.lines.join('\n')}\nSessions logged: ${snap.total}${
         snap.avg != null ? ` · Average score: ${snap.avg.toFixed(1)}` : ''
@@ -1029,23 +1105,17 @@ function skipDataBlock(userId) {
         snap.top.length
           ? `\nDrills tied to their best days: ${snap.top.map((d) => `${d.name} (avg ${d.avg} over ${d.count})`).join(', ')}`
           : ''
-      }`
+      }${
+        snap.bestDay
+          ? `\nHIS BEST DAY — when he's struggling, take him back to exactly this (this is your #1 job):\n${snap.bestDay}`
+          : ''
+      }${memBlock}`
     : 'HITTER DATA: no check-ins logged yet — this is a brand-new hitter. Ask what they are working on.';
 }
 
 const COACH_SYSTEM = `You are Skip, the AI hitting coach inside The Daily Hitter. You are talking to BOBBY ATKINSON — your head coach, the man whose brain you coach with. He is training you right now: giving feedback on your coaching, correcting your answers, teaching you how he wants his hitters coached. Listen carefully, take every correction seriously, and confirm specifically how you will apply what he tells you going forward. Talk to him like a trusted assistant coach — direct, no fluff, no motivational-poster talk. Keep replies short (2-4 sentences) unless he asks for more. Never mention you are an AI model. You are Skip.
 
-IMPORTANT: conversation alone does not change how you coach his hitters — only his saved coaching notes do. If Bobby gives you a correction or a new rule for coaching hitters, apply it in this conversation AND remind him to add it to his coaching notes on the Train Skip page so it sticks for every hitter.`;
-
-// Bobby's coaching notes, injected into Skip's system prompt for every
-// hitter chat (and shown to Bobby in coach mode). This is how his training
-// actually sticks — conversation alone doesn't persist.
-function coachNotesBlock() {
-  const notes = getSetting('coach_notes').trim();
-  return notes
-    ? `\n\nBOBBY'S DIRECT COACHING NOTES — standing instructions from Bobby Atkinson, your head coach, on how to coach his hitters. Follow these; they override your defaults wherever they conflict:\n${notes}`
-    : '';
-}
+IMPORTANT: your coaching knowledge lives in your Brain library — discrete entries (rules, approaches, cues, miss reads, examples) Bobby manages on the Train Skip page. Conversation alone does not change how you coach his hitters. If Bobby teaches you something new here — a correction, a cue, a rule — apply it in this conversation AND confirm exactly what he should save: tell him to add it as a Brain entry (or log it with the correction form) so it sticks for every hitter.`;
 
 async function askSkip(user, userMessage, opts = {}) {
   const coachMode = !!opts.coachMode;
@@ -1064,8 +1134,10 @@ async function askSkip(user, userMessage, opts = {}) {
     ? `The hitter you're talking to is named "${user.firstName}". Call them ${user.firstName} — use their first name naturally, the way a coach would.\n\n`
     : '';
   const dataBlock = coachMode ? '' : skipDataBlock(userId);
-  const notesBlock = coachNotesBlock();
-  const system = coachMode ? COACH_SYSTEM + notesBlock : `${SKIP_SYSTEM}\n\n${nameLine}${dataBlock}${notesBlock}`;
+  // Brain v2: short core prompt + only the playbook entries relevant to this message.
+  const playbook = brain.libraryBlock(db, userMessage);
+  const playbookBlock = playbook ? `\n\n${playbook}` : '';
+  const system = coachMode ? COACH_SYSTEM + playbookBlock : `${SKIP_CORE}\n\n${nameLine}${dataBlock}${playbookBlock}`;
   // Gemini roles are "user"/"model" (our DB stores "assistant").
   const contents = [
     ...history.map((m) => ({

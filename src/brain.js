@@ -1,0 +1,315 @@
+// Skip's Brain v2 — structured coaching library.
+//
+// Replaces the old free-text "coaching notes" blob. The problem with the blob:
+// every training session appended more prose, nothing was ever removed, and old
+// instructions contradicted new ones — the more Bobby trained Skip, the worse
+// Skip got (prompt bloat). The fix:
+//   1. A short, immutable core prompt (in server.js) — identity + 4 rules.
+//   2. This library: discrete entries (rule / approach / cue / diagnosis /
+//      example / note) that Bobby can add, edit, archive, or restore one at
+//      a time on the Train Skip page.
+//   3. Retrieval: only entries relevant to the hitter's current message get
+//      injected — rules always, everything else by keyword match, capped at 5.
+//      The prompt stays short no matter how much Bobby teaches him.
+
+const { DatabaseSync } = require('node:sqlite'); // type hint only; db is injected
+
+const LIB_TYPES = ['rule', 'approach', 'cue', 'diagnosis', 'example', 'note'];
+const TYPE_LABELS = {
+  rule: 'Rules',
+  approach: 'Approaches',
+  cue: 'Cues',
+  diagnosis: 'Miss reads',
+  example: 'Examples',
+  note: 'Notes',
+};
+
+// ---------------------------------------------------------------------------
+// Seed data: Bobby's knowledge, distilled from the old mega-prompt into
+// discrete entries. Nothing was dropped — it just lives in pieces now.
+// ---------------------------------------------------------------------------
+const SEED_ENTRIES = [
+  // ---- Rules: always injected, kept few on purpose ----
+  { type: 'rule', title: 'Learn him over time — your #1 job',
+    body: 'Your number one priority is learning this hitter over time: his words, his feels, what his best days have in common. Know what each hitter needs — no two hitters get the same coaching. When he is struggling, take him back to exactly what he was doing, feeling, and thinking when he was at his best — name the date, the score, his own words. Never give generic advice to a hitter you have history on.',
+    tags: 'coaching priority' },
+  { type: 'rule', title: 'Back-on-track order',
+    body: 'When getting a hitter back on track, work in this order: 1) his own past entries and best days, 2) mental — simple plan, clear intent, full commitment, 3) external cues — target or outcome outside the body, 4) mechanics — needed a lot. EXCEPTION: read what the hitter wants. If he is talking mechanics or asking for mechanical help, meet him there and coach mechanics directly. Never force the order on a hitter who is telling you what he needs.',
+    tags: 'coaching priority slump' },
+  { type: 'rule', title: 'Their words first',
+    body: 'Coach off the hitter\'s own language, their what-worked entries, and their locked-in sessions before anything else. A cue in their own words beats a "better" cue every time. Only reach for Bobby\'s mechanical cues when the hitter has no history.',
+    tags: 'coaching priority' },
+  { type: 'rule', title: 'Mental and external first, mechanics when the hitter wants them',
+    body: 'Game and at-bat problems get approach first: simple plan, ready early, decide late, 100% commitment to one thing. Then external cues before anything mechanical. But mechanics are needed a lot — whenever the hitter talks mechanics or asks for mechanical help, coach mechanics directly. Read what he wants. Cage problems get mechanics and feels.',
+    tags: 'mental approach game slump' },
+  { type: 'rule', title: 'One fix at a time',
+    body: 'Praise what\'s good first, then give the single fix. 2-4 sentences, like a text from their coach. End with one good follow-up question that moves them forward. Never dump three mechanical changes in one message.',
+    tags: 'format' },
+  { type: 'rule', title: 'External cues before internal',
+    body: 'Lead with an external cue — a target or outcome outside the body — before any internal body-part instruction. "Drive it through the shortstop" beats "extend your arms." Only go internal if the external cue isn\'t landing.',
+    tags: 'cue external internal' },
+  { type: 'rule', title: 'No medical advice',
+    body: 'Pain or injury: tell them to get it checked by a trainer and stick to swing talk.',
+    tags: 'safety' },
+  { type: 'rule', title: 'Steer back to the plate',
+    body: 'Off-topic questions: answer briefly, then steer back to hitting.',
+    tags: 'format' },
+
+  // ---- Approaches: the mental menu for crowded heads ----
+  { type: 'approach', title: 'Pick a Spot',
+    body: 'For overthinkers at the plate: pick one field target and hunt it. One spot, full commitment.',
+    tags: 'approach mental overthinking game plan' },
+  { type: 'approach', title: 'Pick a Speed',
+    body: 'Fully commit to one timing: sit fastball or sit off-speed. Pick a speed, no in-between.',
+    tags: 'approach mental timing game' },
+  { type: 'approach', title: 'Pick a Zone',
+    body: 'Hunt one zone, stay on heater timing. Shrink the plate to shrink the thinking.',
+    tags: 'approach mental zone game' },
+  { type: 'approach', title: 'Dead Red Middle',
+    body: 'Sit heater, middle of the plate. The simplest plan there is.',
+    tags: 'approach mental game plan' },
+  { type: 'approach', title: "Bobby's locked-in cue",
+    body: 'When his own head got crowded, Bobby\'s cue was: "hit a line drive and take off the shortstop\'s hat." Simple plan. Clear intent. Full commitment.',
+    tags: 'cue Bobby approach mental slump' },
+
+  // ---- Cues: Bobby's mechanical cues, used sparingly ----
+  { type: 'note', title: 'About Bobby\'s cues',
+    body: 'Bobby\'s mechanical cues were mostly built for left-handed hitters — never force one onto a hitter it doesn\'t fit. They are the last resort, not the starting point.',
+    tags: 'cue guidance' },
+  { type: 'cue', title: 'Swing down the line',
+    body: 'Let the barrel trace a line. Use when: hitter is spinny with no direction.',
+    tags: 'cue mechanics spin direction' },
+  { type: 'cue', title: 'Drive the back elbow',
+    body: 'Use when: hitter is handsy, arms getting long early.',
+    tags: 'cue mechanics hands arms' },
+  { type: 'cue', title: 'Let it happen behind you',
+    body: 'Use when: choppers and weak flares vs velo — let the ball travel.',
+    tags: 'cue mechanics velo timing contact' },
+  { type: 'cue', title: 'Load down, not back',
+    body: 'Use when: hitter is swaying in the load.',
+    tags: 'cue mechanics load sway' },
+  { type: 'cue', title: 'Eyes behind your barrel',
+    body: 'Use when: hitter is standing up on breakers.',
+    tags: 'cue mechanics breaking-ball posture' },
+  { type: 'cue', title: 'Hands above it, chest square',
+    body: 'Use when: top-zone heat is beating them.',
+    tags: 'cue mechanics high fastball' },
+  { type: 'cue', title: "Don't shift — feel behind as the foot lands",
+    body: 'Use when: barrel drag. Feel stacked behind as the foot lands.',
+    tags: 'cue mechanics barrel-drag' },
+  { type: 'cue', title: 'Waiting, waiting, waiting, go',
+    body: 'Timing cue for rushers. Wait longer than feels natural.',
+    tags: 'cue timing rushing' },
+  { type: 'cue', title: 'Let the barrel outrace the hands',
+    body: 'Use when: hitter is pushy, stuck behind the ball.',
+    tags: 'cue mechanics push hands' },
+  { type: 'cue', title: 'Flatten the BP angle',
+    body: 'Missing under balls in games = BP angle too steep. Line drives and seated darts, not launch angle.',
+    tags: 'cue mechanics launch-angle BP' },
+
+  // ---- Diagnoses: reading the miss the way Bobby does ----
+  { type: 'diagnosis', title: 'Rolling over / topspin pull-side',
+    body: 'Bat wrapped around the head at launch.',
+    tags: 'diagnosis miss rolling-over' },
+  { type: 'diagnosis', title: 'Flaring oppo',
+    body: 'Cutting across the ball.',
+    tags: 'diagnosis miss flare opposite-field' },
+  { type: 'diagnosis', title: 'Stuck and pushy',
+    body: 'Stance too wide — reaching instead of turning.',
+    tags: 'diagnosis miss push' },
+  { type: 'diagnosis', title: "Can't catch up to heat",
+    body: 'Not ready early. Check plate position and approach before touching mechanics.',
+    tags: 'diagnosis miss velo timing approach' },
+  { type: 'diagnosis', title: 'Good in the cage, bad in games',
+    body: 'Practicing mechanics, not decisions. Challenge the environment and give them a box plan.',
+    tags: 'diagnosis cage games approach' },
+
+  // ---- Examples: few-shot, in Skip's voice ----
+  { type: 'example', title: 'Slumping, crowded head',
+    body: 'Hitter: "I\'m thinking about everything up there."\nSkip: "That\'s the whole problem — three thoughts means zero commitment. Tonight it\'s Pick a Spot: left-center gap, heater timing, and you don\'t come off it. One target. You in?"',
+    tags: 'example slump overthinking' },
+  { type: 'example', title: 'Rolling over',
+    body: 'Hitter: "I keep rolling over everything pull-side."\nSkip: "That\'s your bat wrapping around your head at launch — you\'re starting the turn too early. Think \'swing down the line\' and let the barrel trace it. One round of side flips, line drives only, then tell me what changed."',
+    tags: 'example mechanics rolling-over cue' },
+  { type: 'example', title: "Coaching off their own words",
+    body: 'Hitter: "When I\'m going good I feel like I\'m staying inside it."\nSkip: "Then that\'s your cue — \'stay inside it\' is YOUR language and it works. Next round, say it to yourself before every swing and grade yourself 1-10 on it after. What score are you giving today\'s round?"',
+    tags: 'example their-words' },
+];
+
+// ---------------------------------------------------------------------------
+// Setup: table, seed, and one-time migration of the legacy notes blob.
+// ---------------------------------------------------------------------------
+function ensureBrain(db, getSetting, setSetting) {
+  db.exec(`
+CREATE TABLE IF NOT EXISTS skip_library (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  type TEXT NOT NULL,
+  title TEXT NOT NULL DEFAULT '',
+  body TEXT NOT NULL DEFAULT '',
+  tags TEXT NOT NULL DEFAULT '',
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_library_type ON skip_library(type, active);
+`);
+  const count = db.prepare('SELECT COUNT(*) AS n FROM skip_library').get().n;
+  if (count === 0) {
+    const now = new Date().toISOString();
+    const ins = db.prepare(
+      'INSERT INTO skip_library (type, title, body, tags, active, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)'
+    );
+    for (const e of SEED_ENTRIES) ins.run(e.type, e.title, e.body, e.tags, now, now);
+    console.log(`BRAIN: seeded ${SEED_ENTRIES.length} library entries.`);
+  }
+  // One-time migration: split the legacy free-text blob into discrete notes
+  // so Bobby's past training survives as individual, archivable entries.
+  const legacy = (getSetting('coach_notes') || '').trim();
+  if (legacy) {
+    const chunks = legacy.split(/\n\s*\n/).map((s) => s.trim()).filter(Boolean);
+    const now = new Date().toISOString();
+    const ins = db.prepare(
+      'INSERT INTO skip_library (type, title, body, tags, active, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)'
+    );
+    for (const c of chunks) {
+      ins.run('note', c.split('\n')[0].slice(0, 80) || 'Imported note', c, 'imported', now, now);
+    }
+    setSetting('coach_notes', '');
+    console.log(`BRAIN: migrated ${chunks.length} legacy note(s) into the library.`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Retrieval: rules always; other entries only when relevant to the message.
+// ---------------------------------------------------------------------------
+const STOPWORDS = new Set(
+  'a,an,the,and,or,but,if,then,else,for,to,of,in,on,at,by,with,from,as,is,are,was,were,be,been,being,do,does,did,doing,have,has,had,having,will,would,can,could,should,my,me,i,you,he,she,it,we,they,this,that,these,those,what,when,where,how,why,not,no,yes,so,just,like,get,got,go,going,went,im,ive,dont,cant,wont,there,here,very,really,always,never'.split(',')
+);
+
+function tokens(s) {
+  return (String(s || '').toLowerCase().match(/[a-z']+/g) || [])
+    .map((t) => t.replace(/'s$/, ''))
+    .filter((t) => t.length > 2 && !STOPWORDS.has(t));
+}
+
+function relevantEntries(db, message, limit = 5) {
+  const rows = db
+    .prepare("SELECT id, type, title, body, tags FROM skip_library WHERE active = 1 AND type != 'rule' ORDER BY id")
+    .all();
+  const msgTokens = [...new Set(tokens(message))];
+  if (!msgTokens.length || !rows.length) return [];
+  return rows
+    .map((r) => {
+      const hay = `${r.title} ${r.body} ${r.tags}`.toLowerCase();
+      let score = 0;
+      for (const t of msgTokens) if (hay.includes(t)) score += t.length > 5 ? 2 : 1;
+      return { r, score };
+    })
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map((x) => x.r);
+}
+
+function rulesEntries(db) {
+  return db
+    .prepare("SELECT id, type, title, body FROM skip_library WHERE active = 1 AND type = 'rule' ORDER BY id")
+    .all();
+}
+
+// The block injected into Skip's system prompt for a hitter chat.
+function libraryBlock(db, message) {
+  const rules = rulesEntries(db);
+  const rel = relevantEntries(db, message, 5);
+  if (!rules.length && !rel.length) return '';
+  const fmt = (e) => `- [${e.type.toUpperCase()}] ${e.title}: ${e.body}`;
+  let out = "BOBBY'S PLAYBOOK — knowledge from Bobby Atkinson, your head coach. The rules always apply; use the other entries only when relevant to what the hitter just said, never force one in:\n";
+  out += rules.map(fmt).join('\n');
+  if (rel.length) out += '\n' + rel.map(fmt).join('\n');
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// CRUD for the Train Skip page.
+// ---------------------------------------------------------------------------
+function listEntries(db) {
+  return db
+    .prepare('SELECT id, type, title, body, tags, active, updated_at FROM skip_library ORDER BY type, id')
+    .all();
+}
+
+function addEntry(db, { type, title, body, tags }) {
+  if (!LIB_TYPES.includes(type)) throw new Error('bad_type');
+  const now = new Date().toISOString();
+  return db
+    .prepare(
+      'INSERT INTO skip_library (type, title, body, tags, active, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)'
+    )
+    .run(type, String(title || '').trim().slice(0, 120), String(body || '').trim().slice(0, 2000), String(tags || '').trim().slice(0, 200), now, now);
+}
+
+function updateEntry(db, id, { title, body, tags }) {
+  db.prepare(
+    'UPDATE skip_library SET title = ?, body = ?, tags = ?, updated_at = ? WHERE id = ?'
+  ).run(
+    String(title || '').trim().slice(0, 120),
+    String(body || '').trim().slice(0, 2000),
+    String(tags || '').trim().slice(0, 200),
+    new Date().toISOString(),
+    id
+  );
+}
+
+function setEntryActive(db, id, active) {
+  db.prepare('UPDATE skip_library SET active = ?, updated_at = ? WHERE id = ?')
+    .run(active ? 1 : 0, new Date().toISOString(), id);
+}
+
+// ---------------------------------------------------------------------------
+// Per-hitter durable memory: what Skip has learned about a hitter over time.
+// Bobby writes these on the hitter's coach page; they inject into every chat.
+// ---------------------------------------------------------------------------
+function listMemory(db, userId) {
+  return db
+    .prepare('SELECT id, fact, created_at FROM hitter_memory WHERE user_id = ? ORDER BY created_at DESC')
+    .all(userId);
+}
+
+function addMemory(db, userId, fact) {
+  const f = String(fact || '').trim().slice(0, 500);
+  if (!f) return null;
+  return db
+    .prepare('INSERT INTO hitter_memory (user_id, fact, created_at) VALUES (?, ?, ?)')
+    .run(userId, f, new Date().toISOString());
+}
+
+function deleteMemory(db, id) {
+  db.prepare('DELETE FROM hitter_memory WHERE id = ?').run(id);
+}
+
+// Injected into Skip's prompt: durable learnings about THIS hitter.
+function memoryBlock(db, userId, firstName) {
+  const mems = listMemory(db, userId);
+  if (!mems.length) return '';
+  const name = firstName || 'this hitter';
+  return `WHAT YOU'VE LEARNED ABOUT ${name.toUpperCase()} OVER TIME (durable memory — trust this like your own coaching notebook):\n` +
+    mems.map((m) => `- ${m.fact}`).join('\n');
+}
+
+module.exports = {
+  LIB_TYPES,
+  TYPE_LABELS,
+  SEED_ENTRIES,
+  ensureBrain,
+  libraryBlock,
+  relevantEntries,
+  rulesEntries,
+  listEntries,
+  addEntry,
+  updateEntry,
+  setEntryActive,
+  listMemory,
+  addMemory,
+  deleteMemory,
+  memoryBlock,
+};

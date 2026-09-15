@@ -137,6 +137,20 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
 CREATE INDEX IF NOT EXISTS idx_reset_user ON password_reset_tokens(user_id);
 `);
 
+// Skip's durable memory per hitter: what Skip has learned about this hitter
+// over time (their best-day patterns, cues that work for them, slump fixes).
+// Written by Bobby on the hitter's coach page; injected into every Skip chat
+// with that hitter. This is how Skip "learns hitters over time."
+db.exec(`
+CREATE TABLE IF NOT EXISTS hitter_memory (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  fact TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_memory_user ON hitter_memory(user_id);
+`);
+
 // Coach settings: key/value store (e.g. Bobby's coaching notes for Skip).
 db.exec(`
 CREATE TABLE IF NOT EXISTS settings (

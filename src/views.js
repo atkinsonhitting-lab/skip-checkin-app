@@ -501,7 +501,7 @@ function coachDashboard(user, userStats, latest, pending) {
   });
 }
 
-function coachUser(user, name, checkins, stats, thoughts, thread, email) {
+function coachUser(user, name, checkins, stats, thoughts, thread, email, memories) {
   const skipImg = `<img src="/skip-avatar.webp" class="skip-avatar" alt="Skip">`;
   const convo =
     thread && thread.length
@@ -521,11 +521,34 @@ function coachUser(user, name, checkins, stats, thoughts, thread, email) {
     tabs: coachTabs('dashboard', user.approvalCount),
     body: `<h1 class="page-title">${esc(name)}</h1>
     <p><a href="/coach">← Back to dashboard</a></p>
+    ${memorySection(email, memories)}
     ${whatWorksSection(stats || [], thoughts || [], null, 0)}
     ${convo}
     ${checkins.length ? checkins.map(checkinCard).join('') : '<div class="card empty">No check-ins yet.</div>'}
     <p style="margin-top:28px;text-align:center"><a href="/coach/user/${encodeURIComponent(email)}/delete" style="color:#8a8a8a;font-size:14px">Delete hitter from the platform</a></p>`,
   });
+}
+
+// What Skip has learned about this hitter over time — Bobby's durable notes,
+// injected into every Skip chat with this hitter. This is how Skip learns hitters.
+function memorySection(email, memories) {
+  const items = (memories || [])
+    .map(
+      (m) => `<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <div>${esc(m.fact)}</div>
+        <form method="post" action="/coach/user/${encodeURIComponent(email)}/memory/${m.id}/delete" style="margin:0">
+          <button type="submit" class="btn-primary" style="padding:4px 10px;font-size:12px;background:#5a5a5a">Remove</button>
+        </form>
+      </div>`
+    )
+    .join('');
+  return `<h2 class="section-head">What Skip has learned about this hitter</h2>
+  <p class="hint">Durable memory — Skip reads this before every chat with this hitter. His best-day patterns, cues that work for him, what fixed his slumps. This is how he learns hitters over time.</p>
+  ${items || '<div class="card empty">Nothing saved yet.</div>'}
+  <div class="card"><form method="post" action="/coach/user/${encodeURIComponent(email)}/memory" class="form">
+    <label>Teach Skip something about this hitter<input name="fact" maxlength="500" required placeholder="e.g. When he's rolling over, the cue 'stay inside it' in his own words fixed it — use that before any mechanical cue."></label>
+    <button type="submit" class="btn-primary">Save to Skip's memory</button>
+  </form></div>`;
 }
 
 // Confirm page before permanently deleting a hitter.
@@ -547,7 +570,8 @@ function coachDeleteHitterPage(user, hitter, name, checkinCount) {
 }
 
 // ---- Train Skip: Bobby's HQ for training Skip and reviewing his chats ----
-function coachSkipPage(user, notes, hitters, thread, chatEnabled, saved) {
+function coachSkipPage(user, entries, hitters, thread, chatEnabled, saved) {
+  const brain = require('./brain');
   const skipImg = `<img src="/skip-avatar.webp" class="skip-avatar" alt="Skip">`;
   const msgs = (thread || [])
     .map(
@@ -577,13 +601,53 @@ function coachSkipPage(user, notes, hitters, thread, chatEnabled, saved) {
         )
         .join('')
     : '<div class="card empty">No hitter has talked to Skip yet.</div>';
+
+  // Skip's Brain: entries grouped by type, each with edit + archive/restore.
+  const typeOrder = brain.LIB_TYPES;
+  const grouped = {};
+  for (const e of entries || []) (grouped[e.type] = grouped[e.type] || []).push(e);
+  const brainSections = typeOrder
+    .map((t) => {
+      const list = grouped[t] || [];
+      if (!list.length) return '';
+      const cards = list
+        .map(
+          (e) => `<div class="card" style="${e.active ? '' : 'opacity:0.55'}">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
+          <strong>${esc(e.title)}${e.active ? '' : ' (archived)'}</strong>
+          <form method="post" action="/coach/skip/brain/${e.id}/archive" style="margin:0">
+            <input type="hidden" name="active" value="${e.active ? '0' : '1'}">
+            <button type="submit" class="btn-primary" style="padding:4px 10px;font-size:12px;background:${e.active ? '#5a5a5a' : '#1f7a33'}">${e.active ? 'Archive' : 'Restore'}</button>
+          </form>
+        </div>
+        <div class="hint" style="white-space:pre-wrap;margin:8px 0">${esc(e.body)}</div>
+        ${e.tags ? `<div class="hint">tags: ${esc(e.tags)}</div>` : ''}
+        <details style="margin-top:8px"><summary class="hint" style="cursor:pointer">Edit</summary>
+          <form method="post" action="/coach/skip/brain/${e.id}" class="form" style="margin-top:8px">
+            <label>Title<input name="title" value="${esc(e.title)}" maxlength="120" required></label>
+            <label>Body<textarea name="body" rows="3" maxlength="2000" required>${esc(e.body)}</textarea></label>
+            <label>Tags (space-separated, used for matching)<input name="tags" value="${esc(e.tags)}" maxlength="200"></label>
+            <button type="submit" class="btn-primary" style="padding:6px 12px;font-size:13px">Save changes</button>
+          </form>
+        </details>
+      </div>`
+        )
+        .join('');
+      return `<h3 class="section-head" style="font-size:16px">${brain.TYPE_LABELS[t]} (${list.length})</h3>${cards}`;
+    })
+    .join('');
+
+  const typeOptions = typeOrder
+    .map((t) => `<option value="${t}">${brain.TYPE_LABELS[t].replace(/s$/, '')}</option>`)
+    .join('');
+
   return layout({
     title: 'Train Skip',
     user,
     tabs: coachTabs('skip', user.approvalCount),
     body: `<h1 class="page-title">Train Skip</h1>
-    <p class="hint">Talk to Skip directly to train him. What you tell him shapes this conversation — <strong>save it in your coaching notes</strong> and he'll apply it to every hitter.</p>
-    ${saved ? '<div class="notice">Coaching notes saved — Skip is using them with every hitter now.</div>' : ''}
+    <p class="hint">Talk to Skip directly. To make training <strong>stick</strong>, put it in his Brain below — small discrete entries he pulls from when they're relevant. That's what fixed the "more training = worse Skip" problem: no more one giant note.</p>
+    ${saved ? '<div class="notice">Brain updated — Skip is using it with every hitter now.</div>' : ''}
     <h2 class="section-head">Talk to Skip</h2>
     ${
       chatEnabled
@@ -597,19 +661,31 @@ function coachSkipPage(user, notes, hitters, thread, chatEnabled, saved) {
         </form>`
         : `<div class="card empty">Skip's chat isn't switched on yet — check back soon.</div>`
     }
-    <h2 class="section-head">Coaching notes</h2>
+    <h2 class="section-head">Log a correction</h2>
     <div class="card">
-      <p class="hint">These get injected into Skip's instructions for <strong>every</strong> hitter chat. Keep them tight — rules, corrections, cues you want him using.</p>
-      <form method="post" action="/coach/skip/notes" class="form">
-        <label>Notes for Skip<textarea name="notes" rows="6" maxlength="8000" placeholder="e.g. Never tell a hitter to change their stance in-season. Always ask about their plan at the plate before touching mechanics.">${esc(
-          notes
-        )}</textarea></label>
-        <button type="submit" class="btn-primary">Save notes</button>
+      <p class="hint">Skip got something wrong with a hitter? Log it here — it becomes an <strong>example</strong> in his Brain so the fix sticks. This is the fastest way to train him now.</p>
+      <form method="post" action="/coach/skip/correction" class="form">
+        <label>What the hitter said<input name="hitter_said" maxlength="500" placeholder="e.g. I'm rolling over everything"></label>
+        <label>What Skip said (wrong)<input name="skip_said" maxlength="500" placeholder="e.g. Widen your stance"></label>
+        <label>What he should have said<textarea name="should_say" rows="3" maxlength="1000" required placeholder="e.g. That's the bat wrapping around your head at launch — think 'swing down the line'..."></textarea></label>
+        <button type="submit" class="btn-primary">Save correction</button>
       </form>
     </div>
+    <h2 class="section-head">Skip's Brain</h2>
+    <div class="card">
+      <p class="hint"><strong>Rules</strong> always apply. Everything else is pulled in only when it matches what the hitter is talking about. Archive anything stale instead of deleting — you can restore it.</p>
+      <form method="post" action="/coach/skip/brain" class="form">
+        <label>Type<select name="type">${typeOptions}</select></label>
+        <label>Title<input name="title" maxlength="120" required placeholder="e.g. Bat drag fix"></label>
+        <label>Body<textarea name="body" rows="3" maxlength="2000" required placeholder="The cue, read, or rule — keep it to a sentence or two."></textarea></label>
+        <label>Tags (space-separated, used for matching)<input name="tags" maxlength="200" placeholder="e.g. mechanics bat-drag"></label>
+        <button type="submit" class="btn-primary">Add to Brain</button>
+      </form>
+    </div>
+    ${brainSections}
     <h2 class="section-head">His conversations</h2>
     <div class="athlete-grid">${convos}</div>
-    <p class="hint">Tap a hitter to read their full thread with Skip.</p>`,
+    <p class="hint">Tap a hitter to read their full thread with Skip — and to teach Skip what he's learning about that hitter over time.</p>`,
   });
 }
 
