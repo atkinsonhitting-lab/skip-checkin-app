@@ -197,4 +197,26 @@ if (!db.prepare("SELECT value FROM settings WHERE key = 'test_cleanup_e2e_202609
   console.log(`TEST CLEANUP (e2e): removed ${ids.length} account(s): ${victims.map((r) => r.email).join(', ') || 'none'}`);
 }
 
+// Learning log (Sep 15 2026): hitters save new things they're learning
+// about hitting (beyond session check-ins), plus the players they like
+// learning from and what they're stealing from each one.
+db.exec(`
+CREATE TABLE IF NOT EXISTS learning_notes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  note TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_learning_user_time ON learning_notes(user_id, created_at);
+CREATE TABLE IF NOT EXISTS study_players (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  player_name TEXT NOT NULL,
+  takeaway TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_players_user_time ON study_players(user_id, created_at);
+`);
+
 module.exports = db;

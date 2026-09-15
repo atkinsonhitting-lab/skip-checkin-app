@@ -54,6 +54,7 @@ function userTabs(active) {
     { href: '/', label: 'Home', active: active === 'home' },
     { href: '/checkin', label: 'Check In', active: active === 'checkin' },
     { href: '/routine', label: 'Routine', active: active === 'routine' },
+    { href: '/learn', label: 'Learn', active: active === 'learn' },
     { href: '/chat', label: 'Talk to Skip', active: active === 'chat' },
     { href: '/history', label: 'History', active: active === 'history' },
   ];
@@ -291,6 +292,74 @@ function routinePage(user, drills, error, drillNames, stations) {
           </form>
         </div>`).join('') : `<p class="hint">Nothing here yet.</p>`}
     </div>`).join('')}`,
+  });
+}
+
+const LEARN_CATEGORIES = ['Mechanics', 'Mental', 'Approach', 'Drills', 'Other'];
+
+function learnPage(user, notes, players) {
+  const catChips = LEARN_CATEGORIES.map(
+    (c, i) =>
+      `<label class="chip-radio"><input type="radio" name="category" value="${c}"${i === 0 ? ' checked' : ''}><span>${c}</span></label>`
+  ).join('');
+  const noteRows = (notes || [])
+    .map(
+      (n) => `<div class="learn-row">
+        <div class="learn-main">
+          ${n.category ? `<span class="badge env">${esc(n.category)}</span>` : ''}
+          <span class="learn-date hint-inline">${esc(String(n.created_at).slice(0, 10))}</span>
+          <p class="learn-text">${esc(n.note)}</p>
+        </div>
+        <form method="post" action="/learn/note/${n.id}/delete" class="routine-remove">
+          <button type="submit" class="btn-ghost btn-sm" aria-label="Delete note">Remove</button>
+        </form>
+      </div>`
+    )
+    .join('');
+  const playerRows = (players || [])
+    .map(
+      (p) => `<div class="learn-row">
+        <div class="learn-main">
+          <strong class="learn-player">${esc(p.player_name)}</strong>
+          ${p.takeaway ? `<p class="learn-text">&ldquo;${esc(p.takeaway)}&rdquo;</p>` : ''}
+        </div>
+        <form method="post" action="/learn/player/${p.id}/delete" class="routine-remove">
+          <button type="submit" class="btn-ghost btn-sm" aria-label="Delete player">Remove</button>
+        </form>
+      </div>`
+    )
+    .join('');
+  return layout({
+    title: 'Learn',
+    user,
+    tabs: userTabs('learn'),
+    body: `<h1 class="page-title">What I'm learning</h1>
+    <div class="card"><p class="hint skip-intro">Your hitting notebook — save new things you're figuring out, not just session check-ins. Skip reads this too.</p>
+    <form method="post" action="/learn/note" class="form">
+      <label>Something new I'm learning
+        <textarea name="note" rows="2" maxlength="1000" placeholder="e.g. Keeping my front shoulder closed longer lets me stay through it" required></textarea>
+      </label>
+      <div class="chip-row">${catChips}</div>
+      <button type="submit" class="btn-primary">Save it</button>
+    </form></div>
+    <div class="card">
+      <h2 class="routine-station">My notes</h2>
+      ${noteRows || `<p class="hint">Nothing saved yet. When something clicks — a cue, a feel, an idea — put it here.</p>`}
+    </div>
+    <div class="card"><p class="hint skip-intro">Players you study. Skip will connect his coaching to the guys you look up to.</p>
+    <form method="post" action="/learn/player" class="form">
+      <label>Player
+        <input name="player_name" maxlength="80" placeholder="e.g. Mookie Betts" required>
+      </label>
+      <label>What I'm stealing from them
+        <input name="takeaway" maxlength="300" placeholder="e.g. Short to it, stays through it">
+      </label>
+      <button type="submit" class="btn-primary">Add player</button>
+    </form></div>
+    <div class="card">
+      <h2 class="routine-station">Players I study</h2>
+      ${playerRows || `<p class="hint">No players yet. Add the hitters you watch and learn from.</p>`}
+    </div>`,
   });
 }
 
@@ -754,6 +823,7 @@ module.exports = {
   userHome,
   checkinForm,
   routinePage,
+  learnPage,
   scorePage,
   historyPage,
   chatPage,

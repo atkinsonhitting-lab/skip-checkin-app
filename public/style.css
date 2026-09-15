@@ -207,6 +207,20 @@ a:active { color: #ff3b30; }
 .level-head { margin: 12px 0; }
 .level-head .hint { margin-bottom: 6px; }
 .level-hero-meter { margin: 16px auto; max-width: 440px; }
+/* Learn page — hitting notebook + players studied */
+.chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.chip-radio input { display: none; }
+.chip-radio span {
+  display: inline-block; padding: 7px 14px; border-radius: 999px; font-size: 13px; font-weight: 700;
+  background: var(--bg2); border: 1px solid var(--line); color: var(--muted); cursor: pointer;
+}
+.chip-radio input:checked + span { background: rgba(225,6,0,.15); border-color: var(--red); color: #ff6b61; }
+.learn-row { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.learn-row:last-child { border-bottom: none; }
+.learn-main { flex: 1; }
+.learn-text { margin: 6px 0 0; font-size: 15px; }
+.learn-player { font-size: 16px; }
+.learn-date { margin-left: 8px; }
 .checkin-score { display: flex; align-items: center; gap: 10px; margin: 8px 0; flex-wrap: wrap; }
 .checkin-score .level-row { flex: 1; min-width: 180px; margin: 0; }
 .score-inline { color: var(--red); font-weight: 800; }

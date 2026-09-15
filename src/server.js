@@ -562,6 +562,54 @@ app.post('/routine/remove', requireLogin, (req, res) => {
   res.redirect('/routine');
 });
 
+// ---- Learn: hitting notebook + players studied ----
+app.get('/learn', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.redirect('/coach');
+  const notes = db
+    .prepare('SELECT * FROM learning_notes WHERE user_id = ? ORDER BY created_at DESC')
+    .all(req.user.id);
+  const players = db
+    .prepare('SELECT * FROM study_players WHERE user_id = ? ORDER BY created_at DESC')
+    .all(req.user.id);
+  res.send(views.learnPage(req.user, notes, players));
+});
+
+app.post('/learn/note', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.status(403).send('Forbidden');
+  const note = String(req.body.note || '').trim().slice(0, 1000);
+  const category = String(req.body.category || '').trim().slice(0, 24);
+  if (note) {
+    db.prepare(
+      "INSERT INTO learning_notes (user_id, note, category, created_at) VALUES (?, ?, ?, datetime('now'))"
+    ).run(req.user.id, note, category);
+  }
+  res.redirect('/learn');
+});
+
+app.post('/learn/player', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.status(403).send('Forbidden');
+  const playerName = String(req.body.player_name || '').trim().slice(0, 80);
+  const takeaway = String(req.body.takeaway || '').trim().slice(0, 300);
+  if (playerName) {
+    db.prepare(
+      "INSERT INTO study_players (user_id, player_name, takeaway, created_at) VALUES (?, ?, ?, datetime('now'))"
+    ).run(req.user.id, playerName, takeaway);
+  }
+  res.redirect('/learn');
+});
+
+app.post('/learn/note/:id/delete', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.status(403).send('Forbidden');
+  db.prepare('DELETE FROM learning_notes WHERE id = ? AND user_id = ?').run(req.params.id, req.user.id);
+  res.redirect('/learn');
+});
+
+app.post('/learn/player/:id/delete', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.status(403).send('Forbidden');
+  db.prepare('DELETE FROM study_players WHERE id = ? AND user_id = ?').run(req.params.id, req.user.id);
+  res.redirect('/learn');
+});
+
 app.get('/checkin/score/:id', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
   const row = db
@@ -771,7 +819,7 @@ app.post('/coach/user/:email/delete', requireCoach, (req, res) => {
 
 // Remove a hitter and everything they created: check-ins, chats, routine, tokens.
 function deleteHitter(userId) {
-  for (const t of ['chat_messages', 'checkins', 'routine_drills', 'password_reset_tokens', 'hitter_memory']) {
+  for (const t of ['chat_messages', 'checkins', 'routine_drills', 'password_reset_tokens', 'hitter_memory', 'learning_notes', 'study_players']) {
     db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(userId);
   }
   db.prepare('DELETE FROM users WHERE id = ?').run(userId);
@@ -1098,6 +1146,24 @@ function skipDataBlock(userId) {
   const u = db.prepare('SELECT first_name FROM users WHERE id = ?').get(userId) || {};
   const mem = brain.memoryBlock(db, userId, u.first_name);
   const memBlock = mem ? `\n${mem}` : '';
+  const learnRows = db
+    .prepare(
+      "SELECT note, category, substr(created_at,1,10) AS d FROM learning_notes WHERE user_id = ? ORDER BY created_at DESC LIMIT 10"
+    )
+    .all(userId);
+  const playerRows = db
+    .prepare('SELECT player_name, takeaway FROM study_players WHERE user_id = ? ORDER BY created_at DESC LIMIT 10')
+    .all(userId);
+  const learnBlock = learnRows.length
+    ? `\nWHAT HE'S LEARNING (his own words — weave this into your coaching):\n${learnRows
+        .map((r) => `- ${r.d}${r.category ? ` (${r.category})` : ''}: "${String(r.note).slice(0, 200)}"`)
+        .join('\n')}`
+    : '';
+  const playersBlock = playerRows.length
+    ? `\nPLAYERS HE STUDIES (connect your coaching to these guys):\n${playerRows
+        .map((r) => `- ${r.player_name}${r.takeaway ? ` — "${String(r.takeaway).slice(0, 200)}"` : ''}`)
+        .join('\n')}`
+    : '';
   return snap.lines.length
     ? `HITTER DATA (newest first):\n${snap.lines.join('\n')}\nSessions logged: ${snap.total}${
         snap.avg != null ? ` · Average level: ${scoreTier(snap.avg)}` : ''
@@ -1109,7 +1175,7 @@ function skipDataBlock(userId) {
         snap.bestDay
           ? `\nHIS BEST DAY — when he's struggling, take him back to exactly this (this is your #1 job):\n${snap.bestDay}`
           : ''
-      }${memBlock}`
+      }${memBlock}${learnBlock}${playersBlock}`
     : 'HITTER DATA: no check-ins logged yet — this is a brand-new hitter. Ask what they are working on.';
 }
 
