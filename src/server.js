@@ -722,20 +722,35 @@ function getProgram(id) {
   if (!prog || typeof prog !== 'object') prog = {};
   return { id: row.id, athlete_name: row.athlete_name, updated_at: row.updated_at, prog };
 }
+// Find the remote program for a hitter's name, honoring aliases
+// ("Samuel Chapman" links to the "Sam Chapman" program).
+function remoteProgramForName(name) {
+  const target = String(name || '').trim().toLowerCase();
+  if (!target) return null;
+  const rows = db.prepare('SELECT id, athlete_name, aliases FROM remote_programs').all();
+  for (const r of rows) {
+    const names = [r.athlete_name, ...String(r.aliases || '').split('\n')]
+      .map((x) => String(x).trim().toLowerCase())
+      .filter(Boolean);
+    if (names.includes(target)) return r.id;
+  }
+  return null;
+}
 function linkRemoteProgram(userId, athleteName) {
-  const prog = db
-    .prepare('SELECT id FROM remote_programs WHERE lower(athlete_name) = lower(?)')
-    .get(String(athleteName || '').trim());
-  if (prog) db.prepare('UPDATE users SET remote_program_id = ? WHERE id = ?').run(prog.id, userId);
+  const id = remoteProgramForName(athleteName);
+  if (id) db.prepare('UPDATE users SET remote_program_id = ? WHERE id = ?').run(id, userId);
 }
 function backfillRemoteLinks() {
-  const link = db.prepare(
-    `UPDATE users SET remote_program_id = ?
-     WHERE remote_program_id IS NULL AND role = 'athlete'
-     AND lower(first_name || ' ' || last_name) = lower(?)`
-  );
-  for (const r of db.prepare('SELECT id, athlete_name FROM remote_programs').all()) {
-    link.run(r.id, r.athlete_name);
+  const users = db
+    .prepare(
+      `SELECT id, first_name, last_name FROM users
+       WHERE remote_program_id IS NULL AND role = 'athlete'`
+    )
+    .all();
+  const upd = db.prepare('UPDATE users SET remote_program_id = ? WHERE id = ?');
+  for (const u of users) {
+    const id = remoteProgramForName((u.first_name || '') + ' ' + (u.last_name || ''));
+    if (id) upd.run(id, u.id);
   }
 }
 
@@ -847,6 +862,24 @@ app.post('/coach/remote/remove', requireCoach, (req, res) => {
   if (id) {
     db.prepare('UPDATE users SET remote_program_id = NULL WHERE remote_program_id = ?').run(id);
     db.prepare('DELETE FROM remote_programs WHERE id = ?').run(id);
+  }
+  res.redirect('/coach');
+});
+
+app.post('/coach/remote/alias', requireCoach, (req, res) => {
+  const id = Number(req.body.id);
+  const alias = String(req.body.alias || '').trim().slice(0, 80);
+  if (id && alias) {
+    const row = db.prepare('SELECT aliases FROM remote_programs WHERE id = ?').get(id);
+    if (row) {
+      const cur = String(row.aliases || '')
+        .split('\n')
+        .map((x) => x.trim())
+        .filter(Boolean);
+      if (!cur.map((x) => x.toLowerCase()).includes(alias.toLowerCase())) cur.push(alias);
+      db.prepare('UPDATE remote_programs SET aliases = ? WHERE id = ?').run(cur.join('\n'), id);
+      backfillRemoteLinks(); // link anyone waiting under this name right away
+    }
   }
   res.redirect('/coach');
 });
@@ -1141,7 +1174,7 @@ app.get('/coach', requireCoach, (req, res) => {
   const pending = pendingList();
   const remotePrograms = db
     .prepare(
-      `SELECT p.id, p.athlete_name, p.updated_at,
+      `SELECT p.id, p.athlete_name, p.aliases, p.updated_at,
               (SELECT email FROM users WHERE remote_program_id = p.id LIMIT 1) AS user_email
        FROM remote_programs p ORDER BY p.athlete_name`
     )

@@ -842,8 +842,21 @@ function remoteProgramsSection(list) {
         ? `<span class="pill">${esc(r.user_email)}</span>`
         : '<span class="hint-inline">no account yet</span>';
       const updated = r.updated_at ? ` · updated ${esc(r.updated_at.slice(0, 10))}` : '';
+      const aliasNames = String(r.aliases || '')
+        .split('\n')
+        .map((x) => x.trim())
+        .filter(Boolean);
+      const aliasLine = aliasNames.length
+        ? `<div class="hint-inline">also: ${aliasNames.map((a) => esc(a)).join(', ')}</div>`
+        : '';
       return `<div class="remote-row">
-        <div><strong>${esc(r.athlete_name)}</strong><div class="hint-inline">${linked}${updated}</div></div>
+        <div><strong>${esc(r.athlete_name)}</strong><div class="hint-inline">${linked}${updated}</div>${aliasLine}
+          <form method="post" action="/coach/remote/alias" class="inline-form" style="margin-top:4px">
+            <input type="hidden" name="id" value="${r.id}">
+            <input type="text" name="alias" placeholder="also known as" maxlength="80" class="input-sm" style="max-width:130px">
+            <button class="btn btn-sm" type="submit">Add name</button>
+          </form>
+        </div>
         <div class="remote-actions">
           <a class="btn btn-sm" href="/coach/program/${r.id}/edit">Edit program</a>
           ${

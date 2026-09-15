@@ -125,6 +125,19 @@ db.exec(`CREATE TABLE IF NOT EXISTS remote_programs (
     db.exec('ALTER TABLE users ADD COLUMN remote_program_id INTEGER;');
   }
 }
+// Aliases: alternate names a remote hitter might sign up under
+// ("Samuel Chapman" vs "Sam Chapman"). Newline-separated. Signup linking
+// and the boot backfill match against these too.
+{
+  const cols = db.prepare('PRAGMA table_info(remote_programs)').all().map((c) => c.name);
+  if (!cols.includes('aliases')) {
+    db.exec("ALTER TABLE remote_programs ADD COLUMN aliases TEXT DEFAULT '';");
+  }
+  db.prepare(
+    `UPDATE remote_programs SET aliases = 'Samuel Chapman'
+     WHERE lower(athlete_name) = 'sam chapman' AND (aliases IS NULL OR aliases = '')`
+  ).run();
+}
 // Seed the 4 remote programs from the bundled snapshots (first boot only —
 // Bobby's in-app edits are never overwritten). Then link any existing
 // accounts whose name matches, so a remote guy who already signed up just
