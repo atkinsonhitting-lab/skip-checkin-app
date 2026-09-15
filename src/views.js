@@ -52,6 +52,11 @@ function layout({ title, user, tabs, body }) {
 ${drawer}
 ${user && user.viewAs ? `<div class="viewas-banner">Previewing as <strong>${esc(user.viewAsName)}</strong> — actions are disabled. <form method="post" action="/coach/view-as/exit" style="display:inline;margin:0"><button type="submit" class="viewas-exit">Exit preview</button></form></div>` : ''}
 <main class="wrap">${body}</main>
+${(() => {
+  const chatTab = (tabs || []).find((t) => t.href === '/chat');
+  if (!chatTab || chatTab.active) return '';
+  return `<a href="/chat" class="skip-fab" aria-label="Talk to Coach Skip"><img src="/skip-avatar.webp" alt="Skip"><span class="skip-fab-bubble" aria-hidden="true">\uD83D\uDCAC</span></a>`;
+})()}
 <script src="/app.js"></script>
 </body>
 </html>`;
