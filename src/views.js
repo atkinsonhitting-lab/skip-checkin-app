@@ -864,37 +864,55 @@ function programRoutinePage(user, p) {
   });
 }
 
-// Hitter-facing: Mental Game — Skip's baseline of the hitter's mental routines,
-// so he can recommend practices when the hitter feels sped up. All hitters.
-function mentalGamePage(user, baseline, saved) {
+// Hitter-facing: Mental Game — gauge questions + baseline, then Skip builds the
+// hitter a personal plan. All hitters.
+function mentalGamePage(user, baseline, saved, planFailed) {
   const b = baseline || {};
+  const radio = (name, options) => `
+    <div class="chip-row">${options
+      .map(
+        ([val, label]) =>
+          `<label class="chip-radio"><input type="radio" name="${name}" value="${esc(val)}"${
+            b[name] === val ? ' checked' : ''
+          }><span>${esc(label)}</span></label>`
+      )
+      .join('')}</div>`;
   const fld = (name, label, hint, val) => `
     <label class="fld">${esc(label)}<span class="hint">${esc(hint)}</span>
       <textarea name="${name}" rows="2" maxlength="600" placeholder="${esc(hint)}">${esc(val || '')}</textarea>
     </label>`;
+  const planHtml = b.plan
+    ? `<div class="card"><h2 class="routine-station">Your mental game plan</h2><p style="white-space:pre-wrap;margin:0">${esc(b.plan)}</p></div>`
+    : '';
   return layout({
     title: 'Mental Game',
     user,
     tabs: userTabs('mental', user),
     body: `<h1 class="page-title">Mental Game</h1>
-    <p class="lede">Tell Coach Skip what you already do — he'll build on it when you need him.</p>
-    ${saved ? '<div class="notice">Saved — Skip knows your baseline now.</div>' : ''}
+    <p class="lede">Answer honestly — Coach Skip gauges where your head's at and builds your plan from it.</p>
+    ${saved ? '<div class="notice">Saved — Skip built your plan below.</div>' : ''}
+    ${planFailed ? '<div class="notice">Baseline saved, but the plan didn\u2019t come through — tap the button again.</div>' : ''}
+    ${planHtml}
     <form method="post" action="/mental-game/save" class="form">
       <div class="card">
+        <p class="field-label">Do you have a routine you actually trust?</p>
+        ${radio('has_routine', [['yes', 'Yes — it\u2019s automatic'], ['sortof', 'Sort of — sometimes'], ['no', 'No routine yet']])}
+        <p class="field-label">In games, where's your head usually?</p>
+        ${radio('head_state', [['present', 'Present — I\u2019m seeing it'], ['between', 'In between'], ['worried', 'Worried — thinking about results']])}
         ${fld('pregame_routine', 'Pre-game routine', 'Do you have one? Walk through it.', b.pregame_routine)}
         ${fld('morning_routine', 'Morning routine', 'Game day or every day — what does it look like?', b.morning_routine)}
         ${fld('breath_work', 'Breath work', 'Do you do any? What kind?', b.breath_work)}
         ${fld('when_sped_up', 'When you feel sped up', 'Rushed in a game — what do you do right now?', b.when_sped_up)}
       </div>
-      <p><button type="submit" class="btn btn-primary">Save my baseline</button></p>
+      <p><button type="submit" class="btn btn-primary">Save & build my plan</button></p>
     </form>
     <div class="card">
-      <p style="margin:0">Feeling sped up or rushing? <a href="/chat">Talk to Coach Skip →</a> — he'll give you one thing to lock back in, built on what you wrote above.</p>
+      <p style="margin:0">Feeling sped up or rushing in a game? <a href="/chat">Talk to Coach Skip →</a> — he'll give you one thing to lock back in.</p>
     </div>`,
   });
 }
 
-// Coach-facing: edit a remote hitter's program.
+// Coach-facing: edit a remote hitter's program.// Coach-facing: edit a remote hitter's program.
 function programEditPage(user, p) {
   const prog = p.prog || {};
   const grades = prog.grades && typeof prog.grades === 'object' ? prog.grades : {};

@@ -413,9 +413,19 @@ CREATE TABLE IF NOT EXISTS mental_baseline (
   morning_routine TEXT NOT NULL DEFAULT '',
   breath_work TEXT NOT NULL DEFAULT '',
   when_sped_up TEXT NOT NULL DEFAULT '',
+  has_routine TEXT NOT NULL DEFAULT '',
+  head_state TEXT NOT NULL DEFAULT '',
+  plan TEXT NOT NULL DEFAULT '',
   updated_at TEXT NOT NULL DEFAULT ''
 );
 `);
+{
+  // Migrate older mental_baseline tables (created before the gauge questions + plan).
+  const cols = db.prepare('PRAGMA table_info(mental_baseline)').all().map((c) => c.name);
+  for (const c of ['has_routine', 'head_state', 'plan']) {
+    if (!cols.includes(c)) db.exec(`ALTER TABLE mental_baseline ADD COLUMN ${c} TEXT NOT NULL DEFAULT '';`);
+  }
+}
 
 // Coach feed REMOVED Sep 15 2026 (Bobby: Learn tab is a personal notebook, no social layer).
 // Drop the tables if a previous deploy created them.

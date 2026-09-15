@@ -800,23 +800,59 @@ function getMentalBaseline(userId) {
 }
 app.get('/mental-game', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
-  res.send(views.mentalGamePage(req.user, getMentalBaseline(req.user.id), req.query.saved === '1'));
+  res.send(views.mentalGamePage(req.user, getMentalBaseline(req.user.id), req.query.saved === '1', req.query.planfailed === '1'));
 });
-app.post('/mental-game/save', requireLogin, (req, res) => {
+const MENTAL_PLAN_SYSTEM = `You are Coach Skip, a direct no-fluff hitting coach writing a hitter's personal mental-game plan. You just gauged where his head is at. Write the plan TO him ("you").
+
+Format exactly like this — short, plain, no fluff:
+READ: one honest sentence on where his mental game is at right now.
+DO THIS: 2-3 concrete practices, one per line starting with "- ". Anchor each to something he already does. If he has no routine, give him one tiny starter routine. If he's usually worried, give him one present-moment reset.
+WHEN YOU'RE SPED UP: one cue or breath reset for mid-game, one or two sentences.
+
+Keep the whole thing under 160 words. Never generic — use his words back at him.`;
+
+async function buildMentalPlan(baseline) {
+  const bits = [];
+  const routineWord = { yes: 'has a routine he trusts', sortof: 'sort of has a routine', no: 'has no routine' }[baseline.has_routine] || 'did not say';
+  const headWord = { present: 'usually present', between: 'in between', worried: 'usually worried' }[baseline.head_state] || 'did not say';
+  bits.push(`Routine: ${routineWord}. Head in games: ${headWord}.`);
+  if (baseline.pregame_routine) bits.push(`Pre-game routine: "${baseline.pregame_routine}"`);
+  if (baseline.morning_routine) bits.push(`Morning routine: "${baseline.morning_routine}"`);
+  if (baseline.breath_work) bits.push(`Breath work: "${baseline.breath_work}"`);
+  if (baseline.when_sped_up) bits.push(`What he does when sped up now: "${baseline.when_sped_up}"`);
+  return geminiText(MENTAL_PLAN_SYSTEM, `This hitter's mental-game baseline:\n${bits.join('\n')}`, 400);
+}
+
+app.post('/mental-game/save', requireLogin, async (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
   const b = req.body || {};
   const clean = (v) => String(v || '').trim().slice(0, 600);
+  const row = {
+    pregame_routine: clean(b.pregame_routine),
+    morning_routine: clean(b.morning_routine),
+    breath_work: clean(b.breath_work),
+    when_sped_up: clean(b.when_sped_up),
+    has_routine: ['yes', 'sortof', 'no'].includes(b.has_routine) ? b.has_routine : '',
+    head_state: ['present', 'between', 'worried'].includes(b.head_state) ? b.head_state : '',
+  };
+  let plan = (getMentalBaseline(req.user.id) || {}).plan || '';
+  let planFailed = false;
+  try {
+    plan = await buildMentalPlan(row);
+  } catch (e) {
+    planFailed = true;
+  }
   db.prepare(
-    `INSERT INTO mental_baseline (user_id, pregame_routine, morning_routine, breath_work, when_sped_up, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?)
+    `INSERT INTO mental_baseline (user_id, pregame_routine, morning_routine, breath_work, when_sped_up, has_routine, head_state, plan, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(user_id) DO UPDATE SET pregame_routine=excluded.pregame_routine, morning_routine=excluded.morning_routine,
-       breath_work=excluded.breath_work, when_sped_up=excluded.when_sped_up, updated_at=excluded.updated_at`
+       breath_work=excluded.breath_work, when_sped_up=excluded.when_sped_up, has_routine=excluded.has_routine,
+       head_state=excluded.head_state, plan=excluded.plan, updated_at=excluded.updated_at`
   ).run(
-    req.user.id,
-    clean(b.pregame_routine), clean(b.morning_routine), clean(b.breath_work), clean(b.when_sped_up),
-    new Date().toISOString()
+    req.user.id, row.pregame_routine, row.morning_routine, row.breath_work, row.when_sped_up,
+    row.has_routine, row.head_state, plan, new Date().toISOString()
   );
-  res.redirect('/mental-game?saved=1');
+  res.redirect(planFailed ? '/mental-game?planfailed=1' : '/mental-game?saved=1');
 });
 
 // Hitter's daily routine tab — every-day blocks of their program. Remote athletes only.
@@ -1732,6 +1768,10 @@ function skipDataBlock(userId) {
     if (mb.morning_routine) bits.push(`Morning routine: "${mb.morning_routine.slice(0, 200)}"`);
     if (mb.breath_work) bits.push(`Breath work: "${mb.breath_work.slice(0, 200)}"`);
     if (mb.when_sped_up) bits.push(`When he feels sped up now: "${mb.when_sped_up.slice(0, 200)}"`);
+    const routineWord = { yes: 'has a routine he trusts', sortof: 'sort of has a routine', no: 'has NO routine' }[mb.has_routine];
+    const headWord = { present: 'usually PRESENT in games', between: 'in between present and worried', worried: 'usually WORRIED in games (not present)' }[mb.head_state];
+    if (routineWord || headWord) bits.unshift(`Gauge: ${[routineWord, headWord].filter(Boolean).join(' · ')}`);
+    if (mb.plan) bits.push(`His mental-game plan (you wrote this — coach from it):\n${mb.plan.slice(0, 900)}`);
     mentalBlock = `\nMENTAL GAME BASELINE (what he already does — build on this, one small practice at a time):\n${bits.join('\n')}\nWhen he feels sped up or rushed in a game, recommend ONE concrete practice anchored to what he already does above. Never lecture — one thing, in his language.`;
   }
   return snap.lines.length
