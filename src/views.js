@@ -24,12 +24,12 @@ function layout({ title, user, tabs, body }) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-<title>${esc(title)} · The Hitter Lab</title>
+<title>${esc(title)} · The Daily Hitter</title>
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 <header class="topbar">
-  <div class="brand"><span class="brand-mark">H</span> THE HITTER LAB</div>
+  <div class="brand"><span class="brand-mark">D</span> THE DAILY HITTER</div>
   ${user ? `<div class="userbox">${esc(user.displayName)} · <a href="/logout">Log out</a></div>` : ''}
 </header>
 ${tabHtml ? `<nav class="tabs">${tabHtml}</nav>` : ''}
@@ -61,8 +61,8 @@ function loginPage(error, notice) {
     user: null,
     tabs: [],
     body: `<div class="login-card card">
-      <h1>The Hitter Lab</h1>
-      <p class="hint">Step into The Hitter Lab. Skip scores your sessions and learns what your best days look like.</p>
+      <h1>The Daily Hitter</h1>
+      <p class="hint">Step into The Daily Hitter. Skip scores your sessions and learns what your best days look like.</p>
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
       ${notice ? `<div class="notice">${esc(notice)}</div>` : ''}
       <form method="post" action="/login" class="form">
@@ -82,7 +82,7 @@ function registerPage(error) {
     user: null,
     tabs: [],
     body: `<div class="login-card card">
-      <h1>Join The Hitter Lab</h1>
+      <h1>Join The Daily Hitter</h1>
       <p class="hint">Free. Use your email, set a password, start checking in.</p>
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
       <form method="post" action="/register" class="form">
