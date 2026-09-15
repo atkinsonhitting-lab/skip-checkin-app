@@ -562,7 +562,7 @@ app.post('/routine/remove', requireLogin, (req, res) => {
   res.redirect('/routine');
 });
 
-// ---- Learn: hitting notebook + players studied ----
+// ---- Learn: hitting notebook + players studied + coach feed ----
 app.get('/learn', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
   const notes = db
@@ -571,7 +571,16 @@ app.get('/learn', requireLogin, (req, res) => {
   const players = db
     .prepare('SELECT * FROM study_players WHERE user_id = ? ORDER BY created_at DESC')
     .all(req.user.id);
-  res.send(views.learnPage(req.user, notes, players));
+  const posts = db
+    .prepare(
+      `SELECT p.*,
+        (SELECT COUNT(*) FROM post_reactions r WHERE r.post_id = p.id AND r.reaction = 'like') AS likes,
+        (SELECT COUNT(*) FROM post_reactions r WHERE r.post_id = p.id AND r.reaction = 'dislike') AS dislikes,
+        (SELECT reaction FROM post_reactions r WHERE r.post_id = p.id AND r.user_id = ?) AS mine
+       FROM coach_posts p ORDER BY p.created_at DESC`
+    )
+    .all(req.user.id);
+  res.send(views.learnPage(req.user, notes, players, posts));
 });
 
 app.post('/learn/note', requireLogin, (req, res) => {
@@ -607,6 +616,25 @@ app.post('/learn/note/:id/delete', requireLogin, (req, res) => {
 app.post('/learn/player/:id/delete', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.status(403).send('Forbidden');
   db.prepare('DELETE FROM study_players WHERE id = ? AND user_id = ?').run(req.params.id, req.user.id);
+  res.redirect('/learn');
+});
+
+// Like/dislike a coach post — tapping the same reaction again removes it.
+app.post('/learn/post/:id/react', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.status(403).send('Forbidden');
+  const postId = Number(req.params.id);
+  const reaction = req.body.reaction === 'dislike' ? 'dislike' : 'like';
+  const existing = db
+    .prepare('SELECT reaction FROM post_reactions WHERE post_id = ? AND user_id = ?')
+    .get(postId, req.user.id);
+  if (existing && existing.reaction === reaction) {
+    db.prepare('DELETE FROM post_reactions WHERE post_id = ? AND user_id = ?').run(postId, req.user.id);
+  } else {
+    db.prepare(
+      `INSERT INTO post_reactions (post_id, user_id, reaction, created_at) VALUES (?, ?, ?, datetime('now'))
+       ON CONFLICT(post_id, user_id) DO UPDATE SET reaction = excluded.reaction`
+    ).run(postId, req.user.id, reaction);
+  }
   res.redirect('/learn');
 });
 
@@ -714,6 +742,18 @@ function setApprovalCount(req) {
   }
 }
 
+// Bobby posts a tip to the Learn feed — every hitter sees it.
+app.post('/coach/post', requireCoach, (req, res) => {
+  const title = String(req.body.title || '').trim().slice(0, 120);
+  const body = String(req.body.body || '').trim().slice(0, 1000);
+  if (title && body) {
+    db.prepare(
+      "INSERT INTO coach_posts (coach_name, title, body, source_url, created_at) VALUES ('Your coach', ?, ?, '', datetime('now'))"
+    ).run(title, body);
+  }
+  res.redirect('/coach');
+});
+
 app.get('/coach', requireCoach, (req, res) => {
   setApprovalCount(req);
   const users = db
@@ -819,7 +859,7 @@ app.post('/coach/user/:email/delete', requireCoach, (req, res) => {
 
 // Remove a hitter and everything they created: check-ins, chats, routine, tokens.
 function deleteHitter(userId) {
-  for (const t of ['chat_messages', 'checkins', 'routine_drills', 'password_reset_tokens', 'hitter_memory', 'learning_notes', 'study_players']) {
+  for (const t of ['chat_messages', 'checkins', 'routine_drills', 'password_reset_tokens', 'hitter_memory', 'learning_notes', 'study_players', 'post_reactions']) {
     db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(userId);
   }
   db.prepare('DELETE FROM users WHERE id = ?').run(userId);
@@ -1164,6 +1204,30 @@ function skipDataBlock(userId) {
         .map((r) => `- ${r.player_name}${r.takeaway ? ` — "${String(r.takeaway).slice(0, 200)}"` : ''}`)
         .join('\n')}`
     : '';
+  const likedRows = db
+    .prepare(
+      `SELECT p.coach_name, p.title FROM coach_posts p
+       JOIN post_reactions r ON r.post_id = p.id
+       WHERE r.user_id = ? AND r.reaction = 'like' ORDER BY r.created_at DESC LIMIT 10`
+    )
+    .all(userId);
+  const dislikedRows = db
+    .prepare(
+      `SELECT p.coach_name, p.title FROM coach_posts p
+       JOIN post_reactions r ON r.post_id = p.id
+       WHERE r.user_id = ? AND r.reaction = 'dislike' ORDER BY r.created_at DESC LIMIT 10`
+    )
+    .all(userId);
+  const likedBlock = likedRows.length
+    ? `\nCOACHING THAT CLICKS FOR HIM (he liked these posts — speak this language):\n${likedRows
+        .map((r) => `- ${r.coach_name}: "${r.title}"`)
+        .join('\n')}`
+    : '';
+  const dislikedBlock = dislikedRows.length
+    ? `\nDOESN'T CLICK FOR HIM (he disliked these — don't push these ideas):\n${dislikedRows
+        .map((r) => `- ${r.coach_name}: "${r.title}"`)
+        .join('\n')}`
+    : '';
   return snap.lines.length
     ? `HITTER DATA (newest first):\n${snap.lines.join('\n')}\nSessions logged: ${snap.total}${
         snap.avg != null ? ` · Average level: ${scoreTier(snap.avg)}` : ''
@@ -1175,7 +1239,7 @@ function skipDataBlock(userId) {
         snap.bestDay
           ? `\nHIS BEST DAY — when he's struggling, take him back to exactly this (this is your #1 job):\n${snap.bestDay}`
           : ''
-      }${memBlock}${learnBlock}${playersBlock}`
+      }${memBlock}${learnBlock}${playersBlock}${likedBlock}${dislikedBlock}`
     : 'HITTER DATA: no check-ins logged yet — this is a brand-new hitter. Ask what they are working on.';
 }
 

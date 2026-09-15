@@ -297,7 +297,7 @@ function routinePage(user, drills, error, drillNames, stations) {
 
 const LEARN_CATEGORIES = ['Mechanics', 'Mental', 'Approach', 'Drills', 'Other'];
 
-function learnPage(user, notes, players) {
+function learnPage(user, notes, players, posts) {
   const catChips = LEARN_CATEGORIES.map(
     (c, i) =>
       `<label class="chip-radio"><input type="radio" name="category" value="${c}"${i === 0 ? ' checked' : ''}><span>${c}</span></label>`
@@ -329,11 +329,33 @@ function learnPage(user, notes, players) {
       </div>`
     )
     .join('');
+  const postCards = (posts || [])
+    .map(
+      (p) => `<div class="card post">
+        <div class="post-head"><span class="post-coach">${esc(p.coach_name)}</span>${p.source_url ? ` <a class="hint-inline" href="${esc(p.source_url)}" target="_blank" rel="noopener">follow →</a>` : ''}</div>
+        <div class="post-title">${esc(p.title)}</div>
+        <p class="post-body">${esc(p.body)}</p>
+        <div class="post-actions">
+          <form method="post" action="/learn/post/${p.id}/react">
+            <input type="hidden" name="reaction" value="like">
+            <button type="submit" class="react-btn${p.mine === 'like' ? ' active-like' : ''}" aria-label="This clicks for me">👍 ${p.likes}</button>
+          </form>
+          <form method="post" action="/learn/post/${p.id}/react">
+            <input type="hidden" name="reaction" value="dislike">
+            <button type="submit" class="react-btn${p.mine === 'dislike' ? ' active-dislike' : ''}" aria-label="Not for me">👎 ${p.dislikes}</button>
+          </form>
+        </div>
+      </div>`
+    )
+    .join('');
   return layout({
     title: 'Learn',
     user,
     tabs: userTabs('learn'),
     body: `<h1 class="page-title">What I'm learning</h1>
+    <p class="hint skip-intro">Ideas from the best hitting minds in the game — tell Skip what clicks for you and what doesn't.</p>
+    ${postCards || `<p class="hint">No posts yet.</p>`}
+    <h2 class="section-head">My notebook</h2>
     <div class="card"><p class="hint skip-intro">Your hitting notebook — save new things you're figuring out, not just session check-ins. Skip reads this too.</p>
     <form method="post" action="/learn/note" class="form">
       <label>Something new I'm learning
@@ -578,6 +600,17 @@ function coachDashboard(user, userStats, latest, pending) {
       <div class="card stat"><div class="stat-num">${totalCheckins}</div><div class="stat-label">check-ins</div></div>
     </div>
     ${approvalNudge}
+    <div class="card"><h2 class="routine-station">Post to the feed</h2>
+    <p class="hint">Drop a tip, cue, or idea — every hitter sees it in their Learn tab.</p>
+    <form method="post" action="/coach/post" class="form">
+      <label>Title
+        <input name="title" maxlength="120" placeholder="e.g. Stay through it" required>
+      </label>
+      <label>Body
+        <textarea name="body" rows="3" maxlength="1000" placeholder="Say it like you'd say it in the cage." required></textarea>
+      </label>
+      <button type="submit" class="btn-primary">Post it</button>
+    </form></div>
     <h2 class="section-head">Hitters</h2>
     <div class="athlete-grid">${cards || '<div class="card empty">Nobody has signed up yet.</div>'}</div>
     <h2 class="section-head">Latest check-ins</h2>
