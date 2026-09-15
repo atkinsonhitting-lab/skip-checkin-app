@@ -137,7 +137,7 @@ function pendingPage() {
 }
 
 function userHome(user, extras) {
-  const { drillStats = [], thoughtStats = [], avgScore = null, checkinCount = 0, recent = [] } = extras || {};
+  const { whatWorks = {}, avgScore = null, checkinCount = 0, recent = [] } = extras || {};
   const head = avgScore !== null
     ? `<div class="level-head"><p class="hint">Skip's read on you across ${checkinCount} session${checkinCount === 1 ? '' : 's'}:</p>${levelLine(avgScore)}</div>`
     : `<p class="hint">No check-ins yet. Log your first session and Skip starts learning your game.</p>`;
@@ -151,23 +151,34 @@ function userHome(user, extras) {
       <a href="/checkin" class="btn-primary">Check in today's session</a>
     </div>
     ${head}
-    ${whatWorksSection(drillStats, thoughtStats, avgScore, checkinCount)}
+    ${whatWorksSection(whatWorks)}
     ${recent.length ? `<h2 class="section-head">Recent</h2>${recent.map(checkinCard).join('')}<p><a href="/notebook">See your notebook →</a></p>` : ''}`,
   });
 }
 
-// Skip's read on this hitter's check-ins: the hitter's own thoughts first,
-// then drills — each ranked by average session level.
-function whatWorksSection(drillStats, thoughtStats, avgScore, checkinCount) {
-  const thoughts = (thoughtStats || [])
+// Skip's read on this hitter's check-ins: which cues to use, which to trash,
+// whether routine days beat other days, and routine suggestions built from
+// the drills of their best sessions.
+function whatWorksSection(data, opts) {
+  const d = data || {};
+  const readOnly = !!(opts && opts.readOnly);
+  const good = (d.goodCues || [])
     .map(
       (t) => `<div class="works-row">
           <div class="works-drill">&ldquo;${esc(t.text)}&rdquo;</div>
-          <div class="works-line">On your best days you keep coming back to this <span class="hint-inline">(${t.count} sessions)</span>${levelLine(t.avg)}</div>
+          <div class="works-line">Shows up on your good days <span class="hint-inline">(${t.count} sessions)</span>${levelLine(t.avg)}</div>
         </div>`
     )
     .join('');
-  const drills = (drillStats || [])
+  const trash = (d.trashCues || [])
+    .map(
+      (t) => `<div class="works-row">
+          <div class="works-drill">&ldquo;${esc(t.text)}&rdquo;</div>
+          <div class="works-line">Shows up on your rough days \u2014 drop it <span class="hint-inline">(${t.count} sessions)</span>${levelLine(t.avg)}</div>
+        </div>`
+    )
+    .join('');
+  const drills = (d.drills || [])
     .map(
       (s) => `<div class="works-row">
           <div class="works-drill">${esc(s.name)}</div>
@@ -175,14 +186,76 @@ function whatWorksSection(drillStats, thoughtStats, avgScore, checkinCount) {
         </div>`
     )
     .join('');
-  const body =
-    thoughts || drills
-      ? `${thoughts ? `<div class="works-sub">Your thoughts</div><div class="works-rows">${thoughts}</div>` : ''}
-         ${drills ? `<div class="works-sub">Your drills</div><div class="works-rows">${drills}</div>` : ''}`
-      : `<p class="hint">Check in 3+ times and Skip will start spotting your patterns.</p>`;
+
+  let verdict = '';
+  const v = d.routineVerdict;
+  if (v) {
+    const line =
+      v.kind === 'routine'
+        ? "You're better when you go through your routine."
+        : v.kind === 'freelance'
+          ? "You're actually better when you skip the routine \u2014 it might need a rethink."
+          : 'No real difference between routine days and other days.';
+    verdict = `<div class="works-sub">Your routine</div>
+      <div class="works-rows"><div class="works-row">
+        <div class="works-drill">${line}</div>
+        <div class="works-line">Routine days <span class="hint-inline">(${v.routineN})</span>${levelLine(v.routineAvg)}</div>
+        <div class="works-line">Other days <span class="hint-inline">(${v.otherN})</span>${levelLine(v.otherAvg)}</div>
+      </div></div>`;
+  }
+
+  let suggested = '';
+  if (d.suggestedRoutine && d.suggestedRoutine.length) {
+    const items = d.suggestedRoutine
+      .map(
+        (x) => `<li>${esc(x.name)}${x.station ? ` <span class="hint-inline">(${esc(x.station)})</span>` : ''} <span class="hint-inline">\u00b7 ${x.count} good days</span></li>`
+      )
+      .join('');
+    const adopt = readOnly
+      ? ''
+      : `<form method="post" action="/routine/adopt" class="works-adopt">
+          <input type="hidden" name="drills" value="${esc(JSON.stringify(d.suggestedRoutine.map((x) => ({ name: x.name, station: x.station }))))}">
+          <button type="submit" class="btn-primary">Save as my daily routine</button>
+        </form>`;
+    suggested = `<div class="works-sub">No routine yet \u2014 start with this</div>
+      <div class="works-rows"><div class="works-row">
+        <div class="works-line">Built from the drills in your best sessions:</div>
+        <ul class="works-list">${items}</ul>
+        ${adopt}
+      </div></div>`;
+  }
+
+  let addable = '';
+  const ds = d.drillSuggestions || [];
+  if (ds.length) {
+    const rows = ds
+      .map(
+        (x) => `<div class="works-row">
+            <div class="works-drill">${esc(x.name)}</div>
+            <div class="works-line">Showed up on your best days <span class="hint-inline">(${x.count})</span>${levelLine(x.avg)}</div>
+            ${readOnly ? '' : `<form method="post" action="/routine/add" class="works-add">
+              <input type="hidden" name="name" value="${esc(x.name)}">
+              <input type="hidden" name="station" value="${esc(x.station || 'Tee')}">
+              <button type="submit" class="btn-ghost btn-sm">Add to routine</button>
+            </form>`}
+          </div>`
+      )
+      .join('');
+    addable = `<div class="works-sub">Worth adding to your routine</div><div class="works-rows">${rows}</div>`;
+  }
+
+  const hasAny = good || trash || drills || verdict || suggested || addable;
+  const body = hasAny
+    ? `${good ? `<div class="works-sub">Use these \u2014 your good-day cues</div><div class="works-rows">${good}</div>` : ''}
+       ${trash ? `<div class="works-sub">Trash these \u2014 rough-day cues</div><div class="works-rows">${trash}</div>` : ''}
+       ${verdict}
+       ${suggested}
+       ${addable}
+       ${drills ? `<div class="works-sub">Your drills</div><div class="works-rows">${drills}</div>` : ''}`
+    : `<p class="hint">Check in 3+ times and Skip will start spotting your patterns.</p>`;
   return `<section id="what-works" class="card">
     <h2>What works for you</h2>
-    <p class="hint">Skip's read on your sessions — the thoughts and drills your best days have in common.</p>
+    <p class="hint">Skip's read on your sessions \u2014 what to keep, what to trash, and what your routine is doing for you.</p>
     ${body}
   </section>`;
 }
@@ -589,7 +662,7 @@ function coachDashboard(user, userStats, latest, pending) {
   });
 }
 
-function coachUser(user, name, checkins, stats, thoughts, thread, email, memories, routine) {
+function coachUser(user, name, checkins, whatWorks, thread, email, memories, routine) {
   const skipImg = `<img src="/skip-avatar.webp" class="skip-avatar" alt="Skip">`;
   const convo =
     thread && thread.length
@@ -611,7 +684,7 @@ function coachUser(user, name, checkins, stats, thoughts, thread, email, memorie
     <p><a href="/coach">← Back to dashboard</a></p>
     ${routineReadonly(routine)}
     ${memorySection(email, memories)}
-    ${whatWorksSection(stats || [], thoughts || [], null, 0)}
+    ${whatWorksSection(whatWorks || {}, { readOnly: true })}
     ${convo}
     ${checkins.length ? checkins.map(checkinCard).join('') : '<div class="card empty">No check-ins yet.</div>'}
     <p style="margin-top:28px;text-align:center"><a href="/coach/user/${encodeURIComponent(email)}/delete" style="color:#8a8a8a;font-size:14px">Delete hitter from the platform</a></p>`,

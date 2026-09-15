@@ -315,6 +315,10 @@ a:active { color: #ff3b30; }
 .works-sub:first-of-type { margin-top: 8px; }
 .works-line { font-size: 14px; color: var(--muted); margin-top: 2px; }
 .works-line strong { color: var(--text); }
+.works-list { margin: 6px 0 0; padding-left: 20px; font-size: 14px; }
+.works-list li { margin: 4px 0; }
+.works-adopt { margin-top: 10px; }
+.works-add { margin-top: 6px; }
 
 /* Library */
 .searchbar { display: flex; gap: 8px; margin-bottom: 14px; }

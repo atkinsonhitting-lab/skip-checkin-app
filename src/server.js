@@ -406,7 +406,7 @@ function drillStats(athleteName) {
 // Thoughts from the hitter's own words ("what worked"), ranked by average
 // session score (min 2 sessions each). Very similar phrasings are grouped
 // together — "stayed back", "stay back", "staying back" become one entry.
-function thoughtStats(athleteName) {
+function thoughtGroups(athleteName) {
   const rows = db
     .prepare(
       `SELECT what_worked, session_score FROM checkins
@@ -500,8 +500,117 @@ function thoughtStats(athleteName) {
     .sort(
       (a, b) =>
         (b.external - a.external || b.avg - a.avg || b.count - a.count)
+    );
+}
+
+// Normalized drill names from a stored drills_done JSON value.
+function sessionDrills(drillsDoneJson) {
+  let arr = [];
+  try { arr = JSON.parse(drillsDoneJson || '[]'); } catch (e) { arr = []; }
+  const out = [];
+  const seen = new Set();
+  for (const d of arr) {
+    const name = String((d && typeof d === 'object' ? d.name : d) || '').trim();
+    const key = name.toLowerCase();
+    if (!name || seen.has(key)) continue;
+    seen.add(key);
+    out.push({ name, station: d && typeof d === 'object' ? d.station || null : null });
+  }
+  return out;
+}
+
+// Everything the "What works for you" section needs: good-day vs trash cues,
+// whether routine days beat other days, a suggested routine when none is set,
+// and drills worth adding when one is.
+function whatWorksData(athleteName, userId) {
+  const scored = db
+    .prepare(
+      'SELECT session_score, drills_done FROM checkins WHERE athlete_name = ? AND session_score IS NOT NULL'
     )
-    .slice(0, 5);
+    .all(athleteName);
+  const avg = (a) => a.reduce((s, x) => s + x, 0) / a.length;
+  const round1 = (n) => Math.round(n * 10) / 10;
+  const data = {
+    checkinCount: scored.length,
+    overallAvg: null,
+    goodCues: [],
+    trashCues: [],
+    drills: [],
+    routineVerdict: null,
+    suggestedRoutine: null,
+    drillSuggestions: [],
+  };
+  if (!scored.length) return data;
+  data.overallAvg = round1(avg(scored.map((r) => r.session_score)));
+
+  const groups = thoughtGroups(athleteName);
+  data.goodCues = groups.filter((g) => g.avg >= data.overallAvg).slice(0, 4);
+  data.trashCues = groups
+    .filter((g) => g.avg < data.overallAvg)
+    .sort((a, b) => a.avg - b.avg)
+    .slice(0, 3);
+  data.drills = drillStats(athleteName);
+
+  const routine = getRoutine(userId);
+  const routineNames = new Set(routine.map((r) => r.name.trim().toLowerCase()));
+  const goodSessions = scored.filter((r) => r.session_score >= data.overallAvg);
+  const tally = () => {
+    const map = new Map();
+    for (const c of goodSessions) {
+      for (const d of sessionDrills(c.drills_done)) {
+        const key = d.name.toLowerCase();
+        const e = map.get(key) || { name: d.name, stations: {}, total: 0, count: 0 };
+        if (d.station) e.stations[d.station] = (e.stations[d.station] || 0) + 1;
+        e.total += c.session_score;
+        e.count += 1;
+        map.set(key, e);
+      }
+    }
+    return [...map.values()].map((e) => ({
+      name: e.name,
+      station:
+        Object.entries(e.stations).sort((a, b) => b[1] - a[1])[0] ?
+        Object.entries(e.stations).sort((a, b) => b[1] - a[1])[0][0] : null,
+      avg: round1(e.total / e.count),
+      count: e.count,
+    }));
+  };
+
+  if (routine.length) {
+    // Routine days vs everything else.
+    const rDays = [];
+    const oDays = [];
+    for (const c of scored) {
+      const drills = sessionDrills(c.drills_done);
+      const matched = drills.filter((d) => routineNames.has(d.name.toLowerCase())).length;
+      (matched >= Math.ceil(routine.length / 2) ? rDays : oDays).push(c.session_score);
+    }
+    if (rDays.length >= 2 && oDays.length >= 2) {
+      const rAvg = round1(avg(rDays));
+      const oAvg = round1(avg(oDays));
+      const diff = rAvg - oAvg;
+      data.routineVerdict = {
+        kind: diff >= 0.5 ? 'routine' : diff <= -0.5 ? 'freelance' : 'tie',
+        routineAvg: rAvg,
+        otherAvg: oAvg,
+        routineN: rDays.length,
+        otherN: oDays.length,
+      };
+    }
+    // Good-day drills that are NOT in the routine — candidates to add.
+    data.drillSuggestions = tally()
+      .filter((e) => !routineNames.has(e.name.toLowerCase()) && e.count >= 2)
+      .sort((a, b) => b.avg - a.avg)
+      .slice(0, 3);
+  } else {
+    // No routine saved — suggest one from the drills of their best days.
+    const list = tally()
+      .filter((e) => e.count >= 2)
+      .sort((a, b) => b.count - a.count || b.avg - a.avg)
+      .slice(0, 6);
+    if (list.length >= 2) data.suggestedRoutine = list;
+  }
+  return data;
 }
 
 function userScoreSummary(userId) {
@@ -523,8 +632,7 @@ app.get('/', requireLogin, (req, res) => {
     .prepare('SELECT * FROM checkins WHERE user_id = ? ORDER BY created_at DESC LIMIT 3')
     .all(req.user.id);
   res.send(views.userHome(req.user, {
-    drillStats: drillStats(req.user.athleteName),
-    thoughtStats: thoughtStats(req.user.athleteName),
+    whatWorks: whatWorksData(req.user.athleteName, req.user.id),
     avgScore,
     checkinCount,
     recent,
@@ -553,6 +661,24 @@ app.post('/routine/add', requireLogin, (req, res) => {
   db.prepare('INSERT INTO routine_drills (user_id, name, station, position) VALUES (?, ?, ?, ?)').run(
     req.user.id, name, station, pos
   );
+  res.redirect('/routine');
+});
+
+app.post('/routine/adopt', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.status(403).send('Forbidden');
+  let drills = [];
+  try { drills = JSON.parse(req.body.drills || '[]'); } catch (e) { drills = []; }
+  if (getRoutine(req.user.id).length === 0 && Array.isArray(drills) && drills.length) {
+    const ins = db.prepare(
+      'INSERT INTO routine_drills (user_id, name, station, position) VALUES (?, ?, ?, ?)'
+    );
+    let pos = 0;
+    for (const d of drills.slice(0, 8)) {
+      const name = String((d && d.name) || '').trim().slice(0, 80);
+      if (!name) continue;
+      ins.run(req.user.id, name, canonicalStation(d && d.station) || 'Tee', pos++);
+    }
+  }
   res.redirect('/routine');
 });
 
@@ -782,7 +908,7 @@ app.get('/coach/user/:email', requireCoach, (req, res) => {
   const thread = db
     .prepare('SELECT role, content, created_at FROM chat_messages WHERE user_id = ? ORDER BY created_at ASC LIMIT 200')
     .all(user.id);
-  res.send(views.coachUser(req.user, name, rows, drillStats(name), thoughtStats(name), thread, user.email, brain.listMemory(db, user.id), getRoutine(user.id)));
+  res.send(views.coachUser(req.user, name, rows, whatWorksData(name, user.id), thread, user.email, brain.listMemory(db, user.id), getRoutine(user.id)));
 });
 
 // Skip's memory of a hitter: Bobby's durable notes on what works for them.
