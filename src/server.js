@@ -1504,6 +1504,7 @@ app.post('/api/coach/chat', requireCoach, async (req, res) => {
     db.prepare('INSERT INTO chat_messages (user_id, role, content, created_at) VALUES (?, ?, ?, ?)')
       .run(req.user.id, 'assistant', reply, new Date().toISOString());
     res.json({ reply });
+    extractDrillIntel(req.user.id, message, reply);
   } catch (err) {
     if (err.code === 'chat_not_configured') {
       return res.status(503).json({ error: "Skip's chat isn't switched on yet — check back soon." });
@@ -1639,7 +1640,8 @@ HOW YOU COACH:
 2. GETTING HIM BACK ON TRACK — when he's struggling, work in this order: (a) his own past entries — take him back to what he was doing, feeling, and thinking on his best days, in his own words, name the date and level; (b) mental first — simple plan, clear intent, full commitment; (c) external cues — a target or outcome outside the body; (d) mechanics — needed a lot, and always fair game when the hitter brings them up. READ WHAT THE HITTER WANTS: if he's talking mechanics or asking for mechanical help, meet him there and coach mechanics directly — don't force the order on a hitter who's telling you what he needs. Never give generic advice to a hitter you have history on. Never mention numeric scores to hitters — talk only in levels and colors: red, yellow, green, bright green (bright green = best day).
 3. Their words first — a cue in the hitter's own words beats a "better" cue every time.
 4. One fix at a time — praise what's good first, then the single fix.
-5. The head coach's playbook below overrides your defaults wherever they conflict. Use an entry only when it's relevant to what the hitter just said — never force one in.`;
+5. The head coach's playbook below overrides your defaults wherever they conflict. Use an entry only when it's relevant to what the hitter just said — never force one in.
+6. DRILL INTEL - when a hitter tells you a drill is working or helped him, ask him what it does for him - one question, conversational, like asking what that drill is doing for you. Do not interrogate; ask at most once per drill. When another hitter is struggling with a matching issue, suggest the drill and tell him WHY it works, in the other hitter's words - never name the other hitter, just say other hitters have found it helps.`;
 
 function hitterSnapshot(userId) {
   const rows = db
@@ -1716,6 +1718,47 @@ function hitterSnapshot(userId) {
 
 // Remote hitters: their program's cues + focus, so Skip coaches FROM the
 // program instead of the page showing static cues (removed Sep 15 2026).
+// Drill intel: why hitters like the drills that work for them (anonymous across hitters).
+function saveDrillInsight(userId, drill, issue, why) {
+  drill = String(drill || '').trim().slice(0, 80);
+  if (!drill) return;
+  issue = String(issue || '').trim().slice(0, 200);
+  why = String(why || '').trim().slice(0, 300);
+  if (!why) return;
+  const now = new Date().toISOString();
+  const existing = db.prepare('SELECT id FROM drill_insights WHERE user_id = ? AND lower(drill) = lower(?)').get(userId, drill);
+  if (existing) {
+    db.prepare('UPDATE drill_insights SET issue = ?, why_it_helps = ?, created_at = ? WHERE id = ?').run(issue, why, now, existing.id);
+  } else {
+    db.prepare('INSERT INTO drill_insights (user_id, drill, issue, why_it_helps, created_at) VALUES (?, ?, ?, ?, ?)').run(userId, drill, issue, why, now);
+  }
+}
+function otherHittersDrillIntel(userId, limit) {
+  return db.prepare(
+    'SELECT drill, issue, why_it_helps FROM drill_insights WHERE user_id != ? ORDER BY created_at DESC LIMIT ?'
+  ).all(userId, limit || 6);
+}
+const DRILL_INTEL_EXTRACT_SYSTEM = 'You read one short coach-hitter chat exchange. If the hitter says a '
+  + 'specific drill helped them, worked for them, or fixed something - and says WHY (what it does for '
+  + 'them, what issue it fixed) - reply with ONLY this JSON, no other text: '
+  + '{"drill": "drill name", "issue": "the issue it helped, in a few words", "why": "why the hitter likes it, in their words"}. '
+  + 'If there is no drill with a stated reason, reply with exactly: NONE';
+async function extractDrillIntel(userId, hitterMsg, skipReply) {
+  try {
+    const raw = await geminiText(
+      DRILL_INTEL_EXTRACT_SYSTEM,
+      'Hitter: ' + String(hitterMsg).slice(0, 800) + '\nSkip: ' + String(skipReply).slice(0, 800),
+      120
+    );
+    const t = String(raw || '').trim();
+    if (!t || /^none/i.test(t)) return;
+    const m = t.match(/\{[\s\S]*\}/);
+    if (!m) return;
+    const j = JSON.parse(m[0]);
+    if (j && j.drill && j.why) saveDrillInsight(userId, j.drill, j.issue || '', j.why);
+  } catch (e) { /* intel extraction is best-effort - never break chat */ }
+}
+
 function programCueBlock(userId) {
   const u = db.prepare('SELECT remote_program_id FROM users WHERE id = ?').get(userId) || {};
   if (!u.remote_program_id) return '';
@@ -1760,6 +1803,17 @@ function skipDataBlock(userId) {
         .join('\n')}`
     : '';
   const progBlock = programCueBlock(userId);
+  const intel = otherHittersDrillIntel(userId, 6);
+  let intelBlock = '';
+  if (intel.length) {
+    const lines = intel.map((r) => {
+      const issueBit = r.issue ? ' - helps with ' + r.issue : '';
+      return '- ' + r.drill + issueBit + ': "' + String(r.why_it_helps).slice(0, 160) + '"';
+    });
+    intelBlock = '\nDRILLS OTHER HITTERS SWEAT BY (anonymous - NEVER name who said what, just say '
+      + '"other hitters have found"): \n' + lines.join('\n')
+      + '\nWhen this hitter struggles with a matching issue, suggest the drill and give the reason in their words.';
+  }
   const mb = getMentalBaseline(userId);
   let mentalBlock = '';
   if (mb && (mb.pregame_routine || mb.morning_routine || mb.breath_work || mb.when_sped_up)) {
@@ -1785,8 +1839,8 @@ function skipDataBlock(userId) {
         snap.bestDay
           ? `\nHIS BEST DAY — when he's struggling, take him back to exactly this (this is your #1 job):\n${snap.bestDay}`
           : ''
-      }${memBlock}${learnBlock}${playersBlock}${progBlock}${mentalBlock}`
-    : `HITTER DATA: no check-ins logged yet — this is a brand-new hitter. Ask what they are working on.${progBlock}${mentalBlock}`;
+      }${memBlock}${learnBlock}${playersBlock}${progBlock}${intelBlock}${mentalBlock}`
+    : `HITTER DATA: no check-ins logged yet — this is a brand-new hitter. Ask what they are working on.${progBlock}${intelBlock}${mentalBlock}`;
 }
 
 const COACH_SYSTEM = `You are Coach Skip, the AI hitting coach inside The Daily Hitter. You are talking to BOBBY ATKINSON — your head coach, the man whose brain you coach with. He is training you right now: giving feedback on your coaching, correcting your answers, teaching you how he wants his hitters coached. Listen carefully, take every correction seriously, and confirm specifically how you will apply what he tells you going forward. Talk to him like a trusted assistant coach — direct, no fluff, no motivational-poster talk. Keep replies short (2-4 sentences) unless he asks for more. Never mention you are an AI model. You are Coach Skip.
