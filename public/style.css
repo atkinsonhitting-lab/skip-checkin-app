@@ -455,3 +455,20 @@ a:active { color: #ff3b30; }
 .live-controls { display: flex; gap: 10px; margin-top: 12px; }
 .live-controls .btn-primary { flex: 1; margin-top: 0; padding: 18px; font-size: 18px; }
 .live-controls .btn-ghost { flex: 1; margin-top: 0; padding: 16px; font-size: 17px; }
+
+/* ---- Remote programs ---- */
+.lede { color: var(--muted); margin: -6px 0 14px; }
+.grade-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.grade-chip { background: var(--card); border: 1px solid var(--border); border-radius: 999px; padding: 6px 12px; font-size: 14px; }
+.grade-chip strong { margin-right: 6px; }
+.grade-edit-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; }
+.fld-inline { margin-bottom: 0; }
+.cue-list { display: grid; gap: 10px; }
+.cue-row { display: grid; grid-template-columns: 90px 1fr; gap: 10px; align-items: baseline; }
+.cue-label { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.remote-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.remote-row:last-of-type { border-bottom: none; }
+.remote-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.inline-form { display: inline-flex; gap: 6px; align-items: center; margin: 0; }
+.input-sm { width: 170px; padding: 6px 10px; font-size: 14px; }
+.remote-add { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }

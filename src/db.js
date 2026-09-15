@@ -111,6 +111,99 @@ if (!checkinCols.includes('difficulty')) {
   db.exec('ALTER TABLE checkins ADD COLUMN difficulty INTEGER;');
 }
 
+// Remote programs: Bobby's 4 remote hitters each get their training program
+// in the app. users.remote_program_id links a hitter's account to theirs.
+db.exec(`CREATE TABLE IF NOT EXISTS remote_programs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  athlete_name TEXT UNIQUE NOT NULL,
+  program_json TEXT NOT NULL DEFAULT '{}',
+  updated_at TEXT NOT NULL DEFAULT ''
+);`);
+{
+  const cols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+  if (!cols.includes('remote_program_id')) {
+    db.exec('ALTER TABLE users ADD COLUMN remote_program_id INTEGER;');
+  }
+}
+// Seed the 4 remote programs from the bundled snapshots (first boot only —
+// Bobby's in-app edits are never overwritten). Then link any existing
+// accounts whose name matches, so a remote guy who already signed up just
+// gets his program.
+{
+  const n = db.prepare('SELECT COUNT(*) AS n FROM remote_programs').get().n;
+  if (n === 0) {
+    const fs = require('fs');
+    const path = require('path');
+    const dir = path.join(__dirname, 'seed_programs');
+    const ins = db.prepare(
+      'INSERT INTO remote_programs (athlete_name, program_json, updated_at) VALUES (?, ?, ?)'
+    );
+    // The 4 program files were built at different times with different
+    // shapes — normalize to one canonical shape on the way in.
+    const normItems = (items) =>
+      (Array.isArray(items) ? items : [])
+        .map((it) => {
+          if (typeof it === 'string') return { drill: it.trim() };
+          const drill = String((it && it.drill) || '').trim();
+          if (!drill) return null;
+          const o = { drill };
+          if (it.volume) o.volume = String(it.volume).trim();
+          return o;
+        })
+        .filter(Boolean);
+    const normalizeProgram = (raw) => {
+      const p = { ...(raw || {}) };
+      const blocks = [];
+      if (Array.isArray(p.routine)) {
+        for (const c of p.routine) {
+          const items = normItems(c.items);
+          if (c.category || items.length) blocks.push({ category: String(c.category || 'Training'), items });
+        }
+      }
+      if (Array.isArray(p.daily_routine) && p.daily_routine.length) {
+        blocks.unshift({ category: 'Daily Routine', items: normItems(p.daily_routine) });
+      }
+      if (Array.isArray(p.mobility) && p.mobility.length) {
+        blocks.push({ category: 'Mobility', items: normItems(p.mobility) });
+      }
+      if (Array.isArray(p.days)) {
+        for (const d of p.days) {
+          const title = [d.title, d.section].filter(Boolean).join(' \u2014 ');
+          const items = normItems(d.items);
+          if (title || items.length) blocks.push({ category: title || 'Training Day', items });
+        }
+      }
+      p.routine = blocks;
+      delete p.daily_routine;
+      delete p.mobility;
+      delete p.days;
+      if (!Array.isArray(p.notes)) p.notes = [];
+      if (!Array.isArray(p.schedule)) p.schedule = [];
+      if (!p.grades || typeof p.grades !== 'object') p.grades = {};
+      if (!Array.isArray(p.strengths)) p.strengths = [];
+      if (!p.cues || typeof p.cues !== 'object') p.cues = { movement: '', timing: '', game: '' };
+      return p;
+    };
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.endsWith('.json')) continue;
+      try {
+        const prog = normalizeProgram(JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')));
+        const name = String(prog.athlete || f.replace(/\.json$/, '')).trim();
+        if (name) ins.run(name, JSON.stringify(prog), new Date().toISOString());
+      } catch (e) { console.warn('program seed skipped', f, e.message); }
+    }
+  }
+  // Backfill: match accounts by full name (runs every boot; idempotent).
+  const link = db.prepare(
+    `UPDATE users SET remote_program_id = ?
+     WHERE remote_program_id IS NULL AND role = 'athlete'
+     AND lower(first_name || ' ' || last_name) = lower(?)`
+  );
+  for (const r of db.prepare('SELECT id, athlete_name FROM remote_programs').all()) {
+    link.run(r.id, r.athlete_name);
+  }
+}
+
 // Daily routine drills: each hitter's everyday drill list, each drill tagged
 // with how it's done (tee / side toss / front toss / BP / machine).
 db.exec(`CREATE TABLE IF NOT EXISTS routine_drills (

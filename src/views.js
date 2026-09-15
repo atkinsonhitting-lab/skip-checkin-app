@@ -49,13 +49,18 @@ ${tabHtml ? `<nav class="tabs">${tabHtml}</nav>` : ''}
 </html>`;
 }
 
-function userTabs(active) {
-  return [
+function userTabs(active, user) {
+  const tabs = [
     { href: '/', label: 'Home', active: active === 'home' },
     { href: '/checkin', label: 'Check In', active: active === 'checkin' },
     { href: '/notebook', label: 'Notebook', active: active === 'notebook' },
     { href: '/chat', label: 'Coach Skip', active: active === 'chat' },
   ];
+  // Bobby's remote hitters only — nobody else ever sees this tab.
+  if (user && user.remoteProgramId) {
+    tabs.splice(3, 0, { href: '/program', label: 'Program', active: active === 'program' });
+  }
+  return tabs;
 }
 
 function coachTabs(active, approvalCount) {
@@ -144,7 +149,7 @@ function userHome(user, extras) {
   return layout({
     title: 'Home',
     user,
-    tabs: userTabs('home'),
+    tabs: userTabs('home', user),
     body: `<h1 class="page-title">What's up, ${esc(user.displayName)}</h1>
     <div class="card cta-card">
       <p class="skip-intro">Check in with Skip. He'll rate every session and learn what your best days look like.</p>
@@ -285,7 +290,7 @@ function checkinForm(user, error, values, drillNames, routine) {
   return layout({
     title: 'Check In',
     user,
-    tabs: userTabs('checkin'),
+    tabs: userTabs('checkin', user),
     body: `<h1 class="page-title">Check in with Skip</h1>
     <div class="card"><p class="hint skip-intro">Tell Skip about your session. Give as much detail as you can — the more he knows, the better his reads get.</p>
     <form method="post" action="/checkin" class="form">
@@ -328,7 +333,7 @@ function routinePage(user, drills, error, drillNames, stations) {
   return layout({
     title: 'Daily Routine',
     user,
-    tabs: userTabs('checkin'),
+    tabs: userTabs('checkin', user),
     body: `<h1 class="page-title">Daily routine</h1>
     <div class="card"><p class="hint skip-intro">Your everyday drills. Set it once — then one tap loads it into your check-in.</p>
     ${error ? `<div class="error">${esc(error)}</div>` : ''}
@@ -404,7 +409,7 @@ function notebookPage(user, checkins, notes, players, justSubmitted) {
   return layout({
     title: 'Notebook',
     user,
-    tabs: userTabs('notebook'),
+    tabs: userTabs('notebook', user),
     body: `<h1 class="page-title">Notebook</h1>
     <div class="subnav"><a href="#checkins">Check-ins</a><a href="#notes">Notes</a></div>
     ${justSubmitted ? `<div class="success">Check-in saved. Good work.</div>` : ''}
@@ -479,7 +484,7 @@ function scorePage(user, c) {
   return layout({
     title: "Skip's Session Level",
     user,
-    tabs: userTabs('checkin'),
+    tabs: userTabs('checkin', user),
     body: `<div class="card score-hero">
       <div class="score-kicker">Skip's Session Level</div>
       <div class="level-hero-meter">${levelBar(c.session_score, c.score_tier, true)}</div>
@@ -572,7 +577,7 @@ function chatPage(user, messages, chatEnabled) {
   return layout({
     title: 'Coach Skip',
     user,
-    tabs: userTabs('chat'),
+    tabs: userTabs('chat', user),
     body: `<h1 class="page-title chat-title"><img src="/skip-avatar.webp" class="skip-avatar" alt="Skip">Coach Skip</h1>
     <p class="hint">Struggling? Tell Skip what's going on at the plate — he's seen your check-ins and will point you back on track.</p>
     ${chatEnabled
@@ -619,7 +624,7 @@ function coachApprovalsPage(user, pending) {
   });
 }
 
-function coachDashboard(user, userStats, latest, pending) {
+function coachDashboard(user, userStats, latest, pending, remotePrograms) {
   const totalCheckins = userStats.reduce((s, u) => s + u.total, 0);
   const cards = userStats
     .map(
@@ -650,9 +655,213 @@ function coachDashboard(user, userStats, latest, pending) {
     ${userStats.length ? `<input type="search" id="hitter-search" class="searchbar" placeholder="Search hitters…" autocomplete="off">` : ''}
     <div class="athlete-grid">${cards || '<div class="card empty">Nobody has signed up yet.</div>'}</div>
     <div class="card empty" id="hitter-no-match" hidden>No hitters match that search.</div>
+    ${remoteProgramsSection(remotePrograms || [])}
     <h2 class="section-head">Latest check-ins</h2>
     ${feed}`,
   });
+}
+
+// ---- Remote programs ----
+
+function programSection(title, inner) {
+  return inner
+    ? `<div class="card routine-group"><h2 class="routine-station">${esc(title)}</h2>${inner}</div>`
+    : '';
+}
+
+// Hitter-facing: their training program, read-only.
+function programPage(user, p) {
+  const prog = p.prog || {};
+  const grades = prog.grades && typeof prog.grades === 'object' ? prog.grades : {};
+  const gradeChips = Object.entries(grades)
+    .map(([k, v]) => `<span class="grade-chip"><strong>${esc(k)}</strong> ${esc(String(v))}</span>`)
+    .join('');
+  const strengths = Array.isArray(prog.strengths) ? prog.strengths.filter(Boolean) : [];
+  const cues = prog.cues && typeof prog.cues === 'object' ? prog.cues : {};
+  const cueRows = [
+    ['Movement', cues.movement],
+    ['Timing', cues.timing],
+    ['Game', cues.game],
+  ]
+    .filter(([, v]) => v)
+    .map(([k, v]) => `<div class="cue-row"><span class="cue-label">${esc(k)}</span><span>${esc(v)}</span></div>`)
+    .join('');
+  const routine = Array.isArray(prog.routine) ? prog.routine : [];
+  const routineHtml = routine
+    .map(
+      (c) => `<div class="card routine-group"><h2 class="routine-station">${esc(c.category || '')}</h2>
+        ${(c.items || [])
+          .map(
+            (it) => `<div class="routine-row"><span class="routine-name">${esc(it.drill || '')}</span>${
+              it.volume ? `<span class="hint-inline">${esc(it.volume)}</span>` : ''
+            }</div>`
+          )
+          .join('')}</div>`
+    )
+    .join('');
+  const schedMap = {};
+  for (const pair of Array.isArray(prog.schedule) ? prog.schedule : []) {
+    if (Array.isArray(pair) && pair[0]) schedMap[String(pair[0])] = String(pair[1] || '');
+  }
+  const schedRows = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    .filter((d) => schedMap[d])
+    .map(
+      (d) =>
+        `<div class="cue-row"><span class="cue-label">${esc(d.slice(0, 3))}</span><span>${esc(schedMap[d])}</span></div>`
+    )
+    .join('');
+  const progNotes = Array.isArray(prog.notes) ? prog.notes.filter(Boolean) : [];
+  const meta = [prog.date_range, prog.phase_emphasis].filter(Boolean).map(esc).join(' · ');
+  return layout({
+    title: 'Your Program',
+    user,
+    tabs: userTabs('program', user),
+    body: `<h1 class="page-title">Your Program</h1>
+    ${meta ? `<p class="lede">${meta}</p>` : ''}
+    ${programSection('The focus', prog.adjustment ? `<p>${esc(prog.adjustment)}</p>` : '')}
+    ${programSection('Grades', gradeChips ? `<div class="grade-row">${gradeChips}</div>` : '')}
+    ${programSection(
+      'Strengths',
+      strengths.length ? `<ul class="works-list">${strengths.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''
+    )}
+    ${programSection('Cues', cueRows ? `<div class="cue-list">${cueRows}</div>` : '')}
+    ${routineHtml}
+    ${programSection('Mental framework', prog.mental_framework ? `<p>${esc(prog.mental_framework)}</p>` : '')}
+    ${programSection('Schedule', schedRows ? `<div class="cue-list">${schedRows}</div>` : '')}
+    ${programSection(
+      'Notes',
+      progNotes.length ? `<ul class="works-list">${progNotes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : ''
+    )}`,
+  });
+}
+
+// Coach-facing: edit a remote hitter's program.
+function programEditPage(user, p) {
+  const prog = p.prog || {};
+  const grades = prog.grades && typeof prog.grades === 'object' ? prog.grades : {};
+  const gradeFields = ['Load', 'Path', 'Connection', 'Timing', 'Power Production']
+    .map(
+      (g) =>
+        `<label class="fld fld-inline">Grade — ${esc(g)}<input type="text" name="grade_${g.replace(/ /g, '_')}" value="${esc(grades[g] || '')}" maxlength="4" placeholder="B+"></label>`
+    )
+    .join('');
+  const routine = Array.isArray(prog.routine) ? prog.routine : [];
+  const catBlocks = routine
+    .map(
+      (c, i) => `<div class="card routine-group prog-cat" data-cat>
+        <label class="fld">Category<input type="text" name="cat_${i}_name" value="${esc(c.category || '')}" maxlength="60"></label>
+        <label class="fld">Drills — one per line, as <em>Drill</em> or <em>Drill | volume</em>
+          <textarea name="cat_${i}_items" rows="4">${esc((c.items || []).map((it) => (it.volume ? `${it.drill} | ${it.volume}` : it.drill)).join('\n'))}</textarea>
+        </label>
+        <button type="button" class="btn btn-danger btn-sm" data-remove-cat>Remove category</button>
+      </div>`
+    )
+    .join('');
+  const cues = prog.cues && typeof prog.cues === 'object' ? prog.cues : {};
+  const editSchedMap = {};
+  for (const pair of Array.isArray(prog.schedule) ? prog.schedule : []) {
+    if (Array.isArray(pair) && pair[0]) editSchedMap[String(pair[0])] = String(pair[1] || '');
+  }
+  const schedFields = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    .map(
+      (d, i) =>
+        `<label class="fld fld-inline">${esc(d)}<input type="text" name="sched_${i}" value="${esc(editSchedMap[d] || '')}" maxlength="40" placeholder="Day 1 / OFF"></label>`
+    )
+    .join('');
+  const editNotes = Array.isArray(prog.notes) ? prog.notes.filter(Boolean) : [];
+  return layout({
+    title: `Edit program — ${p.athlete_name}`,
+    user,
+    tabs: coachTabs('dashboard', user.approvalCount),
+    body: `<h1 class="page-title">Program — ${esc(p.athlete_name)}</h1>
+    <p><a href="/coach">← Back to dashboard</a></p>
+    <form method="post" action="/coach/program/${p.id}/save" class="form">
+      <div class="card routine-group">
+        <label class="fld">Date range<input type="text" name="date_range" value="${esc(prog.date_range || '')}" maxlength="60" placeholder="8/18–9/16"></label>
+        <label class="fld">Phase emphasis<input type="text" name="phase_emphasis" value="${esc(prog.phase_emphasis || '')}" maxlength="120" placeholder="Coil and Barrel Turn"></label>
+        <label class="fld">The adjustment — the one thing he's working on
+          <textarea name="adjustment" rows="2" maxlength="500">${esc(prog.adjustment || '')}</textarea>
+        </label>
+        <label class="fld">Mental framework<input type="text" name="mental_framework" value="${esc(prog.mental_framework || '')}" maxlength="200" placeholder="PREPARED → PRESENT → COMPETE"></label>
+      </div>
+      <div class="card routine-group"><h2 class="routine-station">Grades</h2><div class="grade-edit-row">${gradeFields}</div></div>
+      <div class="card routine-group">
+        <label class="fld">Strengths — one per line
+          <textarea name="strengths" rows="3">${esc((prog.strengths || []).join('\n'))}</textarea>
+        </label>
+      </div>
+      <div class="card routine-group"><h2 class="routine-station">Cues</h2>
+        <label class="fld">Movement<input type="text" name="cue_movement" value="${esc(cues.movement || '')}" maxlength="300"></label>
+        <label class="fld">Timing<input type="text" name="cue_timing" value="${esc(cues.timing || '')}" maxlength="300"></label>
+        <label class="fld">Game<input type="text" name="cue_game" value="${esc(cues.game || '')}" maxlength="300"></label>
+      </div>
+      <div class="card routine-group"><h2 class="routine-station">Weekly schedule</h2><div class="grade-edit-row">${schedFields}</div></div>
+      <div class="card routine-group">
+        <label class="fld">Notes — one per line
+          <textarea name="notes" rows="3">${esc(editNotes.join('\n'))}</textarea>
+        </label>
+      </div>
+      <h2 class="section-head">Training blocks</h2>
+      <div id="prog-cats">${catBlocks}</div>
+      <p><button type="button" class="btn" id="prog-add-cat">+ Add block</button></p>
+      <p><button type="submit" class="btn btn-primary">Save program</button></p>
+    </form>
+    <script>
+    (function () {
+      var wrap = document.getElementById('prog-cats');
+      var next = ${routine.length};
+      document.getElementById('prog-add-cat').addEventListener('click', function () {
+        var div = document.createElement('div');
+        div.className = 'card routine-group prog-cat';
+        div.setAttribute('data-cat', '');
+        div.innerHTML =
+          '<label class="fld">Category<input type="text" name="cat_' + next + '_name" maxlength="60"></label>' +
+          '<label class="fld">Drills — one per line, as <em>Drill</em> or <em>Drill | volume</em>' +
+          '<textarea name="cat_' + next + '_items" rows="4"></textarea></label>' +
+          '<button type="button" class="btn btn-danger btn-sm" data-remove-cat>Remove category</button>';
+        wrap.appendChild(div);
+        next++;
+      });
+      wrap.addEventListener('click', function (e) {
+        if (e.target && e.target.hasAttribute('data-remove-cat')) {
+          e.target.closest('[data-cat]').remove();
+        }
+      });
+    })();
+    </script>`,
+  });
+}
+
+// Coach dashboard section: the remote roster and their programs.
+function remoteProgramsSection(list) {
+  const rows = list
+    .map((r) => {
+      const linked = r.user_email
+        ? `<span class="pill">${esc(r.user_email)}</span>`
+        : '<span class="hint-inline">no account yet</span>';
+      const updated = r.updated_at ? ` · updated ${esc(r.updated_at.slice(0, 10))}` : '';
+      return `<div class="remote-row">
+        <div><strong>${esc(r.athlete_name)}</strong><div class="hint-inline">${linked}${updated}</div></div>
+        <div class="remote-actions">
+          <a class="btn btn-sm" href="/coach/program/${r.id}/edit">Edit program</a>
+          ${
+            r.user_email
+              ? `<form method="post" action="/coach/remote/unlink" class="inline-form"><input type="hidden" name="id" value="${r.id}"><button class="btn btn-sm" type="submit">Unlink</button></form>`
+              : `<form method="post" action="/coach/remote/link" class="inline-form"><input type="email" name="email" placeholder="hitter email" required class="input-sm"><input type="hidden" name="id" value="${r.id}"><button class="btn btn-sm" type="submit">Link</button></form>`
+          }
+          <form method="post" action="/coach/remote/remove" class="inline-form" onsubmit="return confirm('Remove ${esc(r.athlete_name)} and their program?')"><input type="hidden" name="id" value="${r.id}"><button class="btn btn-sm btn-danger" type="submit">Remove</button></form>
+        </div>
+      </div>`;
+    })
+    .join('');
+  return `<h2 class="section-head">Remote programs</h2>
+  <div class="card">
+    ${rows || '<div class="empty">No remote hitters yet.</div>'}
+    <form method="post" action="/coach/remote/add" class="inline-form remote-add">
+      <input type="text" name="name" placeholder="Full name" required maxlength="80" class="input-sm">
+      <button class="btn btn-sm" type="submit">Add remote hitter</button>
+    </form>
+  </div>`;
 }
 
 function coachUser(user, name, checkins, whatWorks, thread, email, memories, routine) {
@@ -924,5 +1133,7 @@ module.exports = {
   coachSkipPage,
   forgotPasswordPage,
   resetPasswordPage,
+  programPage,
+  programEditPage,
   esc,
 };

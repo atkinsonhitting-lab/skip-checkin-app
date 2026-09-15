@@ -66,7 +66,7 @@ if (process.env.SEED_ON_BOOT === 'true' && userCount() === 0) {
 
 function attachUser(req, res, next) {
   if (req.session && req.session.userId) {
-    const row = db.prepare('SELECT id, email, role, athlete_name, first_name, last_name, status FROM users WHERE id = ?').get(req.session.userId);
+    const row = db.prepare('SELECT id, email, role, athlete_name, first_name, last_name, status, remote_program_id FROM users WHERE id = ?').get(req.session.userId);
     if (row) {
       req.user = {
         id: row.id,
@@ -76,6 +76,7 @@ function attachUser(req, res, next) {
         firstName: row.first_name || null,
         displayName: row.first_name || row.athlete_name || 'Coach',
         status: row.status || 'approved',
+        remoteProgramId: row.remote_program_id || null,
       };
     }
   }
@@ -223,6 +224,7 @@ app.post('/register', (req, res) => {
       'INSERT INTO users (email, password_hash, role, athlete_name, first_name, last_name, created_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     )
     .run(email, hash, 'athlete', athleteName, firstName, lastName, new Date().toISOString(), 'pending');
+  linkRemoteProgram(info.lastInsertRowid, athleteName);
   // Tell Bobby so he can approve (or decline) the new hitter.
   notifyCoachOfSignup(req, email, athleteName).catch((e) =>
     console.warn('signup notify failed:', e.message)
@@ -694,6 +696,177 @@ app.post('/routine/remove', requireLogin, (req, res) => {
   res.redirect('/routine');
 });
 
+// ---- Remote programs: Bobby's remote hitters get their training program
+// in the app. Accounts link by name at signup (and on every boot, in db.js).
+const PROGRAM_GRADES = ['Load', 'Path', 'Connection', 'Timing', 'Power Production'];
+function blankProgram(name) {
+  return {
+    athlete: name,
+    date_range: '',
+    phase_emphasis: '',
+    adjustment: '',
+    routine: [],
+    grades: {},
+    strengths: [],
+    cues: { movement: '', timing: '', game: '' },
+    mental_framework: '',
+    schedule: [],
+    notes: [],
+  };
+}
+function getProgram(id) {
+  const row = db.prepare('SELECT * FROM remote_programs WHERE id = ?').get(Number(id));
+  if (!row) return null;
+  let prog = null;
+  try { prog = JSON.parse(row.program_json || '{}'); } catch (e) { prog = {}; }
+  if (!prog || typeof prog !== 'object') prog = {};
+  return { id: row.id, athlete_name: row.athlete_name, updated_at: row.updated_at, prog };
+}
+function linkRemoteProgram(userId, athleteName) {
+  const prog = db
+    .prepare('SELECT id FROM remote_programs WHERE lower(athlete_name) = lower(?)')
+    .get(String(athleteName || '').trim());
+  if (prog) db.prepare('UPDATE users SET remote_program_id = ? WHERE id = ?').run(prog.id, userId);
+}
+function backfillRemoteLinks() {
+  const link = db.prepare(
+    `UPDATE users SET remote_program_id = ?
+     WHERE remote_program_id IS NULL AND role = 'athlete'
+     AND lower(first_name || ' ' || last_name) = lower(?)`
+  );
+  for (const r of db.prepare('SELECT id, athlete_name FROM remote_programs').all()) {
+    link.run(r.id, r.athlete_name);
+  }
+}
+
+// Hitter's program page — remote athletes only.
+app.get('/program', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.redirect('/coach');
+  if (!req.user.remoteProgramId) return res.redirect('/');
+  const p = getProgram(req.user.remoteProgramId);
+  if (!p) return res.redirect('/');
+  res.send(views.programPage(req.user, p));
+});
+
+// Coach: edit a remote hitter's program.
+app.get('/coach/program/:id/edit', requireCoach, (req, res) => {
+  setApprovalCount(req);
+  const p = getProgram(req.params.id);
+  if (!p) return res.redirect('/coach');
+  res.send(views.programEditPage(req.user, p));
+});
+
+app.post('/coach/program/:id/save', requireCoach, (req, res) => {
+  const p = getProgram(req.params.id);
+  if (!p) return res.redirect('/coach');
+  const b = req.body;
+  const prog = p.prog && p.prog.athlete ? p.prog : blankProgram(p.athlete_name);
+  prog.athlete = p.athlete_name;
+  prog.date_range = String(b.date_range || '').trim().slice(0, 60);
+  prog.phase_emphasis = String(b.phase_emphasis || '').trim().slice(0, 120);
+  prog.adjustment = String(b.adjustment || '').trim().slice(0, 500);
+  prog.mental_framework = String(b.mental_framework || '').trim().slice(0, 200);
+  const grades = {};
+  for (const g of PROGRAM_GRADES) {
+    const v = String(b['grade_' + g.replace(/ /g, '_')] || '').trim().slice(0, 4);
+    if (v) grades[g] = v;
+  }
+  prog.grades = grades;
+  prog.strengths = String(b.strengths || '')
+    .split('\n')
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .slice(0, 12);
+  prog.cues = {
+    movement: String(b.cue_movement || '').trim().slice(0, 300),
+    timing: String(b.cue_timing || '').trim().slice(0, 300),
+    game: String(b.cue_game || '').trim().slice(0, 300),
+  };
+  const cats = [];
+  for (const k of Object.keys(b)) {
+    const m = k.match(/^cat_(\d+)_name$/);
+    if (m) {
+      const name = String(b[k] || '').trim().slice(0, 60);
+      if (!name) continue;
+      const items = String(b[`cat_${m[1]}_items`] || '')
+        .split('\n')
+        .map((line) => {
+          const parts = String(line).split('|');
+          const drill = (parts[0] || '').trim().slice(0, 80);
+          if (!drill) return null;
+          const item = { drill };
+          const vol = (parts[1] || '').trim().slice(0, 60);
+          if (vol) item.volume = vol;
+          return item;
+        })
+        .filter(Boolean)
+        .slice(0, 20);
+      cats.push({ category: name, items, _i: Number(m[1]) });
+    }
+  }
+  cats.sort((a, b) => a._i - b._i);
+  prog.routine = cats.map(({ category, items }) => ({ category, items }));
+  const schedDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  prog.schedule = schedDays
+    .map((day, i) => [day, String(b['sched_' + i] || '').trim().slice(0, 40)])
+    .filter(([, label]) => label);
+  prog.notes = String(b.notes || '')
+    .split('\n')
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .slice(0, 20);
+  if (!Array.isArray(prog.schedule)) prog.schedule = [];
+  if (!Array.isArray(prog.notes)) prog.notes = [];
+  db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?').run(
+    JSON.stringify(prog),
+    new Date().toISOString(),
+    p.id
+  );
+  res.redirect('/coach');
+});
+
+// Coach: manage the remote roster.
+app.post('/coach/remote/add', requireCoach, (req, res) => {
+  const name = String(req.body.name || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+  if (name) {
+    const exists = db
+      .prepare('SELECT id FROM remote_programs WHERE lower(athlete_name) = lower(?)')
+      .get(name);
+    if (!exists) {
+      const info = db
+        .prepare('INSERT INTO remote_programs (athlete_name, program_json, updated_at) VALUES (?, ?, ?)')
+        .run(name, JSON.stringify(blankProgram(name)), new Date().toISOString());
+      backfillRemoteLinks();
+    }
+  }
+  res.redirect('/coach');
+});
+
+app.post('/coach/remote/remove', requireCoach, (req, res) => {
+  const id = Number(req.body.id);
+  if (id) {
+    db.prepare('UPDATE users SET remote_program_id = NULL WHERE remote_program_id = ?').run(id);
+    db.prepare('DELETE FROM remote_programs WHERE id = ?').run(id);
+  }
+  res.redirect('/coach');
+});
+
+app.post('/coach/remote/link', requireCoach, (req, res) => {
+  const id = Number(req.body.id);
+  const email = String(req.body.email || '').trim().toLowerCase();
+  const u = email
+    ? db.prepare("SELECT id FROM users WHERE email = ? AND role = 'athlete'").get(email)
+    : null;
+  if (id && u) db.prepare('UPDATE users SET remote_program_id = ? WHERE id = ?').run(id, u.id);
+  res.redirect('/coach');
+});
+
+app.post('/coach/remote/unlink', requireCoach, (req, res) => {
+  const id = Number(req.body.id);
+  if (id) db.prepare('UPDATE users SET remote_program_id = NULL WHERE remote_program_id = ?').run(id);
+  res.redirect('/coach');
+});
+
 app.post('/learn/note', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.status(403).send('Forbidden');
   const note = String(req.body.note || '').trim().slice(0, 1000);
@@ -867,7 +1040,14 @@ app.get('/coach', requireCoach, (req, res) => {
     .prepare('SELECT * FROM checkins ORDER BY created_at DESC LIMIT 20')
     .all();
   const pending = pendingList();
-  res.send(views.coachDashboard(req.user, stats, latest, pending));
+  const remotePrograms = db
+    .prepare(
+      `SELECT p.id, p.athlete_name, p.updated_at,
+              (SELECT email FROM users WHERE remote_program_id = p.id LIMIT 1) AS user_email
+       FROM remote_programs p ORDER BY p.athlete_name`
+    )
+    .all();
+  res.send(views.coachDashboard(req.user, stats, latest, pending, remotePrograms));
 });
 
 // Approvals tab: approve or decline waiting hitters right here.
