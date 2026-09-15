@@ -321,4 +321,4 @@ a:active { color: #ff3b30; }
 .chat-form { display: flex; gap: 8px; align-items: center; }
 .chat-form .voice-wrap { flex: 1; display: flex; }
 .chat-form .voice-wrap input { flex: 1; width: 100%; }
-.chat-form .btn-primary { flex-shrink: 0; }
+.chat-form .btn-primary { flex-shrink: 0; width: auto; margin-top: 0; padding: 12px 20px; }
