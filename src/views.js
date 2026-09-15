@@ -50,7 +50,10 @@ function userTabs(active) {
 }
 
 function coachTabs(active) {
-  return [{ href: '/coach', label: 'Dashboard', active: active === 'dashboard' }];
+  return [
+    { href: '/coach', label: 'Dashboard', active: active === 'dashboard' },
+    { href: '/coach/skip', label: 'Train Skip', active: active === 'skip' },
+  ];
 }
 
 // ---------- Pages ----------
@@ -436,7 +439,20 @@ function coachDashboard(user, userStats, latest) {
   });
 }
 
-function coachUser(user, name, checkins, stats, thoughts) {
+function coachUser(user, name, checkins, stats, thoughts, thread) {
+  const skipImg = `<img src="/skip-avatar.webp" class="skip-avatar" alt="Skip">`;
+  const convo =
+    thread && thread.length
+      ? `<h2 class="section-head">Talk to Skip history</h2>
+    <div class="chat-log">${thread
+      .map(
+        (m) =>
+          `<div class="msg ${m.role === 'user' ? 'msg-user' : 'msg-skip'}">${
+            m.role === 'user' ? '' : skipImg
+          }<div class="msg-bubble">${esc(m.content)}</div></div>`
+      )
+      .join('')}</div>`
+      : '';
   return layout({
     title: name,
     user,
@@ -444,7 +460,75 @@ function coachUser(user, name, checkins, stats, thoughts) {
     body: `<h1 class="page-title">${esc(name)}</h1>
     <p><a href="/coach">← Back to dashboard</a></p>
     ${whatWorksSection(stats || [], thoughts || [], null, 0)}
+    ${convo}
     ${checkins.length ? checkins.map(checkinCard).join('') : '<div class="card empty">No check-ins yet.</div>'}`,
+  });
+}
+
+// ---- Train Skip: Bobby's HQ for training Skip and reviewing his chats ----
+function coachSkipPage(user, notes, hitters, thread, chatEnabled, saved) {
+  const skipImg = `<img src="/skip-avatar.webp" class="skip-avatar" alt="Skip">`;
+  const msgs = (thread || [])
+    .map(
+      (m) =>
+        `<div class="msg ${m.role === 'user' ? 'msg-user' : 'msg-skip'}">${
+          m.role === 'user' ? '' : skipImg
+        }<div class="msg-bubble">${esc(m.content)}</div></div>`
+    )
+    .join('');
+  const convos = hitters.length
+    ? hitters
+        .map(
+          (h) => `<a class="card athlete-card" href="/coach/user/${encodeURIComponent(h.email)}">
+        <div class="athlete-card-name">${esc(h.name)}</div>
+        <div class="athlete-card-email">${esc(h.email)}</div>
+        <div class="athlete-card-meta">${h.n} message${h.n === 1 ? '' : 's'}${
+            h.last ? ` · last ${fmtDate(h.last)}` : ''
+          }</div>
+        ${
+          h.lastSkip
+            ? `<div class="hint" style="margin-top:6px">Skip's latest: &ldquo;${esc(
+                h.lastSkip.slice(0, 140)
+              )}${h.lastSkip.length > 140 ? '…' : ''}&rdquo;</div>`
+            : ''
+        }
+      </a>`
+        )
+        .join('')
+    : '<div class="card empty">No hitter has talked to Skip yet.</div>';
+  return layout({
+    title: 'Train Skip',
+    user,
+    tabs: coachTabs('skip'),
+    body: `<h1 class="page-title">Train Skip</h1>
+    <p class="hint">Talk to Skip directly to train him. What you tell him shapes this conversation — <strong>save it in your coaching notes</strong> and he'll apply it to every hitter.</p>
+    ${saved ? '<div class="notice">Coaching notes saved — Skip is using them with every hitter now.</div>' : ''}
+    <h2 class="section-head">Talk to Skip</h2>
+    ${
+      chatEnabled
+        ? `<div id="chat-log" class="chat-log">${
+            msgs ||
+            `<div class="msg msg-skip">${skipImg}<div class="msg-bubble">Coach — what do you want me doing different with your hitters?</div></div>`
+          }</div>
+        <form id="chat-form" class="chat-form" data-endpoint="/api/coach/chat" autocomplete="off">
+          <input id="chat-input" type="text" placeholder="Train Skip…" maxlength="2000" required>
+          <button type="submit" class="btn-primary">Send</button>
+        </form>`
+        : `<div class="card empty">Skip's chat isn't switched on yet — check back soon.</div>`
+    }
+    <h2 class="section-head">Coaching notes</h2>
+    <div class="card">
+      <p class="hint">These get injected into Skip's instructions for <strong>every</strong> hitter chat. Keep them tight — rules, corrections, cues you want him using.</p>
+      <form method="post" action="/coach/skip/notes" class="form">
+        <label>Notes for Skip<textarea name="notes" rows="6" maxlength="8000" placeholder="e.g. Never tell a hitter to change their stance in-season. Always ask about their plan at the plate before touching mechanics.">${esc(
+          notes
+        )}</textarea></label>
+        <button type="submit" class="btn-primary">Save notes</button>
+      </form>
+    </div>
+    <h2 class="section-head">His conversations</h2>
+    <div class="athlete-grid">${convos}</div>
+    <p class="hint">Tap a hitter to read their full thread with Skip.</p>`,
   });
 }
 
@@ -502,6 +586,7 @@ module.exports = {
   chatPage,
   coachDashboard,
   coachUser,
+  coachSkipPage,
   forgotPasswordPage,
   resetPasswordPage,
   esc,

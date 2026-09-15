@@ -127,4 +127,12 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
 CREATE INDEX IF NOT EXISTS idx_reset_user ON password_reset_tokens(user_id);
 `);
 
+// Coach settings: key/value store (e.g. Bobby's coaching notes for Skip).
+db.exec(`
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL DEFAULT ''
+);
+`);
+
 module.exports = db;

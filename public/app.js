@@ -59,7 +59,8 @@
       try {
         const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), 45000);
-        const resp = await fetch('/api/chat', {
+        const endpoint = form.dataset.endpoint || '/api/chat';
+        const resp = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message: text }),

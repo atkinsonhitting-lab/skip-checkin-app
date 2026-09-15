@@ -92,6 +92,16 @@ function requireCoach(req, res, next) {
   next();
 }
 
+// Coach settings (key/value). Used for Bobby's Skip coaching notes.
+function getSetting(key) {
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+  return row ? row.value : '';
+}
+function setSetting(key, value) {
+  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+    .run(key, value);
+}
+
 // Extract the express-session id from a WebSocket upgrade request's cookies.
 function getWsSessionId(req) {
   const header = req.headers.cookie || '';
@@ -636,12 +646,14 @@ app.get('/coach/user/:email', requireCoach, (req, res) => {
     .prepare('SELECT * FROM checkins WHERE user_id = ? ORDER BY created_at DESC')
     .all(user.id);
   const name = user.athlete_name || user.email;
-  res.send(views.coachUser(req.user, name, rows, drillStats(name), thoughtStats(name)));
+  const thread = db
+    .prepare('SELECT role, content, created_at FROM chat_messages WHERE user_id = ? ORDER BY created_at ASC LIMIT 200')
+    .all(user.id);
+  res.send(views.coachUser(req.user, name, rows, drillStats(name), thoughtStats(name), thread));
 });
 
 // Coach-only backup: download every check-in as JSON.
-app.get('/coach/export', requireCoach, (req, res) => {
-  const rows = db
+app.get('/coach/export', requireCoach, (req, res) => {  const rows = db
     .prepare(
       `SELECT c.id, c.athlete_name, u.email, c.created_at, c.environment, c.drills_done,
               c.feel, c.confidence, c.focus, c.session_score, c.score_tier,
@@ -653,6 +665,77 @@ app.get('/coach/export', requireCoach, (req, res) => {
     .map((r) => ({ ...r, drills_done: safeParseDrills(r.drills_done) }));
   res.setHeader('Content-Disposition', 'attachment; filename="skip-checkins-export.json"');
   res.json({ exported_at: new Date().toISOString(), checkins: rows });
+});
+
+// ---- Train Skip (coach HQ) ----
+// Bobby talks to Skip directly to train him, keeps coaching notes that get
+// injected into every hitter's Skip prompt, and reviews Skip's conversations
+// with each hitter.
+
+app.get('/coach/skip', requireCoach, (req, res) => {
+  const notes = getSetting('coach_notes');
+  const hitters = db
+    .prepare(
+      `SELECT u.id, u.email, u.first_name, u.last_name, u.athlete_name,
+              COUNT(m.id) AS n, MAX(m.created_at) AS last
+       FROM users u LEFT JOIN chat_messages m ON m.user_id = u.id
+       WHERE u.role != 'coach'
+       GROUP BY u.id HAVING n > 0 ORDER BY last DESC`
+    )
+    .all()
+    .map((h) => ({
+      ...h,
+      name: [h.first_name, h.last_name].filter(Boolean).join(' ') || h.athlete_name || h.email,
+      lastSkip: (
+        db
+          .prepare(
+            "SELECT content FROM chat_messages WHERE user_id = ? AND role = 'assistant' ORDER BY created_at DESC LIMIT 1"
+          )
+          .get(h.id) || {}
+      ).content,
+    }));
+  const thread = db
+    .prepare('SELECT role, content, created_at FROM chat_messages WHERE user_id = ? ORDER BY created_at ASC LIMIT 100')
+    .all(req.user.id);
+  res.send(views.coachSkipPage(req.user, notes, hitters, thread, !!process.env.LLM_API_KEY, req.query.saved === '1'));
+});
+
+app.post('/coach/skip/notes', requireCoach, (req, res) => {
+  const notes = typeof req.body.notes === 'string' ? req.body.notes.trim().slice(0, 8000) : '';
+  setSetting('coach_notes', notes);
+  res.redirect('/coach/skip?saved=1');
+});
+
+// Coach chats with Skip directly (stored as the coach's own thread).
+app.post('/api/coach/chat', requireCoach, async (req, res) => {
+  const message = typeof req.body.message === 'string' ? req.body.message.trim() : '';
+  if (!message) return res.status(400).json({ error: 'Message is empty.' });
+  if (message.length > 2000) return res.status(400).json({ error: 'Keep it under 2000 characters.' });
+  const today = new Date().toISOString().slice(0, 10);
+  const used = db
+    .prepare("SELECT COUNT(*) AS n FROM chat_messages WHERE user_id = ? AND role = 'user' AND substr(created_at, 1, 10) = ?")
+    .get(req.user.id, today).n;
+  if (used >= CHAT_DAILY_LIMIT) {
+    return res.status(429).json({ error: "You've hit today's chat limit (30). Back tomorrow." });
+  }
+  const now = new Date().toISOString();
+  db.prepare('INSERT INTO chat_messages (user_id, role, content, created_at) VALUES (?, ?, ?, ?)')
+    .run(req.user.id, 'user', message, now);
+  try {
+    const reply = await askSkip(req.user, message, { coachMode: true });
+    db.prepare('INSERT INTO chat_messages (user_id, role, content, created_at) VALUES (?, ?, ?, ?)')
+      .run(req.user.id, 'assistant', reply, new Date().toISOString());
+    res.json({ reply });
+  } catch (err) {
+    if (err.code === 'chat_not_configured') {
+      return res.status(503).json({ error: "Skip's chat isn't switched on yet — check back soon." });
+    }
+    if (err.code === 'llm_rate_limit') {
+      return res.status(429).json({ error: "Skip's getting a lot of traffic right now — try again in a minute." });
+    }
+    console.error('coach chat error:', err.message);
+    return res.status(502).json({ error: 'Skip is having trouble right now. Try again in a bit.' });
+  }
 });
 
 // ---- Ingestion API for the AI assistant ----
@@ -852,7 +935,22 @@ function skipDataBlock(userId) {
     : 'HITTER DATA: no check-ins logged yet — this is a brand-new hitter. Ask what they are working on.';
 }
 
-async function askSkip(user, userMessage) {
+const COACH_SYSTEM = `You are Skip, the AI hitting coach inside The Daily Hitter. You are talking to BOBBY ATKINSON — your head coach, the man whose brain you coach with. He is training you right now: giving feedback on your coaching, correcting your answers, teaching you how he wants his hitters coached. Listen carefully, take every correction seriously, and confirm specifically how you will apply what he tells you going forward. Talk to him like a trusted assistant coach — direct, no fluff, no motivational-poster talk. Keep replies short (2-4 sentences) unless he asks for more. Never mention you are an AI model. You are Skip.
+
+IMPORTANT: conversation alone does not change how you coach his hitters — only his saved coaching notes do. If Bobby gives you a correction or a new rule for coaching hitters, apply it in this conversation AND remind him to add it to his coaching notes on the Train Skip page so it sticks for every hitter.`;
+
+// Bobby's coaching notes, injected into Skip's system prompt for every
+// hitter chat (and shown to Bobby in coach mode). This is how his training
+// actually sticks — conversation alone doesn't persist.
+function coachNotesBlock() {
+  const notes = getSetting('coach_notes').trim();
+  return notes
+    ? `\n\nBOBBY'S DIRECT COACHING NOTES — standing instructions from Bobby Atkinson, your head coach, on how to coach his hitters. Follow these; they override your defaults wherever they conflict:\n${notes}`
+    : '';
+}
+
+async function askSkip(user, userMessage, opts = {}) {
+  const coachMode = !!opts.coachMode;
   const userId = user.id;
   const apiKey = process.env.LLM_API_KEY;
   if (!apiKey) {
@@ -864,10 +962,12 @@ async function askSkip(user, userMessage) {
     .prepare('SELECT role, content FROM chat_messages WHERE user_id = ? ORDER BY created_at DESC LIMIT 20')
     .all(userId)
     .reverse();
-  const nameLine = user.firstName
+  const nameLine = !coachMode && user.firstName
     ? `The hitter you're talking to is named "${user.firstName}". Call them ${user.firstName} — use their first name naturally, the way a coach would.\n\n`
     : '';
-  const dataBlock = skipDataBlock(userId);
+  const dataBlock = coachMode ? '' : skipDataBlock(userId);
+  const notesBlock = coachNotesBlock();
+  const system = coachMode ? COACH_SYSTEM + notesBlock : `${SKIP_SYSTEM}\n\n${nameLine}${dataBlock}${notesBlock}`;
   // Gemini roles are "user"/"model" (our DB stores "assistant").
   const contents = [
     ...history.map((m) => ({
@@ -885,7 +985,7 @@ async function askSkip(user, userMessage) {
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: `${SKIP_SYSTEM}\n\n${nameLine}${dataBlock}` }] },
+        systemInstruction: { parts: [{ text: system }] },
         contents,
         generationConfig: { maxOutputTokens: 500, temperature: 0.7 },
       }),
