@@ -339,3 +339,17 @@ a:active { color: #ff3b30; }
 .chat-form .voice-wrap { flex: 1; display: flex; }
 .chat-form .voice-wrap input { flex: 1; width: 100%; }
 .chat-form .btn-primary { flex-shrink: 0; width: auto; margin-top: 0; padding: 12px 20px; }
+
+/* Text / Live mode toggle + live voice panel */
+.chat-mode { display: flex; gap: 8px; margin: 4px 0 12px; }
+.mode-btn {
+  flex: 1; padding: 10px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--bg2); color: var(--fg);
+  font-size: 15px; font-weight: 600; cursor: pointer;
+}
+.mode-btn.mode-active { border-color: var(--red); color: var(--red); }
+.live-card { margin-top: 0; }
+.live-status { font-weight: 600; font-size: 16px; margin-bottom: 10px; }
+.live-transcript { max-height: 40vh; min-height: 120px; }
+.live-controls { display: flex; gap: 10px; margin-top: 10px; }
+.live-controls .btn-primary { flex: 1; }

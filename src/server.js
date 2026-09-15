@@ -28,9 +28,10 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 const isProd = process.env.NODE_ENV === 'production';
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev-only-secret-change-me';
 
+const sessionStore = new SQLiteStore(db);
 app.use(
   session({
-    store: new SQLiteStore(db),
+    store: sessionStore,
     secret: SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
@@ -81,6 +82,26 @@ function requireCoach(req, res, next) {
   if (!req.user) return res.redirect('/login');
   if (req.user.role !== 'coach') return res.status(403).send('Forbidden');
   next();
+}
+
+// Extract the express-session id from a WebSocket upgrade request's cookies.
+function getWsSessionId(req) {
+  const header = req.headers.cookie || '';
+  const m = header.match(/(?:^|;\s*)connect\.sid=([^;]+)/);
+  if (!m) return null;
+  let val;
+  try {
+    val = decodeURIComponent(m[1]);
+  } catch (e) {
+    return null;
+  }
+  if (val.startsWith('s:')) {
+    val = val.slice(2);
+    const dot = val.lastIndexOf('.');
+    if (dot === -1) return null;
+    val = val.slice(0, dot);
+  }
+  return val || null;
 }
 
 // Simple in-memory throttle: 10 attempts per 5 minutes per IP.
@@ -698,19 +719,9 @@ function hitterSnapshot(userId) {
   return { lines, avg, total, trend, top };
 }
 
-async function askSkip(userId, userMessage) {
-  const apiKey = process.env.LLM_API_KEY;
-  if (!apiKey) {
-    const err = new Error('chat_not_configured');
-    err.code = 'chat_not_configured';
-    throw err;
-  }
+function skipDataBlock(userId) {
   const snap = hitterSnapshot(userId);
-  const history = db
-    .prepare('SELECT role, content FROM chat_messages WHERE user_id = ? ORDER BY created_at DESC LIMIT 20')
-    .all(userId)
-    .reverse();
-  const dataBlock = snap.lines.length
+  return snap.lines.length
     ? `HITTER DATA (newest first):\n${snap.lines.join('\n')}\nSessions logged: ${snap.total}${
         snap.avg != null ? ` · Average score: ${snap.avg.toFixed(1)}` : ''
       }\n${snap.trend}${
@@ -719,6 +730,20 @@ async function askSkip(userId, userMessage) {
           : ''
       }`
     : 'HITTER DATA: no check-ins logged yet — this is a brand-new hitter. Ask what they are working on.';
+}
+
+async function askSkip(userId, userMessage) {
+  const apiKey = process.env.LLM_API_KEY;
+  if (!apiKey) {
+    const err = new Error('chat_not_configured');
+    err.code = 'chat_not_configured';
+    throw err;
+  }
+  const history = db
+    .prepare('SELECT role, content FROM chat_messages WHERE user_id = ? ORDER BY created_at DESC LIMIT 20')
+    .all(userId)
+    .reverse();
+  const dataBlock = skipDataBlock(userId);
   // Gemini roles are "user"/"model" (our DB stores "assistant").
   const contents = [
     ...history.map((m) => ({
@@ -1079,7 +1104,7 @@ async function ratePendingJournals() {
 
 // ---- Boot ----
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Skip listening on port ${PORT}`);
   const n = db.prepare("SELECT COUNT(*) AS n FROM users WHERE role != 'coach'").get().n;
   console.log(`Hitters signed up: ${n}`);
@@ -1093,3 +1118,27 @@ app.listen(PORT, () => {
   setTimeout(ratePendingJournals, 20000);
   setInterval(ratePendingJournals, 5 * 60 * 1000);
 });
+
+// Live voice conversations with Skip (server-side Gemini Live API proxy).
+try {
+  require('./live').setupLive(server, db, {
+    sessionStore,
+    getSessionId: getWsSessionId,
+    dataBlock: skipDataBlock,
+    systemPrompt: () => SKIP_SYSTEM,
+    saveMessage: (userId, role, content) =>
+      db
+        .prepare('INSERT INTO chat_messages (user_id, role, content, created_at) VALUES (?, ?, ?, ?)')
+        .run(userId, role, content, new Date().toISOString()),
+    todayUserCount: (userId) =>
+      db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM chat_messages WHERE user_id = ? AND role = 'user' AND substr(created_at, 1, 10) = ?"
+        )
+        .get(userId, new Date().toISOString().slice(0, 10)).n,
+    chatCap: 30,
+  });
+  console.log('Live voice endpoint ready at /live');
+} catch (e) {
+  console.error('Live voice setup failed:', e.message);
+}

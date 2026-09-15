@@ -376,11 +376,29 @@ function chatPage(user, messages, chatEnabled) {
     body: `<h1 class="page-title">Talk to Skip</h1>
     <p class="hint">Struggling? Tell Skip what's going on at the plate — he's seen your check-ins and will point you back on track.</p>
     ${chatEnabled
-      ? `<div id="chat-log" class="chat-log">${msgs || `<div class="msg msg-skip"><div class="msg-bubble">What's going on at the plate? Tell me what feels off.</div></div>`}</div>
-      <form id="chat-form" class="chat-form" autocomplete="off">
-        <input id="chat-input" type="text" placeholder="Ask Skip…" maxlength="2000" required>
-        <button type="submit" class="btn-primary">Send</button>
-      </form>`
+      ? `<div class="chat-mode">
+        <button type="button" id="mode-text" class="mode-btn mode-active">Text</button>
+        <button type="button" id="mode-live" class="mode-btn">Live</button>
+      </div>
+      <div id="text-panel">
+        <div id="chat-log" class="chat-log">${msgs || `<div class="msg msg-skip"><div class="msg-bubble">What's going on at the plate? Tell me what feels off.</div></div>`}</div>
+        <form id="chat-form" class="chat-form" autocomplete="off">
+          <input id="chat-input" type="text" placeholder="Ask Skip…" maxlength="2000" required>
+          <button type="submit" class="btn-primary">Send</button>
+        </form>
+      </div>
+      <div id="live-panel" hidden>
+        <div class="card live-card">
+          <div id="live-status" class="live-status">Talk it out with Skip — live voice, like a phone call.</div>
+          <div id="live-transcript" class="chat-log live-transcript"></div>
+          <div class="live-controls">
+            <button type="button" id="live-start" class="btn-primary">Start live conversation</button>
+            <button type="button" id="live-end" class="btn-ghost" hidden>End</button>
+          </div>
+          <p class="hint">Everything you both say is saved to your chat as a transcript.</p>
+        </div>
+      </div>
+      <script src="/live.js"></script>`
       : `<div class="card empty">Skip's chat isn't switched on yet — check back soon.</div>`}`,
   });
 }
