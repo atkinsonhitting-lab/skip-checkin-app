@@ -101,18 +101,28 @@
       log.appendChild(thinking);
       scroll();
       try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 45000);
         const resp = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message: text }),
+          signal: ctrl.signal,
         });
+        clearTimeout(timer);
         const data = await resp.json().catch(() => ({}));
         thinking.remove();
         if (data.reply) addMsg('assistant', data.reply);
         else addMsg('assistant', data.error || 'Something went wrong. Try again.', false);
       } catch (err) {
         thinking.remove();
-        addMsg('assistant', 'Could not reach Skip. Check your connection and try again.', false);
+        addMsg(
+          'assistant',
+          err && err.name === 'AbortError'
+            ? 'Skip is taking too long — try sending that again.'
+            : 'Could not reach Skip. Check your connection and try again.',
+          false
+        );
       }
       input.disabled = false;
       input.focus();
