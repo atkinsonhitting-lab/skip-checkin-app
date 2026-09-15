@@ -115,9 +115,9 @@ function handleSession(client, user, opts) {
       JSON.stringify({
         setup: {
           model: `models/${LIVE_MODEL}`,
-          responseModalities: ['AUDIO'],
           systemInstruction: { parts: [{ text: systemText }] },
           generationConfig: {
+            responseModalities: ['AUDIO'],
             speechConfig: {
               voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Charon' } },
             },
@@ -137,9 +137,9 @@ function handleSession(client, user, opts) {
     } catch (e) {
       return;
     }
-    // TEMP-DEBUG: surface Google's structured error payloads while diagnosing.
+    // Surface Google's structured error payloads in the server log for diagnosis.
     if (msg.error) {
-      googleDown(`payload ${JSON.stringify(msg.error).slice(0, 200)}`);
+      googleDown(`error payload ${JSON.stringify(msg.error).slice(0, 200)}`);
       return;
     }
     if (msg.setupComplete) {
@@ -182,8 +182,7 @@ function handleSession(client, user, opts) {
   const googleDown = (why) => {
     if (closed) return;
     console.error('live voice upstream closed:', why);
-    // TEMP-DEBUG: include upstream detail in the client error while diagnosing.
-    send(client, { type: 'error', message: `Voice service dropped the call (${why}).` });
+    send(client, { type: 'error', message: 'Lost connection to the voice service — try again.' });
     closeBoth();
   };
   google.on('close', (code, reason) => googleDown(`code ${code} ${reason || ''}`.trim()));
