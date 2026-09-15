@@ -23,6 +23,13 @@ app.set('trust proxy', 1); // needed for secure cookies behind Render's proxy
 app.use(helmet());
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
+// Never let browsers cache app pages or scripts — Bobby tests on his phone
+// and stale cached pages caused real confusion (old wording, missing sections).
+app.use((req, res, next) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.set('Pragma', 'no-cache');
+  next();
+});
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 const isProd = process.env.NODE_ENV === 'production';
