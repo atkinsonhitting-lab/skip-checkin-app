@@ -135,4 +135,24 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 `);
 
+// One-time cleanup (Sep 15 2026): Bobby asked to remove ALL test accounts
+// except test@atkinsonhitting.com. Keeps every coach account and that one
+// athlete account; deletes everyone else plus their check-ins, chats,
+// routines, and reset tokens. Guarded by a settings flag so it runs once.
+if (!db.prepare("SELECT value FROM settings WHERE key = 'test_cleanup_20260915'").get()) {
+  const victims = db
+    .prepare("SELECT id, email FROM users WHERE role != 'coach' AND email != 'test@atkinsonhitting.com'")
+    .all();
+  const ids = victims.map((r) => r.id);
+  if (ids.length) {
+    const ph = ids.map(() => '?').join(',');
+    for (const t of ['chat_messages', 'checkins', 'routine_drills', 'password_reset_tokens']) {
+      db.prepare(`DELETE FROM ${t} WHERE user_id IN (${ph})`).run(...ids);
+    }
+    db.prepare(`DELETE FROM users WHERE id IN (${ph})`).run(...ids);
+  }
+  db.prepare("INSERT INTO settings (key, value) VALUES ('test_cleanup_20260915', ?)").run(String(ids.length));
+  console.log(`TEST CLEANUP: removed ${ids.length} test account(s): ${victims.map((r) => r.email).join(', ') || 'none'}`);
+}
+
 module.exports = db;
