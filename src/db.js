@@ -216,6 +216,13 @@ db.exec(`CREATE TABLE IF NOT EXISTS video_library (
   updated_at TEXT NOT NULL DEFAULT ''
 );`);
 db.exec('CREATE INDEX IF NOT EXISTS idx_video_cat ON video_library(category, name);');
+// Coach overrides: custom display names + hide from hitters. The Drive sync
+// never touches these columns, so Bobby's edits survive every sync.
+{
+  const cols = db.prepare('PRAGMA table_info(video_library)').all().map((c) => c.name);
+  if (!cols.includes('custom_name')) db.exec("ALTER TABLE video_library ADD COLUMN custom_name TEXT DEFAULT '';");
+  if (!cols.includes('hidden')) db.exec('ALTER TABLE video_library ADD COLUMN hidden INTEGER DEFAULT 0;');
+}
 db.exec(`CREATE TABLE IF NOT EXISTS library_sync_state (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL DEFAULT ''

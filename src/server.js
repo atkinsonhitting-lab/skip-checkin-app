@@ -917,19 +917,53 @@ app.post('/api/library/sync', (req, res) => {
 
 app.get('/videos', requireLogin, requireRemote, (req, res) => {
   const cats = db
-    .prepare('SELECT category, COUNT(*) AS n FROM video_library GROUP BY category ORDER BY category')
+    .prepare(
+      'SELECT category, COUNT(*) AS n FROM video_library WHERE hidden = 0 GROUP BY category ORDER BY category'
+    )
     .all();
   const active = req.query.cat || (cats[0] ? cats[0].category : '');
   const videos = active
-    ? db.prepare('SELECT * FROM video_library WHERE category = ? ORDER BY name').all(active)
+    ? db
+        .prepare(
+          "SELECT * FROM video_library WHERE category = ? AND hidden = 0 ORDER BY COALESCE(NULLIF(custom_name, ''), name)"
+        )
+        .all(active)
     : [];
   res.send(views.videosPage(req.user, cats, active, videos));
 });
 
 app.get('/videos/watch/:id', requireLogin, requireRemote, (req, res) => {
-  const v = db.prepare('SELECT * FROM video_library WHERE id = ?').get(req.params.id);
+  const v = db.prepare('SELECT * FROM video_library WHERE id = ? AND hidden = 0').get(req.params.id);
   if (!v) return res.redirect('/videos');
   res.send(views.videoWatchPage(req.user, v));
+});
+
+// ---- Coach video library manager ----
+app.get('/coach/library', requireCoach, (req, res) => {
+  const cats = db
+    .prepare('SELECT category, COUNT(*) AS n FROM video_library GROUP BY category ORDER BY category')
+    .all();
+  const active = req.query.cat || (cats[0] ? cats[0].category : '');
+  const videos = active
+    ? db
+        .prepare("SELECT * FROM video_library WHERE category = ? ORDER BY COALESCE(NULLIF(custom_name, ''), name)")
+        .all(active)
+    : [];
+  const playing = req.query.play ? db.prepare('SELECT * FROM video_library WHERE id = ?').get(req.query.play) : null;
+  res.send(views.coachLibraryPage(req.user, cats, active, videos, playing));
+});
+
+app.post('/coach/library/rename', requireCoach, (req, res) => {
+  const id = Number(req.body.id);
+  const name = String(req.body.custom_name || '').trim().slice(0, 200);
+  if (id) db.prepare('UPDATE video_library SET custom_name = ? WHERE id = ?').run(name, id);
+  res.redirect('/coach/library?cat=' + encodeURIComponent(req.body.cat || ''));
+});
+
+app.post('/coach/library/toggle', requireCoach, (req, res) => {
+  const id = Number(req.body.id);
+  if (id) db.prepare('UPDATE video_library SET hidden = 1 - hidden WHERE id = ?').run(id);
+  res.redirect('/coach/library?cat=' + encodeURIComponent(req.body.cat || ''));
 });
 
 app.post('/learn/note', requireLogin, (req, res) => {

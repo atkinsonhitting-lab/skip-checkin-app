@@ -880,11 +880,12 @@ function videosPage(user, cats, activeCat, videos) {
     )
     .join('');
   const isVideo = (m) => String(m || '').startsWith('video/');
+  const disp = (v) => (v.custom_name && v.custom_name.trim()) || v.name;
   const cards = videos
     .map(
-      (v) => `<a class="card video-card" data-search="${esc(v.name.toLowerCase())}" href="/videos/watch/${v.id}">
+      (v) => `<a class="card video-card" data-search="${esc(disp(v).toLowerCase())}" href="/videos/watch/${v.id}">
         <div class="video-thumb">${isVideo(v.mime_type) ? '\u25B6' : '\uD83D\uDCC4'}</div>
-        <div class="video-name">${esc(v.name)}</div>
+        <div class="video-name">${esc(disp(v))}</div>
       </a>`
     )
     .join('');
@@ -919,12 +920,13 @@ function videosPage(user, cats, activeCat, videos) {
 
 function videoWatchPage(user, v) {
   const src = `https://drive.google.com/file/d/${encodeURIComponent(v.drive_file_id)}/preview`;
+  const disp = (v.custom_name && v.custom_name.trim()) || v.name;
   return layout({
-    title: v.name,
+    title: disp,
     user,
     tabs: userTabs('videos', user),
     body: `<p><a href="/videos?cat=${encodeURIComponent(v.category)}">\u2190 ${esc(cleanCat(v.category))}</a></p>
-    <h1 class="page-title">${esc(v.name)}</h1>
+    <h1 class="page-title">${esc(disp)}</h1>
     <div class="video-player"><iframe src="${src}" allow="autoplay; fullscreen" allowfullscreen></iframe></div>`,
   });
 }
@@ -942,7 +944,59 @@ function librarySection(library) {
   <div class="card">
     <div class="hint-inline">${total} file${total === 1 ? '' : 's'} · ${syncLine} · syncs automatically from Drive</div>
     ${rows || '<div class="empty">Empty.</div>'}
+    <div style="margin-top:10px"><a class="btn-small" href="/coach/library">Open video library</a></div>
   </div>`;
+}
+
+function coachLibraryPage(user, cats, activeCat, videos, playing) {
+  const pills = cats
+    .map(
+      (c) =>
+        `<a class="pill-link${c.category === activeCat ? ' active' : ''}" href="/coach/library?cat=${encodeURIComponent(c.category)}">${esc(cleanCat(c.category))} <span class="hint-inline">${c.n}</span></a>`
+    )
+    .join('');
+  const isVideo = (m) => String(m || '').startsWith('video/');
+  const rows = videos
+    .map((v) => {
+      const disp = (v.custom_name && v.custom_name.trim()) || v.name;
+      const renamed = v.custom_name && v.custom_name.trim() && v.custom_name.trim() !== v.name;
+      return `<div class="card lib-row${v.hidden ? ' lib-hidden' : ''}">
+        <div class="lib-main">
+          <div class="lib-title">${isVideo(v.mime_type) ? '\u25B6 ' : '\uD83D\uDCC4 '}${esc(disp)}</div>
+          ${renamed ? `<div class="hint-inline">Drive name: ${esc(v.name)}</div>` : ''}
+          <div class="lib-actions">
+            <a class="btn-small" href="/coach/library?cat=${encodeURIComponent(activeCat)}&play=${v.id}">Play</a>
+            <form method="post" action="/coach/library/toggle" style="display:inline">
+              <input type="hidden" name="id" value="${v.id}">
+              <input type="hidden" name="cat" value="${esc(activeCat)}">
+              <button class="btn-small${v.hidden ? '' : ' btn-quiet'}" type="submit">${v.hidden ? 'Unhide' : 'Hide'}</button>
+            </form>
+          </div>
+        </div>
+        <form method="post" action="/coach/library/rename" class="lib-rename">
+          <input type="hidden" name="id" value="${v.id}">
+          <input type="hidden" name="cat" value="${esc(activeCat)}">
+          <input type="text" name="custom_name" value="${esc(v.custom_name || '')}" placeholder="Rename\u2026" maxlength="200">
+          <button class="btn-small" type="submit">Save</button>
+        </form>
+      </div>`;
+    })
+    .join('');
+  const player = playing
+    ? `<h1 class="page-title">${esc((playing.custom_name && playing.custom_name.trim()) || playing.name)}</h1>
+       <div class="video-player"><iframe src="https://drive.google.com/file/d/${encodeURIComponent(playing.drive_file_id)}/preview" allow="autoplay; fullscreen" allowfullscreen></iframe></div>`
+    : '';
+  return layout({
+    title: 'Video library',
+    user,
+    active: 'coach',
+    body: `<p><a href="/coach">\u2190 Dashboard</a></p>
+    <h1 class="page-title">Video library</h1>
+    <div class="hint-inline">Renames and hidden videos are yours only — the Drive sync never overwrites them. New Drive files appear here automatically.</div>
+    ${player}
+    <div class="pill-row">${pills}</div>
+    ${rows || '<div class="card empty">No videos in this category yet.</div>'}`,
+  });
 }
 
 function coachUser(user, name, checkins, whatWorks, thread, email, memories, routine) {
@@ -1218,5 +1272,6 @@ module.exports = {
   programEditPage,
   videosPage,
   videoWatchPage,
+  coachLibraryPage,
   esc,
 };
