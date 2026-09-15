@@ -496,11 +496,13 @@ function checkinCard(c, opts = {}) {
     ${worked}
   </div>`;
   }
-  const words = `${notes}${c.what_worked ? `<p><span class="label">What worked</span> ${esc(c.what_worked)}</p>` : ''}`;
+  const words = `${notes}${worked}`;
   return `<div class="card checkin">
     ${head}
-    ${words || `<p class="hint">No notes written for this session.</p>`}
-    <details class="checkin-more"><summary>Full entry</summary>${score}${drillRow}${read}</details>
+    ${score}
+    ${drillRow}
+    ${read}
+    <details class="checkin-more"><summary>Full entry</summary>${words || `<p class="hint">No notes written for this session.</p>`}</details>
   </div>`;
 }
 
