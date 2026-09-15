@@ -748,7 +748,7 @@ app.post('/coach/post', requireCoach, (req, res) => {
   const body = String(req.body.body || '').trim().slice(0, 1000);
   if (title && body) {
     db.prepare(
-      "INSERT INTO coach_posts (coach_name, title, body, source_url, created_at) VALUES ('Your coach', ?, ?, '', datetime('now'))"
+      "INSERT INTO coach_posts (coach_name, title, body, source_url, created_at) VALUES ('Atkinson Hitting', ?, ?, '', datetime('now'))"
     ).run(title, body);
   }
   res.redirect('/coach');

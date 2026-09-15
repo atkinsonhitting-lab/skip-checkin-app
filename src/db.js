@@ -278,4 +278,42 @@ if (!db.prepare('SELECT COUNT(*) AS n FROM coach_posts').get().n) {
   console.log(`SEED: ${seed.length} coach feed posts`);
 }
 
+// Atkinson Hitting's own voice in the feed — shown as just another coaching
+// voice in the lineup, with no indication it owns the app.
+if (
+  !db.prepare("SELECT COUNT(*) AS n FROM coach_posts WHERE coach_name = 'Atkinson Hitting'").get().n
+) {
+  const seed = [
+    [
+      'Atkinson Hitting',
+      'Get back to your best day',
+      "When you're struggling, don't rebuild your swing. Go find what you were doing, thinking, and feeling the last time you were locked in — and do that again. Your best swing is already in you.",
+      'https://www.instagram.com/atkinsonhitting',
+    ],
+    [
+      'Atkinson Hitting',
+      'One fix at a time',
+      'Trying to fix five things fixes nothing. Pick the ONE thing that matters most today, own it, and let the rest wait. Hitters who chase everything catch nothing.',
+      'https://www.instagram.com/atkinsonhitting',
+    ],
+    [
+      'Atkinson Hitting',
+      'Aim at something, not somewhere in your body',
+      "External beats internal every time. Don't think about your hands — think about driving it through the pitcher's chest. A target outside your body frees your swing up.",
+      'https://www.instagram.com/atkinsonhitting',
+    ],
+    [
+      'Atkinson Hitting',
+      'Mental before mechanical',
+      'In a real at-bat, your plan and your intent matter more than your mechanics. Clear mind, simple plan, full commit. Most slumps are between the ears, not in the swing.',
+      'https://www.instagram.com/atkinsonhitting',
+    ],
+  ];
+  const ins2 = db.prepare(
+    "INSERT INTO coach_posts (coach_name, title, body, source_url, created_at) VALUES (?, ?, ?, ?, datetime('now'))"
+  );
+  for (const p of seed) ins2.run(p[0], p[1], p[2], p[3]);
+  console.log(`SEED: ${seed.length} Atkinson Hitting feed posts`);
+}
+
 module.exports = db;
