@@ -715,7 +715,7 @@ function programPage(user, p) {
   // ---- Day-based training navigator ----
   // Blocks are grouped by day label ("Day 1 — Med Ball"). The hitter picks a
   // weekday (Mon–Fri, defaulting to today) and sees that whole day in one spot.
-  const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+  const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
   const dayLabelRe = /^(Day \d+)(?:\s*[\u2014\u2013-]\s*(.+))?$/i;
   const everyDayBlocks = everyDayFirst;
   const everyDayCats = everyDaySet;
