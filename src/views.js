@@ -469,24 +469,38 @@ function skipReadBlock(c) {
   return `<p class="skip-pending">Skip's reviewing your entry — his read lands here.</p>`;
 }
 
-function checkinCard(c) {
+function checkinCard(c, opts = {}) {
   const drills = drillsOf(c);
-  return `<div class="card checkin">
-    <div class="checkin-head">
+  const head = `<div class="checkin-head">
       <span class="checkin-date">${fmtDate(c.created_at)}</span>
       ${c.environment ? `<span class="badge env">${esc(c.environment)}</span>` : ''}
     </div>
-    ${c.athlete_name && c.showAthlete ? `<div class="checkin-athlete">${esc(c.athlete_name)}</div>` : ''}
-    ${c.session_score != null ? `<div class="checkin-score">
+    ${c.athlete_name && c.showAthlete ? `<div class="checkin-athlete">${esc(c.athlete_name)}</div>` : ''}`;
+  const score = `${c.session_score != null ? `<div class="checkin-score">
       ${levelLine(c.session_score, c.score_tier)}
       <span class="hint-inline">Feel ${esc(c.feel)} · Conf ${esc(c.confidence)} · Focus ${esc(c.focus)}${c.difficulty != null ? ` · Difficulty ${esc(c.difficulty)}` : ''}</span>
-    </div>` : ''}
-    ${drills.length ? `<div class="drill-chips">${drills.map(drillChip).join('')}</div>` : ''}
-    ${skipReadBlock(c)}
-    ${c.session_notes ? `<p>${esc(c.session_notes)}</p>` : ''}
-    <div class="checkin-grid">
+    </div>` : ''}`;
+  const drillRow = `${drills.length ? `<div class="drill-chips">${drills.map(drillChip).join('')}</div>` : ''}`;
+  const read = `${skipReadBlock(c)}`;
+  const notes = `${c.session_notes ? `<p>${esc(c.session_notes)}</p>` : ''}`;
+  const worked = `<div class="checkin-grid">
       ${c.what_worked ? `<div><span class="label">What worked</span>${esc(c.what_worked)}</div>` : ''}
-    </div>
+    </div>`;
+  if (opts.expanded) {
+    return `<div class="card checkin">
+    ${head}
+    ${score}
+    ${drillRow}
+    ${read}
+    ${notes}
+    ${worked}
+  </div>`;
+  }
+  const words = `${notes}${c.what_worked ? `<p><span class="label">What worked</span> ${esc(c.what_worked)}</p>` : ''}`;
+  return `<div class="card checkin">
+    ${head}
+    ${words || `<p class="hint">No notes written for this session.</p>`}
+    <details class="checkin-more"><summary>Full entry</summary>${score}${drillRow}${read}</details>
   </div>`;
 }
 
@@ -559,7 +573,7 @@ function coachDashboard(user, userStats, latest, pending) {
     )
     .join('');
   const feed = latest.length
-    ? latest.map((c) => checkinCard({ ...c, showAthlete: true })).join('')
+    ? latest.map((c) => checkinCard({ ...c, showAthlete: true }, { expanded: true })).join('')
     : '<div class="card empty">No check-ins yet.</div>';
   const approvalNudge = pending && pending.length
     ? `<a class="card approval-nudge" href="/coach/approvals">${pending.length} hitter${pending.length === 1 ? '' : 's'} waiting for approval →</a>`
@@ -604,7 +618,7 @@ function coachUser(user, name, checkins, stats, thoughts, thread, email, memorie
     ${memorySection(email, memories)}
     ${whatWorksSection(stats || [], thoughts || [], null, 0)}
     ${convo}
-    ${checkins.length ? checkins.map(checkinCard).join('') : '<div class="card empty">No check-ins yet.</div>'}
+    ${checkins.length ? checkins.map((c) => checkinCard(c, { expanded: true })).join('') : '<div class="card empty">No check-ins yet.</div>'}
     <p style="margin-top:28px;text-align:center"><a href="/coach/user/${encodeURIComponent(email)}/delete" style="color:#8a8a8a;font-size:14px">Delete hitter from the platform</a></p>`,
   });
 }

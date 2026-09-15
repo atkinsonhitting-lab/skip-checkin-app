@@ -195,6 +195,10 @@ a:active { color: #ff3b30; }
 
 /* Check-ins */
 .checkin-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.checkin-more { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+.checkin-more summary { cursor: pointer; color: var(--muted); font-size: 13px; font-weight: 700; }
+.checkin-more summary:active { color: var(--red); }
+.checkin-more[open] summary { margin-bottom: 6px; }
 .checkin-date { color: var(--muted); font-size: 13px; }
 .badge.env { background: rgba(225,6,0,.15); color: #ff6b61; }
 .checkin-athlete { font-weight: 800; font-size: 16px; margin-bottom: 6px; }
