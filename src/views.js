@@ -17,8 +17,15 @@ function fmtDate(iso) {
 
 function layout({ title, user, tabs, body }) {
   const tabHtml = (tabs || [])
-    .map((t) => `<a href="${t.href}" class="tab${t.active ? ' active' : ''}">${esc(t.label)}${t.badge ? `<span class="tab-badge">${esc(t.badge)}</span>` : ''}</a>`)
+    .map((t) => `<a href="${t.href}" class="drawer-link${t.active ? ' active' : ''}">${esc(t.label)}${t.badge ? `<span class="tab-badge">${esc(t.badge)}</span>` : ''}</a>`)
     .join('');
+  const drawer = tabHtml
+    ? `<div id="drawer-overlay" hidden></div>
+       <aside id="drawer" aria-label="Navigation" hidden>
+         <div class="drawer-head"><span>THE DAILY HITTER</span><button type="button" id="drawer-close" aria-label="Close menu">\u2715</button></div>
+         <nav>${tabHtml}</nav>
+       </aside>`
+    : '';
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -39,10 +46,10 @@ function layout({ title, user, tabs, body }) {
 </head>
 <body>
 <header class="topbar">
-  <div class="brand"><img src="/daily-hitter-logo.jpg" class="brand-logo-icon" alt=""> THE DAILY HITTER</div>
+  <div class="topbar-left">${tabHtml ? `<button type="button" id="drawer-btn" aria-label="Open menu">\u2630</button>` : ''}<div class="brand"><img src="/daily-hitter-logo.jpg" class="brand-logo-icon" alt=""> THE DAILY HITTER</div></div>
   ${user ? `<div class="userbox">${esc(user.displayName)} · <a href="/logout">Log out</a></div>` : ''}
 </header>
-${tabHtml ? `<nav class="tabs">${tabHtml}</nav>` : ''}
+${drawer}
 ${user && user.viewAs ? `<div class="viewas-banner">Previewing as <strong>${esc(user.viewAsName)}</strong> — actions are disabled. <form method="post" action="/coach/view-as/exit" style="display:inline;margin:0"><button type="submit" class="viewas-exit">Exit preview</button></form></div>` : ''}
 <main class="wrap">${body}</main>
 <script src="/app.js"></script>

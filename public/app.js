@@ -284,3 +284,27 @@
     })();
   });
 })();
+
+// ---- Sidebar drawer nav ----
+(function drawer() {
+  var btn = document.getElementById('drawer-btn');
+  var panel = document.getElementById('drawer');
+  var overlay = document.getElementById('drawer-overlay');
+  var closeBtn = document.getElementById('drawer-close');
+  if (!btn || !panel || !overlay) return;
+  function open() {
+    panel.hidden = false;
+    overlay.hidden = false;
+    requestAnimationFrame(function () { document.body.classList.add('drawer-open'); });
+  }
+  function close() {
+    document.body.classList.remove('drawer-open');
+    setTimeout(function () { panel.hidden = true; overlay.hidden = true; }, 260);
+  }
+  btn.addEventListener('click', open);
+  if (closeBtn) closeBtn.addEventListener('click', close);
+  overlay.addEventListener('click', close);
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && document.body.classList.contains('drawer-open')) close();
+  });
+})();
