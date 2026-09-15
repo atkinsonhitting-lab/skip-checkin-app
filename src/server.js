@@ -65,7 +65,7 @@ if (process.env.SEED_ON_BOOT === 'true' && userCount() === 0) {
 
 function attachUser(req, res, next) {
   if (req.session && req.session.userId) {
-    const row = db.prepare('SELECT id, email, role, athlete_name, first_name, last_name FROM users WHERE id = ?').get(req.session.userId);
+    const row = db.prepare('SELECT id, email, role, athlete_name, first_name, last_name, status FROM users WHERE id = ?').get(req.session.userId);
     if (row) {
       req.user = {
         id: row.id,
@@ -74,6 +74,7 @@ function attachUser(req, res, next) {
         athleteName: row.athlete_name,
         firstName: row.first_name || null,
         displayName: row.first_name || row.athlete_name || 'Bobby',
+        status: row.status || 'approved',
       };
     }
   }
@@ -83,6 +84,10 @@ app.use(attachUser);
 
 function requireLogin(req, res, next) {
   if (!req.user) return res.redirect('/login');
+  // Athletes waiting for Bobby's approval can't use the app yet.
+  if (req.user.role !== 'coach' && req.user.status !== 'approved') {
+    return res.redirect('/pending');
+  }
   next();
 }
 
@@ -163,6 +168,10 @@ app.post('/login', (req, res) => {
     attemptFailed(ip);
     return res.send(views.loginPage('Wrong email or password.'));
   }
+  // New signups wait for Bobby's approval before they can get in.
+  if (row.role !== 'coach' && row.status !== 'approved') {
+    return res.send(views.loginPage('Your account is waiting for Coach Bobby\u2019s approval. You\u2019ll be able to log in once he approves you.'));
+  }
   req.session.userId = row.id;
   res.redirect('/');
 });
@@ -206,11 +215,22 @@ app.post('/register', (req, res) => {
   const athleteName = `${firstName} ${lastName}`;
   const info = db
     .prepare(
-      'INSERT INTO users (email, password_hash, role, athlete_name, first_name, last_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO users (email, password_hash, role, athlete_name, first_name, last_name, created_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     )
-    .run(email, hash, 'athlete', athleteName, firstName, lastName, new Date().toISOString());
-  req.session.userId = info.lastInsertRowid;
-  res.redirect('/');
+    .run(email, hash, 'athlete', athleteName, firstName, lastName, new Date().toISOString(), 'pending');
+  // Tell Bobby so he can approve (or decline) the new hitter.
+  notifyCoachOfSignup(req, email, athleteName).catch((e) =>
+    console.warn('signup notify failed:', e.message)
+  );
+  res.redirect('/pending');
+});
+
+// Waiting room for athletes Bobby hasn't approved yet.
+app.get('/pending', (req, res) => {
+  if (req.user && (req.user.role === 'coach' || req.user.status === 'approved')) {
+    return res.redirect('/');
+  }
+  res.send(views.pendingPage());
 });
 
 app.get('/logout', (req, res) => {
@@ -621,7 +641,7 @@ app.get('/history', requireLogin, (req, res) => {
 
 app.get('/coach', requireCoach, (req, res) => {
   const users = db
-    .prepare("SELECT id, email, athlete_name, first_name, last_name, created_at FROM users WHERE role != 'coach' ORDER BY created_at ASC")
+    .prepare("SELECT id, email, athlete_name, first_name, last_name, created_at FROM users WHERE role != 'coach' AND status = 'approved' ORDER BY created_at ASC")
     .all();
   const stats = users.map((u) => {
     const row = db
@@ -633,7 +653,38 @@ app.get('/coach', requireCoach, (req, res) => {
   const latest = db
     .prepare('SELECT * FROM checkins ORDER BY created_at DESC LIMIT 20')
     .all();
-  res.send(views.coachDashboard(req.user, stats, latest));
+  const pending = db
+    .prepare("SELECT id, email, athlete_name, first_name, last_name, created_at FROM users WHERE role = 'athlete' AND status = 'pending' ORDER BY created_at ASC")
+    .all()
+    .map((u) => ({
+      ...u,
+      name: [u.first_name, u.last_name].filter(Boolean).join(' ') || u.athlete_name || u.email,
+    }));
+  res.send(views.coachDashboard(req.user, stats, latest, pending));
+});
+
+// Approve a waiting hitter — they can log in from here on.
+app.post('/coach/approve/:id', requireCoach, (req, res) => {
+  const u = db
+    .prepare("SELECT id, email, athlete_name, first_name, last_name FROM users WHERE id = ? AND role = 'athlete' AND status = 'pending'")
+    .get(req.params.id);
+  if (u) {
+    db.prepare("UPDATE users SET status = 'approved' WHERE id = ?").run(u.id);
+    const name = [u.first_name, u.last_name].filter(Boolean).join(' ') || u.athlete_name || u.email;
+    sendApprovalEmail(req, u.email, name).catch((e) =>
+      console.warn('approval email failed:', e.message)
+    );
+  }
+  res.redirect('/coach');
+});
+
+// Decline a waiting hitter — removes the signup entirely.
+app.post('/coach/decline/:id', requireCoach, (req, res) => {
+  const u = db
+    .prepare("SELECT id FROM users WHERE id = ? AND role = 'athlete' AND status = 'pending'")
+    .get(req.params.id);
+  if (u) deleteHitter(u.id);
+  res.redirect('/coach');
 });
 
 app.get('/coach/user/:email', requireCoach, (req, res) => {
@@ -649,8 +700,37 @@ app.get('/coach/user/:email', requireCoach, (req, res) => {
   const thread = db
     .prepare('SELECT role, content, created_at FROM chat_messages WHERE user_id = ? ORDER BY created_at ASC LIMIT 200')
     .all(user.id);
-  res.send(views.coachUser(req.user, name, rows, drillStats(name), thoughtStats(name), thread));
+  res.send(views.coachUser(req.user, name, rows, drillStats(name), thoughtStats(name), thread, user.email));
 });
+
+// Delete a hitter from the platform: confirm page first, then the delete.
+app.get('/coach/user/:email/delete', requireCoach, (req, res) => {
+  const em = (req.params.email || '').toLowerCase();
+  const user = db
+    .prepare("SELECT id, email, athlete_name, first_name, last_name FROM users WHERE email = ? AND role != 'coach'")
+    .get(em);
+  if (!user) return res.status(404).send('Unknown user.');
+  const n = db.prepare('SELECT COUNT(*) AS n FROM checkins WHERE user_id = ?').get(user.id).n;
+  const name = [user.first_name, user.last_name].filter(Boolean).join(' ') || user.athlete_name || user.email;
+  res.send(views.coachDeleteHitterPage(req.user, user, name, n));
+});
+
+app.post('/coach/user/:email/delete', requireCoach, (req, res) => {
+  const em = (req.params.email || '').toLowerCase();
+  const user = db
+    .prepare("SELECT id FROM users WHERE email = ? AND role != 'coach'")
+    .get(em);
+  if (user) deleteHitter(user.id);
+  res.redirect('/coach');
+});
+
+// Remove a hitter and everything they created: check-ins, chats, routine, tokens.
+function deleteHitter(userId) {
+  for (const t of ['chat_messages', 'checkins', 'routine_drills', 'password_reset_tokens']) {
+    db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(userId);
+  }
+  db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+}
 
 // Coach-only backup: download every check-in as JSON.
 app.get('/coach/export', requireCoach, (req, res) => {  const rows = db
@@ -1161,6 +1241,45 @@ async function sendResetEmail(to, link) {
       `<p>If that wasn't you, ignore this email.</p>`,
   });
   return true;
+}
+
+// ---- Account approvals: Bobby reviews every signup ----
+
+// New hitter signed up — tell Bobby so he can approve or decline them.
+async function notifyCoachOfSignup(req, email, name) {
+  const m = mailer();
+  const coachEmail = (process.env.COACH_EMAIL || '').trim().toLowerCase();
+  if (!m || !coachEmail) {
+    console.warn('SIGNUP (no mail configured or no coach email):', email);
+    return;
+  }
+  const base = publicBaseUrl(req);
+  await m.transport.sendMail({
+    from: m.from,
+    to: coachEmail,
+    subject: `New Daily Hitter signup: ${name}`,
+    text:
+      `${name} (${email}) just signed up for The Daily Hitter and is waiting for your approval.\n\n` +
+      `Approve or decline them here:\n${base}/coach\n`,
+  });
+}
+
+// Bobby approved a hitter — let them know they're in.
+async function sendApprovalEmail(req, to, name) {
+  const m = mailer();
+  if (!m) return;
+  const base = publicBaseUrl(req);
+  const first = String(name || '').split(' ')[0] || 'hitter';
+  await m.transport.sendMail({
+    from: m.from,
+    to,
+    subject: "You're in — The Daily Hitter",
+    text:
+      `Hey ${first},\n\n` +
+      `Coach Bobby approved your Daily Hitter account. Log in and check in your first session:\n\n` +
+      `${base}/login\n\n` +
+      `— Skip`,
+  });
 }
 
 function publicBaseUrl(req) {

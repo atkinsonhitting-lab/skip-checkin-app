@@ -32,13 +32,13 @@ function seedUsers({ reset = false } = {}) {
   }
   const created = [];
   const insert = db.prepare(
-    'INSERT INTO users (email, password_hash, role, athlete_name, created_at) VALUES (?, ?, ?, ?, ?)'
+    'INSERT INTO users (email, password_hash, role, athlete_name, created_at, status) VALUES (?, ?, ?, ?, ?, ?)'
   );
   const now = new Date().toISOString();
   for (const u of SEED_USERS) {
     const password = generatePassword();
     const hash = bcrypt.hashSync(password, 12);
-    insert.run(u.email, hash, u.role, u.athlete_name, now);
+    insert.run(u.email, hash, u.role, u.athlete_name, now, 'approved');
     created.push({ ...u, password });
   }
   return created;

@@ -28,6 +28,16 @@ for (const col of ['first_name', 'last_name']) {
   if (!cols.includes(col)) db.exec(`ALTER TABLE users ADD COLUMN ${col} TEXT;`);
 }
 
+// Account approvals (Sep 15 2026): Bobby approves every new signup before the
+// hitter can use the app. New athletes are inserted as 'pending'; existing
+// rows (including the coach) default to 'approved' so nobody gets locked out.
+{
+  const cols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+  if (!cols.includes('status')) {
+    db.exec("ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'approved';");
+  }
+}
+
 // Check-ins: the full Skip flow — environment, drills done, Feel/Confidence/
 // Focus (1-10), instant session score + tier, journal fields, and Skip's
 // journal rating (posted back by the assistant via the API).

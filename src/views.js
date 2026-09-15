@@ -96,7 +96,7 @@ function registerPage(error) {
     tabs: [],
     body: `<div class="login-card card">
       <img src="/daily-hitter-logo.jpg" class="brand-logo-full" alt="The Daily Hitter — A Hitting Journal">
-      <p class="hint">Free. Use your email, set a password, start checking in.</p>
+      <p class="hint">Free. Use your email, set a password, start checking in. Coach Bobby approves every new account.</p>
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
       <form method="post" action="/register" class="form">
         <label>First name
@@ -117,6 +117,21 @@ function registerPage(error) {
         <button type="submit" class="btn-primary">Create account</button>
       </form>
       <p class="hint" style="text-align:center">Already have one? <a href="/login">Log in</a>.</p>
+    </div>`,
+  });
+}
+
+// Waiting room: the hitter signed up but Bobby hasn't approved them yet.
+function pendingPage() {
+  return layout({
+    title: 'Waiting for approval',
+    user: null,
+    tabs: [],
+    body: `<div class="login-card card">
+      <img src="/daily-hitter-logo.jpg" class="brand-logo-full" alt="The Daily Hitter — A Hitting Journal">
+      <h1 class="page-title">You're on the list.</h1>
+      <p class="hint">Coach Bobby personally approves every account. You'll be able to log in as soon as he gives you the green light.</p>
+      <p class="hint" style="text-align:center"><a href="/login">Back to log in</a></p>
     </div>`,
   });
 }
@@ -419,7 +434,7 @@ function chatPage(user, messages, chatEnabled) {
   });
 }
 
-function coachDashboard(user, userStats, latest) {
+function coachDashboard(user, userStats, latest, pending) {
   const totalCheckins = userStats.reduce((s, u) => s + u.total, 0);
   const cards = userStats
     .map(
@@ -433,6 +448,27 @@ function coachDashboard(user, userStats, latest) {
   const feed = latest.length
     ? latest.map((c) => checkinCard({ ...c, showAthlete: true })).join('')
     : '<div class="card empty">No check-ins yet.</div>';
+  const pendingCards = (pending || [])
+    .map(
+      (p) => `<div class="card athlete-card">
+        <div class="athlete-card-name">${esc(p.name)}</div>
+        <div class="athlete-card-email">${esc(p.email)}</div>
+        <div class="athlete-card-meta">signed up ${fmtDate(p.created_at)}</div>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <form method="post" action="/coach/approve/${p.id}" style="flex:1;margin:0">
+            <button type="submit" class="btn-primary" style="width:100%">Approve</button>
+          </form>
+          <form method="post" action="/coach/decline/${p.id}" style="flex:1;margin:0">
+            <button type="submit" style="width:100%;padding:14px;border-radius:12px;border:1px solid #5a5a5a;background:transparent;color:#b0b0b0;font-size:16px;cursor:pointer">Decline</button>
+          </form>
+        </div>
+      </div>`
+    )
+    .join('');
+  const pendingSection = pending && pending.length
+    ? `<h2 class="section-head">Waiting for approval (${pending.length})</h2>
+    <div class="athlete-grid">${pendingCards}</div>`
+    : '';
   return layout({
     title: 'Coach Dashboard',
     user,
@@ -442,6 +478,7 @@ function coachDashboard(user, userStats, latest) {
       <div class="card stat"><div class="stat-num">${userStats.length}</div><div class="stat-label">hitters</div></div>
       <div class="card stat"><div class="stat-num">${totalCheckins}</div><div class="stat-label">check-ins</div></div>
     </div>
+    ${pendingSection}
     <h2 class="section-head">Hitters</h2>
     <div class="athlete-grid">${cards || '<div class="card empty">Nobody has signed up yet.</div>'}</div>
     <h2 class="section-head">Latest check-ins</h2>
@@ -449,7 +486,7 @@ function coachDashboard(user, userStats, latest) {
   });
 }
 
-function coachUser(user, name, checkins, stats, thoughts, thread) {
+function coachUser(user, name, checkins, stats, thoughts, thread, email) {
   const skipImg = `<img src="/skip-avatar.webp" class="skip-avatar" alt="Skip">`;
   const convo =
     thread && thread.length
@@ -471,7 +508,26 @@ function coachUser(user, name, checkins, stats, thoughts, thread) {
     <p><a href="/coach">← Back to dashboard</a></p>
     ${whatWorksSection(stats || [], thoughts || [], null, 0)}
     ${convo}
-    ${checkins.length ? checkins.map(checkinCard).join('') : '<div class="card empty">No check-ins yet.</div>'}`,
+    ${checkins.length ? checkins.map(checkinCard).join('') : '<div class="card empty">No check-ins yet.</div>'}
+    <p style="margin-top:28px;text-align:center"><a href="/coach/user/${encodeURIComponent(email)}/delete" style="color:#8a8a8a;font-size:14px">Delete hitter from the platform</a></p>`,
+  });
+}
+
+// Confirm page before permanently deleting a hitter.
+function coachDeleteHitterPage(user, hitter, name, checkinCount) {
+  return layout({
+    title: 'Delete hitter',
+    user,
+    tabs: coachTabs('dashboard'),
+    body: `<h1 class="page-title">Delete hitter?</h1>
+    <div class="card">
+      <p>This will permanently remove <strong>${esc(name)}</strong> (${esc(hitter.email)}) from The Daily Hitter — their account, ${checkinCount} check-in${checkinCount === 1 ? '' : 's'}, chat history, and routine.</p>
+      <p class="hint">This can't be undone.</p>
+      <form method="post" action="/coach/user/${encodeURIComponent(hitter.email)}/delete" class="form">
+        <button type="submit" class="btn-primary" style="background:#a02020">Yes, delete ${esc(String(name).split(' ')[0] || 'hitter')}</button>
+      </form>
+      <p class="hint" style="text-align:center"><a href="/coach/user/${encodeURIComponent(hitter.email)}">Cancel — keep them</a></p>
+    </div>`,
   });
 }
 
@@ -588,6 +644,7 @@ module.exports = {
   coachTabs,
   loginPage,
   registerPage,
+  pendingPage,
   userHome,
   checkinForm,
   routinePage,
@@ -596,6 +653,7 @@ module.exports = {
   chatPage,
   coachDashboard,
   coachUser,
+  coachDeleteHitterPage,
   coachSkipPage,
   forgotPasswordPage,
   resetPasswordPage,
