@@ -794,6 +794,15 @@ app.get('/program', requireLogin, (req, res) => {
   res.send(views.programPage(req.user, p));
 });
 
+// Hitter's daily routine tab — every-day blocks of their program. Remote athletes only.
+app.get('/program/routine', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.redirect('/coach');
+  if (!req.user.remoteProgramId) return res.redirect('/');
+  const p = getProgram(req.user.remoteProgramId);
+  if (!p) return res.redirect('/');
+  res.send(views.programRoutinePage(req.user, p));
+});
+
 // Coach: edit a remote hitter's program.
 app.get('/coach/program/:id/edit', requireCoach, (req, res) => {
   setApprovalCount(req);

@@ -60,7 +60,8 @@ function userTabs(active, user) {
   // Bobby's remote hitters only — nobody else ever sees this tab.
   if (user && user.remoteProgramId) {
     tabs.splice(3, 0, { href: '/program', label: 'Program', active: active === 'program' });
-    tabs.splice(4, 0, { href: '/videos', label: 'Videos', active: active === 'videos' });
+    tabs.splice(4, 0, { href: '/program/routine', label: 'Routine', active: active === 'routine' });
+    tabs.splice(5, 0, { href: '/videos', label: 'Videos', active: active === 'videos' });
   }
   return tabs;
 }
@@ -678,6 +679,13 @@ function programSection(title, inner, id) {
     : '';
 }
 
+// Every-day blocks of a remote program (Daily Routine + Mobility) — shown on the
+// Routine tab, not inside the Program tab.
+function dailyRoutineBlocks(prog) {
+  const routine = Array.isArray(prog.routine) ? prog.routine : [];
+  return routine.filter((c) => /^daily routine/i.test(String(c.category || '')) || /^mobility/i.test(String(c.category || '')));
+}
+
 // Hitter-facing: their training program, read-only.
 function programPage(user, p) {
   const prog = p.prog || {};
@@ -697,7 +705,9 @@ function programPage(user, p) {
       .join('');
     return `<details class="card routine-group" open><summary class="routine-summary"><span class="routine-station">${esc(name || 'Training')}</span></summary>${rows}</details>`;
   };
-  const routineHtml = routine.map((c) => sectionCard(c.category, c.items)).join('');
+  const everyDayFirst = dailyRoutineBlocks(prog);
+  const everyDaySet = new Set(everyDayFirst);
+  const routineHtml = routine.filter((c) => !everyDaySet.has(c)).map((c) => sectionCard(c.category, c.items)).join('');
   const schedMap = {};
   for (const pair of Array.isArray(prog.schedule) ? prog.schedule : []) {
     if (Array.isArray(pair) && pair[0]) schedMap[String(pair[0])] = String(pair[1] || '');
@@ -707,15 +717,13 @@ function programPage(user, p) {
   // weekday (Mon–Fri, defaulting to today) and sees that whole day in one spot.
   const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
   const dayLabelRe = /^(Day \d+)(?:\s*[\u2014\u2013-]\s*(.+))?$/i;
-  const everyDayBlocks = [];
+  const everyDayBlocks = everyDayFirst;
+  const everyDayCats = everyDaySet;
   const daySections = {};
   const flatBlocks = [];
   for (const c of routine) {
+    if (everyDayCats.has(c)) continue;
     const cat = String(c.category || '');
-    if (/^daily routine/i.test(cat) || /^mobility/i.test(cat)) {
-      everyDayBlocks.push(c);
-      continue;
-    }
     const m = cat.match(dayLabelRe);
     if (m) {
       const lbl = 'Day ' + m[1].replace(/\D+/g, '');
@@ -734,7 +742,6 @@ function programPage(user, p) {
       return `<div class="card"><p style="margin:0">OFF — rest up.</p></div>`;
     }
     const cards = [];
-    for (const c of everyDayBlocks) cards.push(sectionCard(c.category, c.items));
     const dm = String(label || '').match(/^day\s*(\d+)$/i);
     if (dm) {
       for (const sec of daySections['Day ' + dm[1]] || []) {
@@ -808,6 +815,31 @@ function programPage(user, p) {
       progNotes.length ? `<ul class="works-list">${progNotes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '',
       'notes'
     )}`,
+  });
+}
+
+// Hitter-facing: their daily routine — the every-day blocks of their program.
+// Remote athletes only.
+function programRoutinePage(user, p) {
+  const prog = p.prog || {};
+  const blocks = dailyRoutineBlocks(prog);
+  const sectionCard = (name, items) => {
+    const rows = (items || [])
+      .map(
+        (it) => `<div class="routine-row"><span class="routine-name">${esc(it.drill || '')}</span>${
+          it.volume ? `<span class="hint-inline">${esc(it.volume)}</span>` : ''
+        }</div>`
+      )
+      .join('');
+    return `<details class="card routine-group" open><summary class="routine-summary"><span class="routine-station">${esc(name || 'Training')}</span></summary>${rows}</details>`;
+  };
+  return layout({
+    title: 'Daily Routine',
+    user,
+    tabs: userTabs('routine', user),
+    body: `<h1 class="page-title">Daily Routine</h1>
+    <p class="lede">Every day, before the work below — no thinking, just go.</p>
+    ${blocks.length ? blocks.map((c) => sectionCard(c.category, c.items)).join('') : '<div class="card empty">No daily routine set yet.</div>'}`,
   });
 }
 
@@ -1318,6 +1350,7 @@ module.exports = {
   forgotPasswordPage,
   resetPasswordPage,
   programPage,
+  programRoutinePage,
   programEditPage,
   videosPage,
   videoWatchPage,
