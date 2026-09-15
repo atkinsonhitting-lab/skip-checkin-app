@@ -469,7 +469,7 @@ function skipReadBlock(c) {
   return `<p class="skip-pending">Skip's reviewing your entry — his read lands here.</p>`;
 }
 
-function checkinCard(c, opts = {}) {
+function checkinCard(c) {
   const drills = drillsOf(c);
   const head = `<div class="checkin-head">
       <span class="checkin-date">${fmtDate(c.created_at)}</span>
@@ -486,16 +486,6 @@ function checkinCard(c, opts = {}) {
   const worked = `<div class="checkin-grid">
       ${c.what_worked ? `<div><span class="label">What worked</span>${esc(c.what_worked)}</div>` : ''}
     </div>`;
-  if (opts.expanded) {
-    return `<div class="card checkin">
-    ${head}
-    ${score}
-    ${drillRow}
-    ${read}
-    ${notes}
-    ${worked}
-  </div>`;
-  }
   const words = `${notes}${worked}`;
   return `<div class="card checkin">
     ${head}
@@ -575,7 +565,7 @@ function coachDashboard(user, userStats, latest, pending) {
     )
     .join('');
   const feed = latest.length
-    ? latest.map((c) => checkinCard({ ...c, showAthlete: true }, { expanded: true })).join('')
+    ? latest.map((c) => checkinCard({ ...c, showAthlete: true })).join('')
     : '<div class="card empty">No check-ins yet.</div>';
   const approvalNudge = pending && pending.length
     ? `<a class="card approval-nudge" href="/coach/approvals">${pending.length} hitter${pending.length === 1 ? '' : 's'} waiting for approval →</a>`
@@ -620,7 +610,7 @@ function coachUser(user, name, checkins, stats, thoughts, thread, email, memorie
     ${memorySection(email, memories)}
     ${whatWorksSection(stats || [], thoughts || [], null, 0)}
     ${convo}
-    ${checkins.length ? checkins.map((c) => checkinCard(c, { expanded: true })).join('') : '<div class="card empty">No check-ins yet.</div>'}
+    ${checkins.length ? checkins.map(checkinCard).join('') : '<div class="card empty">No check-ins yet.</div>'}
     <p style="margin-top:28px;text-align:center"><a href="/coach/user/${encodeURIComponent(email)}/delete" style="color:#8a8a8a;font-size:14px">Delete hitter from the platform</a></p>`,
   });
 }
