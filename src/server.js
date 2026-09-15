@@ -987,6 +987,97 @@ app.post('/reset-password', (req, res) => {
   res.redirect('/login?reset=1');
 });
 
+// ---- Skip's journal read poller ----
+// Rates unrated check-ins in the background so "Skip's reviewing your entry"
+// always resolves into an actual read. Runs in-app against the local DB;
+// the /api/checkins/:id/skip-rating endpoint remains for external use.
+async function geminiText(systemText, userText, maxTokens) {
+  const apiKey = process.env.LLM_API_KEY;
+  if (!apiKey) throw new Error('chat_not_configured');
+  const resp = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(LLM_MODEL)}:generateContent`,
+    {
+      method: 'POST',
+      headers: { 'x-goog-api-key': apiKey, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: systemText }] },
+        contents: [{ role: 'user', parts: [{ text: userText }] }],
+        generationConfig: { maxOutputTokens: maxTokens || 300, temperature: 0.5 },
+      }),
+    }
+  );
+  if (!resp.ok) throw new Error(`llm_http_${resp.status}`);
+  const data = await resp.json();
+  const parts = (((data.candidates || [])[0] || {}).content || {}).parts || [];
+  return parts
+    .map((p) => p.text || '')
+    .join('')
+    .trim();
+}
+
+const JOURNAL_SYSTEM = `You are Skip, a direct no-fluff hitting coach in the Bobby Atkinson mold. You read a hitter's journal entry and give it a 1-10 score plus a 1-2 sentence coach's note, like a margin note on their entry. Judge by what the hitter WROTE first — their words, their honesty, their approach — then their numbers. Mental approach before mechanics: a grinder who battled honestly outscores a talented day with no intent. Be specific to what they said. Never generic. Reply ONLY as JSON: {"score": 8.5, "note": "..."}`;
+
+function drillNamesOf(c) {
+  try {
+    return JSON.parse(c.drills_done || '[]')
+      .map((d) => {
+        const name = String((d && typeof d === 'object' ? d.name : d) || '').trim();
+        const station = d && typeof d === 'object' ? d.station : null;
+        return station ? `${name} (${station})` : name;
+      })
+      .filter(Boolean)
+      .join(', ');
+  } catch (e) {
+    return '';
+  }
+}
+
+async function journalRead(c) {
+  const entry = [
+    `Environment: ${c.environment || 'n/a'}`,
+    `Feel ${c.feel}/10, Confidence ${c.confidence}/10, Focus ${c.focus}/10, Difficulty ${c.difficulty != null ? c.difficulty + '/10' : 'n/a'}`,
+    c.session_score != null ? `Session score: ${c.session_score} (${c.score_tier})` : null,
+    drillNamesOf(c) ? `Drills: ${drillNamesOf(c)}` : null,
+    c.session_notes ? `Their words: "${c.session_notes}"` : null,
+    c.what_worked ? `What worked: "${c.what_worked}"` : null,
+  ]
+    .filter(Boolean)
+    .join('\n');
+  const raw = await geminiText(JOURNAL_SYSTEM, entry, 300);
+  const m = raw.match(/\{[\s\S]*\}/);
+  if (!m) throw new Error('llm_bad_json');
+  const parsed = JSON.parse(m[0]);
+  const score = Math.round(Math.min(10, Math.max(1, Number(parsed.score))) * 10) / 10;
+  const note = String(parsed.note || '').trim().slice(0, 400);
+  if (!Number.isFinite(score) || !note) throw new Error('llm_bad_json');
+  return { score, note };
+}
+
+let journalRunning = false;
+async function ratePendingJournals() {
+  if (journalRunning || !process.env.LLM_API_KEY) return;
+  journalRunning = true;
+  try {
+    const pending = db
+      .prepare('SELECT * FROM checkins WHERE skip_journal_score IS NULL ORDER BY created_at ASC LIMIT 8')
+      .all();
+    for (const c of pending) {
+      try {
+        const r = await journalRead(c);
+        db.prepare(
+          'UPDATE checkins SET skip_journal_score = ?, skip_journal_note = ?, skip_rated_at = ? WHERE id = ? AND skip_journal_score IS NULL'
+        ).run(r.score, r.note, new Date().toISOString(), c.id);
+        console.log(`journal rated checkin ${c.id}: ${r.score}`);
+      } catch (e) {
+        console.error(`journal read failed for checkin ${c.id}: ${e.message}`);
+      }
+      await new Promise((r) => setTimeout(r, 2500));
+    }
+  } finally {
+    journalRunning = false;
+  }
+}
+
 // ---- Boot ----
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
@@ -999,4 +1090,7 @@ app.listen(PORT, () => {
   if (!process.env.SKIP_API_KEY) {
     console.warn('WARNING: SKIP_API_KEY is not set — the assistant API is disabled.');
   }
+  // Skip's journal reads: first pass shortly after boot, then every 5 min.
+  setTimeout(ratePendingJournals, 20000);
+  setInterval(ratePendingJournals, 5 * 60 * 1000);
 });
