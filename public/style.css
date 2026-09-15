@@ -309,7 +309,13 @@ a:active { color: #ff3b30; }
 .typing span:nth-child(3) { animation-delay: 0.4s; }
 @keyframes typing-blink { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
 /* Skip voice: speaker button on Skip's messages */
-.msg-skip { align-items: center; gap: 6px; }
+.msg-skip { align-items: flex-start; gap: 8px; }
+.skip-avatar {
+  width: 34px; height: 34px; border-radius: 50%; object-fit: cover; flex-shrink: 0;
+  border: 1px solid var(--line); background: #000; margin-top: 2px;
+}
+.chat-title { display: flex; align-items: center; gap: 12px; }
+.chat-title .skip-avatar { width: 46px; height: 46px; margin-top: 0; }
 .speak-btn {
   flex-shrink: 0; width: 30px; height: 30px; border-radius: 50%; padding: 0;
   border: 1px solid var(--line); background: var(--bg2); color: var(--muted);
@@ -320,7 +326,7 @@ a:active { color: #ff3b30; }
 .speak-btn.playing { background: var(--red); border-color: var(--red); color: #fff; }
 .speak-btn.loading { opacity: 0.5; pointer-events: none; }
 .speak-btn.denied { border-color: var(--red); color: var(--red); }
-#text-panel { display: flex; flex-direction: column; }
+#text-panel:not([hidden]) { display: flex; flex-direction: column; }
 .chat-form {
   display: flex; gap: 8px; align-items: center;
   position: sticky; bottom: 0;

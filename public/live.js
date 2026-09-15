@@ -43,6 +43,13 @@
   function addBubble(role) {
     var div = document.createElement('div');
     div.className = 'msg ' + (role === 'user' ? 'msg-user' : 'msg-skip');
+    if (role !== 'user') {
+      var img = document.createElement('img');
+      img.src = '/skip-avatar.webp';
+      img.className = 'skip-avatar';
+      img.alt = 'Skip';
+      div.appendChild(img);
+    }
     var b = document.createElement('div');
     b.className = 'msg-bubble';
     div.appendChild(b);

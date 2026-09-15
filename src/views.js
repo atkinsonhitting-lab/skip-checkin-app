@@ -364,16 +364,17 @@ function historyPage(user, checkins, justSubmitted) {
 }
 
 function chatPage(user, messages, chatEnabled) {
+  const skipImg = `<img src="/skip-avatar.webp" class="skip-avatar" alt="Skip">`;
   const msgs = (messages || [])
     .map(
-      (m) => `<div class="msg ${m.role === 'user' ? 'msg-user' : 'msg-skip'}"><div class="msg-bubble">${esc(m.content)}</div></div>`
+      (m) => `<div class="msg ${m.role === 'user' ? 'msg-user' : 'msg-skip'}">${m.role === 'user' ? '' : skipImg}<div class="msg-bubble">${esc(m.content)}</div></div>`
     )
     .join('');
   return layout({
     title: 'Talk to Skip',
     user,
     tabs: userTabs('chat'),
-    body: `<h1 class="page-title">Talk to Skip</h1>
+    body: `<h1 class="page-title chat-title"><img src="/skip-avatar.webp" class="skip-avatar" alt="Skip">Talk to Skip</h1>
     <p class="hint">Struggling? Tell Skip what's going on at the plate — he's seen your check-ins and will point you back on track.</p>
     ${chatEnabled
       ? `<div class="chat-mode">
@@ -381,7 +382,7 @@ function chatPage(user, messages, chatEnabled) {
         <button type="button" id="mode-live" class="mode-btn">Live</button>
       </div>
       <div id="text-panel">
-        <div id="chat-log" class="chat-log">${msgs || `<div class="msg msg-skip"><div class="msg-bubble">What's going on at the plate? Tell me what feels off.</div></div>`}</div>
+        <div id="chat-log" class="chat-log">${msgs || `<div class="msg msg-skip">${skipImg}<div class="msg-bubble">What's going on at the plate? Tell me what feels off.</div></div>`}</div>
         <form id="chat-form" class="chat-form" autocomplete="off">
           <input id="chat-input" type="text" placeholder="Ask Skip…" maxlength="2000" required>
           <button type="submit" class="btn-primary">Send</button>

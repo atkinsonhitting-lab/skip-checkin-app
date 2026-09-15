@@ -77,6 +77,13 @@
     function addMsg(role, text, speakable) {
       const d = document.createElement('div');
       d.className = 'msg ' + (role === 'user' ? 'msg-user' : 'msg-skip');
+      if (role !== 'user') {
+        const img = document.createElement('img');
+        img.src = '/skip-avatar.webp';
+        img.className = 'skip-avatar';
+        img.alt = 'Skip';
+        d.appendChild(img);
+      }
       const b = document.createElement('div');
       b.className = 'msg-bubble';
       b.textContent = text;
@@ -97,7 +104,7 @@
       addMsg('user', text);
       const thinking = document.createElement('div');
       thinking.className = 'msg msg-skip';
-      thinking.innerHTML = '<div class="msg-bubble typing"><span></span><span></span><span></span></div>';
+      thinking.innerHTML = '<img src="/skip-avatar.webp" class="skip-avatar" alt="Skip"><div class="msg-bubble typing"><span></span><span></span><span></span></div>';
       log.appendChild(thinking);
       scroll();
       try {
