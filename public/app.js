@@ -227,3 +227,19 @@
     document.querySelectorAll('input[name="did_drills"]').forEach((r) => r.addEventListener('change', sync));
     sync();
   })();
+
+  // ---- Check-in: fill drills from the hitter's daily routine ----
+  (function useRoutine() {
+    const btn = document.getElementById('use-routine');
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      let drills = [];
+      try { drills = JSON.parse(btn.dataset.routine || '[]'); } catch (e) { drills = []; }
+      const input = document.getElementById('drills-input');
+      if (!input || !drills.length) return;
+      input.value = drills
+        .map((d) => (d.station ? `${d.name} (${d.station})` : d.name))
+        .join(', ');
+      input.focus();
+    });
+  })();

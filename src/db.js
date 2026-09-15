@@ -93,6 +93,19 @@ if (!checkinCols.includes('difficulty')) {
   db.exec('ALTER TABLE checkins ADD COLUMN difficulty INTEGER;');
 }
 
+// Daily routine drills: each hitter's everyday drill list, each drill tagged
+// with how it's done (tee / side toss / front toss / BP / machine).
+db.exec(`CREATE TABLE IF NOT EXISTS routine_drills (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  name TEXT NOT NULL,
+  station TEXT NOT NULL DEFAULT '',
+  position INTEGER NOT NULL DEFAULT 0
+);`);
+db.exec(
+  'CREATE INDEX IF NOT EXISTS idx_routine_user ON routine_drills(user_id, position);'
+);
+
 // Password resets: single-use tokens, SHA-256 hashed, 1-hour expiry.
 db.exec(`
 CREATE TABLE IF NOT EXISTS password_reset_tokens (

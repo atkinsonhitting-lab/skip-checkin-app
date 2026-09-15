@@ -119,13 +119,30 @@ a:active { color: #ff3b30; }
 
 /* Forms */
 .form label { display: block; margin: 12px 0; font-weight: 600; font-size: 14px; }
-.form input, .form textarea {
+.form input, .form textarea, .form select {
   display: block; width: 100%; margin-top: 6px;
   background: var(--bg2); border: 1px solid var(--line); border-radius: 8px;
   color: var(--text); font-size: 16px; padding: 12px;
   font-family: inherit;
 }
-.form input:focus, .form textarea:focus { outline: none; border-color: var(--red); }
+.form input:focus, .form textarea:focus, .form select:focus { outline: none; border-color: var(--red); }
+/* Ghost + small buttons */
+.btn-ghost {
+  background: transparent; border: 1px solid var(--line); border-radius: 10px;
+  color: var(--text); font-size: 15px; font-weight: 700; padding: 10px 16px;
+  cursor: pointer; margin-top: 8px;
+}
+.btn-ghost:active { border-color: var(--red); color: var(--red); }
+.btn-sm { font-size: 13px; padding: 6px 12px; margin-top: 0; }
+/* Daily routine page */
+.routine-station { font-size: 17px; font-weight: 800; margin: 0 0 8px; color: var(--red); }
+.routine-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 0; border-top: 1px solid var(--line);
+}
+.routine-name { font-weight: 600; }
+.routine-remove { margin: 0; }
+.chip-station { color: var(--muted); font-weight: 400; }
 .field-label { font-weight: 600; font-size: 14px; margin: 14px 0 6px; }
 .pills { display: flex; gap: 8px; flex-wrap: wrap; }
 .pill input { display: none; }

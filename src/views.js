@@ -43,6 +43,7 @@ function userTabs(active) {
   return [
     { href: '/', label: 'Home', active: active === 'home' },
     { href: '/checkin', label: 'Check In', active: active === 'checkin' },
+    { href: '/routine', label: 'Routine', active: active === 'routine' },
     { href: '/chat', label: 'Talk to Skip', active: active === 'chat' },
     { href: '/history', label: 'History', active: active === 'history' },
   ];
@@ -156,8 +157,10 @@ function sliderField(name, label, question, value, ends) {
   </div>`;
 }
 
-function checkinForm(user, error, values, drillNames) {
+function checkinForm(user, error, values, drillNames, routine) {
   const v = values || {};
+  const rt = routine || [];
+  const routineJson = esc(JSON.stringify(rt.map((d) => ({ name: d.name, station: d.station }))));
   const envPills = ENVIRONMENTS
     .map((e) => `<label class="pill"><input type="radio" name="environment" value="${e}"${v.environment === e ? ' checked' : ''} required><span>${e}</span></label>`)
     .join('');
@@ -187,12 +190,56 @@ function checkinForm(user, error, values, drillNames) {
       </div>
       <div id="drill-names"${v.did_drills === 'yes' ? '' : ' hidden'}>
         <label>What ones? <span class="hint-inline">(separate with commas)</span>
-          <input name="drills_done" list="drill-list" placeholder="e.g. Deep Tee Drill, Walk In Drill" value="${esc(v.drills_done || '')}">
+          <input id="drills-input" name="drills_done" list="drill-list" placeholder="e.g. Deep Tee Drill, Walk In Drill" value="${esc(v.drills_done || '')}">
         </label>
+        ${rt.length ? `<button type="button" id="use-routine" class="btn-ghost" data-routine="${routineJson}">Use my daily routine</button>` : ''}
+        <p class="hint">Tip: add (tee), (side toss), (front toss), (BP), or (machine) after a drill — e.g. "Fence drill (tee)".</p>
       </div>
       <datalist id="drill-list">${datalist}</datalist>
       <button type="submit" class="btn-primary">Submit check-in</button>
     </form></div>`,
+  });
+}
+
+function routinePage(user, drills, error, drillNames, stations) {
+  const groups = (stations || []).map((st) => ({
+    station: st,
+    drills: (drills || []).filter((d) => (d.station || '').toLowerCase() === st.toLowerCase()),
+  }));
+  const datalist = (drillNames || []).map((d) => `<option value="${esc(d)}">`).join('');
+  const stationOpts = (stations || []).map((st) => `<option value="${esc(st)}">${esc(st)}</option>`).join('');
+  return layout({
+    title: 'Daily Routine',
+    user,
+    tabs: userTabs('routine'),
+    body: `<h1 class="page-title">Daily routine</h1>
+    <div class="card"><p class="hint skip-intro">Your everyday drills. Set it once — then one tap loads it into your check-in.</p>
+    ${error ? `<div class="error">${esc(error)}</div>` : ''}
+    <form method="post" action="/routine/add" class="form routine-add">
+      <label>Drill
+        <input name="name" list="drill-list" placeholder="e.g. Fence drill" maxlength="80" required>
+      </label>
+      <datalist id="drill-list">${datalist}</datalist>
+      <label>Done on
+        <select name="station" required>
+          <option value="" disabled selected>Pick one</option>
+          ${stationOpts}
+        </select>
+      </label>
+      <button type="submit" class="btn-primary">Add drill</button>
+    </form></div>
+    ${groups.map((g) => `
+    <div class="card routine-group">
+      <h2 class="routine-station">${esc(g.station)}</h2>
+      ${g.drills.length ? g.drills.map((d) => `
+        <div class="routine-row">
+          <span class="routine-name">${esc(d.name)}</span>
+          <form method="post" action="/routine/remove" class="routine-remove">
+            <input type="hidden" name="id" value="${d.id}">
+            <button type="submit" class="btn-ghost btn-sm" aria-label="Remove ${esc(d.name)}">Remove</button>
+          </form>
+        </div>`).join('') : `<p class="hint">Nothing here yet.</p>`}
+    </div>`).join('')}`,
   });
 }
 
@@ -241,12 +288,25 @@ function scorePage(user, c) {
 }
 
 function drillsOf(c) {
+  // Normalizes drills_done to [{name, station|null}]; handles legacy
+  // rows stored as plain name strings.
   try {
     const arr = JSON.parse(c.drills_done || '[]');
-    return Array.isArray(arr) ? arr : [];
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .map((d) =>
+        d && typeof d === 'object'
+          ? { name: String(d.name || ''), station: d.station || null }
+          : { name: String(d || ''), station: null }
+      )
+      .filter((d) => d.name);
   } catch (e) {
     return [];
   }
+}
+
+function drillChip(d) {
+  return `<span class="chip">${esc(d.name)}${d.station ? ` <span class="chip-station">${esc(d.station)}</span>` : ''}</span>`;
 }
 
 // Skip's journal rating: posted by the assistant after reading the hitter's
@@ -276,7 +336,7 @@ function checkinCard(c) {
       <span class="badge ${tierBadgeClass(c.score_tier)}">${esc(c.score_tier)}</span>
       <span class="hint-inline">Feel ${esc(c.feel)} · Conf ${esc(c.confidence)} · Focus ${esc(c.focus)}${c.difficulty != null ? ` · Difficulty ${esc(c.difficulty)}` : ''}</span>
     </div>` : ''}
-    ${drills.length ? `<div class="drill-chips">${drills.map((d) => `<span class="chip">${esc(d)}</span>`).join('')}</div>` : ''}
+    ${drills.length ? `<div class="drill-chips">${drills.map(drillChip).join('')}</div>` : ''}
     ${skipReadBlock(c)}
     ${c.session_notes ? `<p>${esc(c.session_notes)}</p>` : ''}
     <div class="checkin-grid">
@@ -413,6 +473,7 @@ module.exports = {
   registerPage,
   userHome,
   checkinForm,
+  routinePage,
   scorePage,
   historyPage,
   chatPage,

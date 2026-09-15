@@ -250,19 +250,60 @@ function scoreBreakdown(feel, confidence, focus, difficulty, notesText) {
   return { base, grind, words, total };
 }
 
+const STATIONS = ['Tee', 'Side toss', 'Front toss', 'BP', 'Machine'];
+
+function canonicalStation(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return null;
+  const hit = STATIONS.find((st) => st.toLowerCase() === s.toLowerCase());
+  return hit || (s.length <= 24 ? s : null);
+}
+
 function parseDrillsDone(raw) {
   // Form sends one text field; multiple drills are comma-separated.
-  // Also accepts a JSON array string (API-style input).
+  // A drill may carry its station in trailing parens: "Fence drill (tee)".
+  // Also accepts a JSON array string (API-style input) of names or
+  // {name, station} objects. Returns [{name, station|null}].
+  const toEntry = (d) => {
+    if (d && typeof d === 'object') {
+      const name = String(d.name || '').trim();
+      if (!name) return null;
+      return { name, station: canonicalStation(d.station) };
+    }
+    let name = String(d || '').trim();
+    if (!name) return null;
+    let station = null;
+    const m = name.match(/^(.*?)\s*\(([^()]*)\)\s*$/);
+    if (m && m[1].trim()) {
+      station = canonicalStation(m[2]);
+      if (station) name = m[1].trim();
+    }
+    return { name, station };
+  };
   if (!raw) return [];
   const s = String(raw).trim();
   if (!s) return [];
   if (s.startsWith('[')) {
     try {
       const arr = JSON.parse(s);
-      if (Array.isArray(arr)) return arr.map((d) => String(d).trim()).filter(Boolean);
+      if (Array.isArray(arr)) return arr.map(toEntry).filter(Boolean);
     } catch (e) { /* fall through to comma split */ }
   }
-  return s.split(',').map((d) => d.trim()).filter(Boolean);
+  return s.split(',').map(toEntry).filter(Boolean);
+}
+
+function getRoutine(userId) {
+  const rows = db
+    .prepare('SELECT id, name, station FROM routine_drills WHERE user_id = ? ORDER BY position, id')
+    .all(userId);
+  const order = new Map(STATIONS.map((s, i) => [s.toLowerCase(), i]));
+  return rows
+    .map((r) => ({ id: r.id, name: r.name, station: r.station || null }))
+    .sort(
+      (a, b) =>
+        (order.get(String(a.station || '').toLowerCase()) ?? 99) -
+        (order.get(String(b.station || '').toLowerCase()) ?? 99)
+    );
 }
 
 // Drills ranked by this hitter's average session score (min 3 sessions each).
@@ -276,7 +317,7 @@ function drillStats(athleteName) {
     try { drills = JSON.parse(r.drills_done || '[]'); } catch (e) { drills = []; }
     const seen = new Set();
     for (const d of drills) {
-      const name = String(d || '').trim();
+      const name = String((d && typeof d === 'object' ? d.name : d) || '').trim();
       const key = name.toLowerCase();
       if (!name || seen.has(key)) continue;
       seen.add(key);
@@ -321,7 +362,33 @@ app.get('/', requireLogin, (req, res) => {
 
 app.get('/checkin', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
-  res.send(views.checkinForm(req.user, null, {}, data.drillNames()));
+  res.send(views.checkinForm(req.user, null, {}, data.drillNames(), getRoutine(req.user.id)));
+});
+
+// ---- Daily routine ----
+app.get('/routine', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.redirect('/coach');
+  res.send(views.routinePage(req.user, getRoutine(req.user.id), null, data.drillNames(), STATIONS));
+});
+
+app.post('/routine/add', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.status(403).send('Forbidden');
+  const name = String(req.body.name || '').trim().slice(0, 80);
+  const station = canonicalStation(req.body.station);
+  if (!name || !station) {
+    return res.send(views.routinePage(req.user, getRoutine(req.user.id), 'Give the drill a name and pick where it\u2019s done.', data.drillNames(), STATIONS));
+  }
+  const pos = db.prepare('SELECT COALESCE(MAX(position), -1) + 1 AS p FROM routine_drills WHERE user_id = ?').get(req.user.id).p;
+  db.prepare('INSERT INTO routine_drills (user_id, name, station, position) VALUES (?, ?, ?, ?)').run(
+    req.user.id, name, station, pos
+  );
+  res.redirect('/routine');
+});
+
+app.post('/routine/remove', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.status(403).send('Forbidden');
+  db.prepare('DELETE FROM routine_drills WHERE id = ? AND user_id = ?').run(req.body.id, req.user.id);
+  res.redirect('/routine');
 });
 
 app.get('/checkin/score/:id', requireLogin, (req, res) => {
@@ -343,7 +410,7 @@ app.get('/checkin/score/:id', requireLogin, (req, res) => {
 app.post('/checkin', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.status(403).send('Forbidden');
   const b = req.body;
-  const fail = (msg) => res.send(views.checkinForm(req.user, msg, b, data.drillNames()));
+  const fail = (msg) => res.send(views.checkinForm(req.user, msg, b, data.drillNames(), getRoutine(req.user.id)));
   if (!ENVIRONMENTS.includes(b.environment)) {
     return fail('Pick the environment you were in.');
   }
@@ -596,11 +663,16 @@ function hitterSnapshot(userId) {
   const lines = rows.map((r) => {
     let drills = [];
     try { drills = JSON.parse(r.drills_done || '[]'); } catch (e) { drills = []; }
+    const drillBits = drills.map((d) => {
+      const name = String((d && typeof d === 'object' ? d.name : d) || '').trim();
+      const station = d && typeof d === 'object' ? d.station : null;
+      return station ? `${name} (${station})` : name;
+    }).filter(Boolean);
     const bits = [
       `${String(r.created_at).slice(0, 10)} · ${r.environment}`,
       r.session_score != null ? `Score ${r.session_score} (${r.score_tier})` : 'Unscored',
       `Feel ${r.feel} Conf ${r.confidence} Focus ${r.focus}${r.difficulty != null ? ` Difficulty ${r.difficulty}` : ''}`,
-      drills.length ? `Drills: ${drills.join(', ')}` : null,
+      drillBits.length ? `Drills: ${drillBits.join(', ')}` : null,
       r.session_notes ? `Notes: "${String(r.session_notes).slice(0, 200)}"` : null,
       r.what_worked ? `What worked: "${String(r.what_worked).slice(0, 200)}"` : null,
     ].filter(Boolean);
