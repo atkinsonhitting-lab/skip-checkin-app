@@ -37,7 +37,7 @@ const SEED_ENTRIES = [
     body: 'When getting a hitter back on track, work in this order: 1) his own past entries and best days, 2) mental — simple plan, clear intent, full commitment, 3) external cues — target or outcome outside the body, 4) mechanics — needed a lot. EXCEPTION: read what the hitter wants. If he is talking mechanics or asking for mechanical help, meet him there and coach mechanics directly. Never force the order on a hitter who is telling you what he needs.',
     tags: 'coaching priority slump' },
   { type: 'rule', title: 'Their words first',
-    body: 'Coach off the hitter\'s own language, their what-worked entries, and their locked-in sessions before anything else. A cue in their own words beats a "better" cue every time. Only reach for Bobby\'s mechanical cues when the hitter has no history.',
+    body: 'Coach off the hitter\'s own language, their what-worked entries, and their locked-in sessions before anything else. A cue in their own words beats a "better" cue every time. Only reach for the head coach\'s mechanical cues when the hitter has no history.',
     tags: 'coaching priority' },
   { type: 'rule', title: 'Mental and external first, mechanics when the hitter wants them',
     body: 'Game and at-bat problems get approach first: simple plan, ready early, decide late, 100% commitment to one thing. Then external cues before anything mechanical. But mechanics are needed a lot — whenever the hitter talks mechanics or asks for mechanical help, coach mechanics directly. Read what he wants. Cage problems get mechanics and feels.',
@@ -68,13 +68,13 @@ const SEED_ENTRIES = [
   { type: 'approach', title: 'Dead Red Middle',
     body: 'Sit heater, middle of the plate. The simplest plan there is.',
     tags: 'approach mental game plan' },
-  { type: 'approach', title: "Bobby's locked-in cue",
-    body: 'When his own head got crowded, Bobby\'s cue was: "hit a line drive and take off the shortstop\'s hat." Simple plan. Clear intent. Full commitment.',
-    tags: 'cue Bobby approach mental slump' },
+  { type: 'approach', title: "Head coach's locked-in cue",
+    body: 'When his own head got crowded, his cue was: "hit a line drive and take off the shortstop\'s hat." Simple plan. Clear intent. Full commitment.',
+    tags: 'cue approach mental slump' },
 
   // ---- Cues: Bobby's mechanical cues, used sparingly ----
-  { type: 'note', title: 'About Bobby\'s cues',
-    body: 'Bobby\'s mechanical cues were mostly built for left-handed hitters — never force one onto a hitter it doesn\'t fit. They are the last resort, not the starting point.',
+  { type: 'note', title: 'About the head coach\'s cues',
+    body: 'The head coach\'s mechanical cues were mostly built for left-handed hitters — never force one onto a hitter it doesn\'t fit. They are the last resort, not the starting point.',
     tags: 'cue guidance' },
   { type: 'cue', title: 'Swing down the line',
     body: 'Let the barrel trace a line. Use when: hitter is spinny with no direction.',
@@ -162,6 +162,32 @@ CREATE INDEX IF NOT EXISTS idx_library_type ON skip_library(type, active);
     for (const e of SEED_ENTRIES) ins.run(e.type, e.title, e.body, e.tags, now, now);
     console.log(`BRAIN: seeded ${SEED_ENTRIES.length} library entries.`);
   }
+  // One-time (Sep 15 2026): scrub Bobby's name from already-seeded library
+  // entries (seed only runs on empty tables, so this fixes live DBs too).
+  // Idempotent — re-running finds nothing to change.
+  {
+    const now = new Date().toISOString();
+    const SCRUBS = [
+      { from: 'Their words first', title: null,
+        body: 'Coach off the hitter\'s own language, their what-worked entries, and their locked-in sessions before anything else. A cue in their own words beats a "better" cue every time. Only reach for the head coach\'s mechanical cues when the hitter has no history.',
+        tags: null },
+      { from: "Bobby's locked-in cue", title: "Head coach's locked-in cue",
+        body: 'When his own head got crowded, his cue was: "hit a line drive and take off the shortstop\'s hat." Simple plan. Clear intent. Full commitment.',
+        tags: 'cue approach mental slump' },
+      { from: 'About Bobby\'s cues', title: 'About the head coach\'s cues',
+        body: 'The head coach\'s mechanical cues were mostly built for left-handed hitters — never force one onto a hitter it doesn\'t fit. They are the last resort, not the starting point.',
+        tags: null },
+    ];
+    const upd = db.prepare(
+      'UPDATE skip_library SET title = COALESCE(?, title), body = COALESCE(?, body), tags = COALESCE(?, tags), updated_at = ? WHERE id = ?'
+    );
+    for (const s of SCRUBS) {
+      const row = db.prepare('SELECT id FROM skip_library WHERE title = ?').get(s.from);
+      if (row) upd.run(s.title, s.body, s.tags, now, row.id);
+    }
+    // Fallback: any entry whose title was renamed but body still names Bobby.
+    db.prepare('UPDATE skip_library SET body = REPLACE(body, \'Bobby\'\'s\', \'the head coach\'\'s\'), updated_at = ? WHERE body LIKE \'%Bobby%\'').run(now);
+  }
   // One-time migration: split the legacy free-text blob into discrete notes
   // so Bobby's past training survives as individual, archivable entries.
   const legacy = (getSetting('coach_notes') || '').trim();
@@ -223,7 +249,7 @@ function libraryBlock(db, message) {
   const rel = relevantEntries(db, message, 5);
   if (!rules.length && !rel.length) return '';
   const fmt = (e) => `- [${e.type.toUpperCase()}] ${e.title}: ${e.body}`;
-  let out = "BOBBY'S PLAYBOOK — knowledge from Bobby Atkinson, your head coach. The rules always apply; use the other entries only when relevant to what the hitter just said, never force one in:\n";
+  let out = "HEAD COACH'S PLAYBOOK — knowledge from your head coach. The rules always apply; use the other entries only when relevant to what the hitter just said, never force one in:\n";
   out += rules.map(fmt).join('\n');
   if (rel.length) out += '\n' + rel.map(fmt).join('\n');
   return out;

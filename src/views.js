@@ -97,7 +97,7 @@ function registerPage(error) {
     tabs: [],
     body: `<div class="login-card card">
       <img src="/daily-hitter-logo.jpg" class="brand-logo-full" alt="The Daily Hitter — A Hitting Journal">
-      <p class="hint">Free. Use your email, set a password, start checking in. Coach Bobby approves every new account.</p>
+      <p class="hint">Free. Use your email, set a password, start checking in. Your coach approves every new account.</p>
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
       <form method="post" action="/register" class="form">
         <label>First name
@@ -131,7 +131,7 @@ function pendingPage() {
     body: `<div class="login-card card">
       <img src="/daily-hitter-logo.jpg" class="brand-logo-full" alt="The Daily Hitter — A Hitting Journal">
       <h1 class="page-title">You're on the list.</h1>
-      <p class="hint">Coach Bobby personally approves every account. You'll be able to log in as soon as he gives you the green light.</p>
+      <p class="hint">Every account is personally approved. You'll be able to log in as soon as you get the green light.</p>
       <p class="hint" style="text-align:center"><a href="/login">Back to log in</a></p>
     </div>`,
   });

@@ -74,7 +74,7 @@ function attachUser(req, res, next) {
         role: row.role,
         athleteName: row.athlete_name,
         firstName: row.first_name || null,
-        displayName: row.first_name || row.athlete_name || 'Bobby',
+        displayName: row.first_name || row.athlete_name || 'Coach',
         status: row.status || 'approved',
       };
     }
@@ -175,7 +175,7 @@ app.post('/login', (req, res) => {
   }
   // New signups wait for Bobby's approval before they can get in.
   if (row.role !== 'coach' && row.status !== 'approved') {
-    return res.send(views.loginPage('Your account is waiting for Coach Bobby\u2019s approval. You\u2019ll be able to log in once he approves you.'));
+    return res.send(views.loginPage('Your account is waiting for coach approval. You\u2019ll be able to log in once it\u2019s approved.'));
   }
   req.session.userId = row.id;
   res.redirect('/');
@@ -1009,7 +1009,7 @@ app.post('/api/checkins/:id/skip-rating', (req, res) => {
 
 const LLM_MODEL = process.env.LLM_MODEL || 'gemini-2.5-flash';
 
-const SKIP_CORE = `You are Skip, the AI hitting coach inside The Daily Hitter, a session check-in app for baseball and softball hitters. Hitters check in after sessions and talk to you when they need coaching. You coach the way Bobby Atkinson coaches — his brain is your brain.
+const SKIP_CORE = `You are Skip, the AI hitting coach inside The Daily Hitter, a session check-in app for baseball and softball hitters. Hitters check in after sessions and talk to you when they need coaching. You coach the way your head coach coaches — his system is your system. Never mention your head coach by name to hitters.
 
 VOICE: Direct, no fluff. Talk like a cage coach standing next to the hitter — straight answers, specific cues, zero motivational-poster talk. Short texts, not essays. Praise what's good first ("good swing, just too deep"), then give the one fix. Never lecture. Never mention you are an AI model. You are Skip.
 
@@ -1018,7 +1018,7 @@ HOW YOU COACH:
 2. GETTING HIM BACK ON TRACK — when he's struggling, work in this order: (a) his own past entries — take him back to what he was doing, feeling, and thinking on his best days, in his own words, name the date and score; (b) mental first — simple plan, clear intent, full commitment; (c) external cues — a target or outcome outside the body; (d) mechanics — needed a lot, and always fair game when the hitter brings them up. READ WHAT THE HITTER WANTS: if he's talking mechanics or asking for mechanical help, meet him there and coach mechanics directly — don't force the order on a hitter who's telling you what he needs. Never give generic advice to a hitter you have history on.
 3. Their words first — a cue in the hitter's own words beats a "better" cue every time.
 4. One fix at a time — praise what's good first, then the single fix.
-5. Bobby's playbook below overrides your defaults wherever they conflict. Use an entry only when it's relevant to what the hitter just said — never force one in.`;
+5. The head coach's playbook below overrides your defaults wherever they conflict. Use an entry only when it's relevant to what the hitter just said — never force one in.`;
 
 function hitterSnapshot(userId) {
   const rows = db
@@ -1359,7 +1359,7 @@ async function sendApprovalEmail(req, to, name) {
     subject: "You're in — The Daily Hitter",
     text:
       `Hey ${first},\n\n` +
-      `Coach Bobby approved your Daily Hitter account. Log in and check in your first session:\n\n` +
+      `Your Daily Hitter account was approved. Log in and check in your first session:\n\n` +
       `${base}/login\n\n` +
       `— Skip`,
   });
@@ -1466,7 +1466,7 @@ async function geminiText(systemText, userText, maxTokens) {
     .trim();
 }
 
-const JOURNAL_SYSTEM = `You are Skip, a direct no-fluff hitting coach in the Bobby Atkinson mold. Read this hitter's journal entry and write a 2-3 sentence summary of the session, like a coach's margin note on their entry. Capture what actually happened: how they felt, what worked, what was off, and the one thing to carry forward. Judge by what the hitter WROTE first — their words, their honesty, their approach — then their numbers. Mental approach before mechanics. Be specific to what they said, never generic. Reply with ONLY the summary — no score, no rating, no number.`;
+const JOURNAL_SYSTEM = `You are Skip, a direct no-fluff hitting coach. Read this hitter's journal entry and write a 2-3 sentence summary of the session, like a coach's margin note on their entry. Capture what actually happened: how they felt, what worked, what was off, and the one thing to carry forward. Judge by what the hitter WROTE first — their words, their honesty, their approach — then their numbers. Mental approach before mechanics. Be specific to what they said, never generic. Reply with ONLY the summary — no score, no rating, no number.`;
 
 function drillNamesOf(c) {
   try {
