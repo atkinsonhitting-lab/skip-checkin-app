@@ -30,8 +30,8 @@
   var micSource = null;
   var micProc = null;
   var playQueue = [];
-  var playing = false;
-  var currentSource = null;
+  var scheduledSources = [];
+  var nextPlayTime = 0;
   var userBubble = null;
   var skipBubble = null;
   var lastSpeechAt = 0;
@@ -86,6 +86,8 @@
     return btoa(binary);
   }
 
+  // Gapless scheduled playback: each chunk starts exactly when the
+  // previous one ends, so Skip's voice doesn't drag or stutter.
   function queueAudio(b64) {
     var binary = atob(b64);
     var bytes = new Uint8Array(binary.length);
@@ -94,31 +96,39 @@
     var f32 = new Float32Array(int16.length);
     for (var j = 0; j < int16.length; j++) f32[j] = int16[j] / 0x8000;
     playQueue.push(f32);
-    if (!playing) playNext();
+    pumpAudio();
   }
 
-  function playNext() {
-    var buf = playQueue.shift();
-    if (!buf) { playing = false; return; }
-    playing = true;
+  function pumpAudio() {
+    if (!playQueue.length) return;
     var ctx = ensureCtx();
-    var ab = ctx.createBuffer(1, buf.length, 24000);
-    ab.getChannelData(0).set(buf);
-    var src = ctx.createBufferSource();
-    src.buffer = ab;
-    src.connect(ctx.destination);
-    currentSource = src;
-    src.onended = function () { currentSource = null; playNext(); };
-    try { src.start(); } catch (e) { currentSource = null; playNext(); }
+    var now = ctx.currentTime;
+    if (nextPlayTime < now) nextPlayTime = now + 0.06; // recover from starvation
+    while (playQueue.length && nextPlayTime - now < 3) {
+      var buf = playQueue.shift();
+      var ab = ctx.createBuffer(1, buf.length, 24000);
+      ab.getChannelData(0).set(buf);
+      var src = ctx.createBufferSource();
+      src.buffer = ab;
+      src.connect(ctx.destination);
+      src.onended = function () {
+        for (var i = scheduledSources.length - 1; i >= 0; i--) {
+          if (scheduledSources[i] === this) scheduledSources.splice(i, 1);
+        }
+      };
+      try { src.start(nextPlayTime); } catch (e) { continue; }
+      scheduledSources.push(src);
+      nextPlayTime += buf.length / 24000;
+    }
   }
 
   function stopPlayback() {
     playQueue = [];
-    if (currentSource) {
-      try { currentSource.stop(); } catch (e) {}
-      currentSource = null;
+    for (var i = 0; i < scheduledSources.length; i++) {
+      try { scheduledSources[i].stop(); } catch (e) {}
     }
-    playing = false;
+    scheduledSources = [];
+    nextPlayTime = 0;
   }
 
   function startMic() {
