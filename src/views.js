@@ -183,7 +183,7 @@ function whatWorksSection(drillStats, thoughtStats, avgScore, checkinCount) {
       : `<p class="hint">Check in 3+ times and Skip will start spotting your patterns.</p>`;
   return `<section id="what-works" class="card">
     <h2>What works for you</h2>
-    <p class="hint">Skip's read on your sessions — your thoughts and the drills your best days have in common.</p>
+    <p class="hint">Skip's read on your sessions — the thoughts and drills your best days have in common.</p>
     ${body}
   </section>`;
 }
