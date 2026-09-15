@@ -180,10 +180,11 @@ function userHome(user, extras) {
       <a href="/checkin" class="btn-primary">Check in today's session</a>
     </div>
     ${head}
-    ${streakCard}
+    ${pushOn ? '' : streakCard}
     ${pushCard}
     ${whatWorksSection(whatWorks)}
-    ${recent.length ? `<h2 class="section-head">Recent</h2>${recent.map(checkinCard).join('')}<p><a href="/notebook">See your notebook →</a></p>` : ''}`,
+    ${recent.length ? `<h2 class="section-head">Recent</h2>${recent.map(checkinCard).join('')}<p><a href="/notebook">See your notebook →</a></p>` : ''}
+    ${pushOn ? streakCard : ''}`,
   });
 }
 
