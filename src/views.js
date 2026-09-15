@@ -904,7 +904,7 @@ function programRoutinePage(user, p) {
 
 // Hitter-facing: Mental Game — gauge questions + baseline, then Skip builds the
 // hitter a personal plan. All hitters.
-function mentalGamePage(user, baseline, saved, planFailed) {
+function mentalGamePage(user, baseline, saved, planFailed, keys) {
   const b = baseline || {};
   const radio = (name, options) => `
     <div class="chip-row">${options
@@ -931,6 +931,17 @@ function mentalGamePage(user, baseline, saved, planFailed) {
     ${saved ? '<div class="notice">Saved — Skip built your plan below.</div>' : ''}
     ${planFailed ? '<div class="notice">Baseline saved, but the plan didn\u2019t come through — tap the button again.</div>' : ''}
     ${planHtml}
+    <div class="card">
+      <h2 class="routine-station">Your keys</h2>
+      <p class="hint">Things you and Coach Skip saved from the chat. Tell him <strong>&ldquo;add this to my mental game&rdquo;</strong> and it lands here.</p>
+      ${(keys || []).length
+        ? `<ul class="keys-list">${(keys || []).map((k) => `<li><span>${esc(k.content)}</span>
+            <form method="post" action="/mental-game/keys/delete" style="display:inline;margin:0">
+              <input type="hidden" name="id" value="${k.id}">
+              <button type="submit" class="link-danger" aria-label="Remove">\u2715</button>
+            </form></li>`).join('')}</ul>`
+        : `<p class="hint">Nothing saved yet.</p>`}
+    </div>
     <form method="post" action="/mental-game/save" class="form">
       <div class="card">
         <p class="field-label">Do you have a routine you actually trust?</p>

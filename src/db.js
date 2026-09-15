@@ -465,6 +465,19 @@ CREATE TABLE IF NOT EXISTS mental_baseline (
   }
 }
 
+// Mental keys (Sep 15 2026): things a hitter asks Coach Skip to save to their
+// Mental Game tab from the chat ("add this to my mental game"). Shown on the
+// Mental Game tab; hitters can delete them.
+db.exec(`
+CREATE TABLE IF NOT EXISTS mental_keys (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  content TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mental_keys_user ON mental_keys(user_id, created_at);
+`);
+
 // Subscriptions (Sep 15 2026): account-level billing state lives here once
 // payments launch. Settings reads it (plan + End subscription); the cancel
 // route flips an active sub to canceled. No provider wired up yet.

@@ -870,7 +870,14 @@ function getMentalBaseline(userId) {
 }
 app.get('/mental-game', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
-  res.send(views.mentalGamePage(req.user, getMentalBaseline(req.user.id), req.query.saved === '1', req.query.planfailed === '1'));
+  const keys = db.prepare('SELECT id, content FROM mental_keys WHERE user_id = ? ORDER BY created_at DESC').all(req.user.id);
+  res.send(views.mentalGamePage(req.user, getMentalBaseline(req.user.id), req.query.saved === '1', req.query.planfailed === '1', keys));
+});
+
+app.post('/mental-game/keys/delete', requireLogin, (req, res) => {
+  const id = parseInt(req.body.id, 10);
+  if (id) db.prepare('DELETE FROM mental_keys WHERE id = ? AND user_id = ?').run(id, req.user.id);
+  res.redirect('/mental-game');
 });
 const MENTAL_PLAN_SYSTEM = `You are Coach Skip, a direct no-fluff hitting coach writing a hitter's personal mental-game plan. You just gauged where his head is at. Write the plan TO him ("you").
 
@@ -1780,7 +1787,9 @@ HOW YOU COACH:
 2. GETTING HIM BACK ON TRACK — when he's struggling, work in this order: (a) his own past entries — take him back to what he was doing, feeling, and thinking on his best days, in his own words, name the date and level; (b) mental first — simple plan, clear intent, full commitment; (c) external cues — a target or outcome outside the body; (d) mechanics — needed a lot, and always fair game when the hitter brings them up. READ WHAT THE HITTER WANTS: if he's talking mechanics or asking for mechanical help, meet him there and coach mechanics directly — don't force the order on a hitter who's telling you what he needs. Never give generic advice to a hitter you have history on. Never mention numeric scores to hitters — talk only in levels and colors: red, yellow, green, bright green (bright green = best day).
 3. Their words first — a cue in the hitter's own words beats a "better" cue every time.
 4. One fix at a time — praise what's good first, then the single fix.
-5. The head coach's playbook below overrides your defaults wherever they conflict. Use an entry only when it's relevant to what the hitter just said — never force one in.`;
+5. The head coach's playbook below overrides your defaults wherever they conflict. Use an entry only when it's relevant to what the hitter just said — never force one in.
+
+SAVING TO HIS MENTAL GAME TAB: if he shares a cue, mindset shift, or routine piece he wants to keep, tell him: say 'add this to my mental game' followed by the thing, and you'll put it on his Mental Game tab for him.`;
 
 // ---- Check-in streak (Chicago days) ----
 const chiDayFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' });
@@ -1980,7 +1989,8 @@ async function askSkip(user, userMessage, opts = {}) {
   // Brain v2: short core prompt + only the playbook entries relevant to this message.
   const playbook = brain.libraryBlock(db, userMessage);
   const playbookBlock = playbook ? `\n\n${playbook}` : '';
-  const system = coachMode ? COACH_SYSTEM + playbookBlock : `${SKIP_CORE}\n\n${nameLine}${dataBlock}${playbookBlock}`;
+  const saveBlock = !coachMode && opts.saveNote ? `\n\n${opts.saveNote}` : '';
+  const system = coachMode ? COACH_SYSTEM + playbookBlock : `${SKIP_CORE}\n\n${nameLine}${dataBlock}${playbookBlock}${saveBlock}`;
   // Gemini roles are "user"/"model" (our DB stores "assistant").
   const contents = [
     ...history.map((m) => ({
@@ -2036,16 +2046,50 @@ app.get('/chat', requireLogin, (req, res) => {
   res.send(views.chatPage(req.user, messages, !!process.env.LLM_API_KEY));
 });
 
+// "Add this to my mental game" — the hitter asks Coach Skip to save something
+// to their Mental Game tab from the chat. Returns the extracted content, or
+// null when the message isn't a save request.
+function extractMentalKey(message) {
+  const triggers = [
+    'add this to my mental game',
+    'save this to my mental game',
+    'put this in my mental game',
+    'add to my mental game',
+    'remember this',
+  ];
+  const lower = message.toLowerCase();
+  for (const t of triggers) {
+    const i = lower.indexOf(t);
+    if (i !== -1) {
+      const rest = (message.slice(0, i) + message.slice(i + t.length)).replace(/^[:\-\u2014\s]+/, '').trim();
+      return rest.slice(0, 300);
+    }
+  }
+  return null;
+}
+
 app.post('/api/chat', requireLogin, async (req, res) => {
   if (req.user.role !== 'athlete') return res.status(403).json({ error: 'Forbidden' });
   const message = typeof req.body.message === 'string' ? req.body.message.trim() : '';
   if (!message) return res.status(400).json({ error: 'Message is empty.' });
   if (message.length > 2000) return res.status(400).json({ error: 'Keep it under 2000 characters.' });
   const now = new Date().toISOString();
+  // Mental-game save request: store it before Skip replies, then have him confirm.
+  let saveNote = null;
+  const keyContent = extractMentalKey(message);
+  if (keyContent !== null) {
+    if (keyContent.length > 3) {
+      db.prepare('INSERT INTO mental_keys (user_id, content, created_at) VALUES (?, ?, ?)')
+        .run(req.user.id, keyContent, now);
+      saveNote = `The hitter just asked you to save this to their Mental Game tab, and it's already saved there: "${keyContent}". Confirm briefly in your reply (one line) that it's on their Mental Game tab now.`;
+    } else {
+      saveNote = `The hitter said something like "add this to my mental game" but didn't include what to save. Ask them what they want on their Mental Game tab.`;
+    }
+  }
   db.prepare('INSERT INTO chat_messages (user_id, role, content, created_at) VALUES (?, ?, ?, ?)')
     .run(req.user.id, 'user', message, now);
   try {
-    const reply = await askSkip(req.user, message);
+    const reply = await askSkip(req.user, message, { saveNote });
     db.prepare('INSERT INTO chat_messages (user_id, role, content, created_at) VALUES (?, ?, ?, ?)')
       .run(req.user.id, 'assistant', reply, new Date().toISOString());
     res.json({ reply });
