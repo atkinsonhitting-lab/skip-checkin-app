@@ -34,6 +34,9 @@
   var currentSource = null;
   var userBubble = null;
   var skipBubble = null;
+  var lastSpeechAt = 0;
+  var audioSentSinceEnd = false;
+  var silenceTimer = null;
 
   function setStatus(t) { statusEl.textContent = t; }
 
@@ -133,14 +136,32 @@
         micProc.onaudioprocess = function (e) {
           if (!ws || ws.readyState !== 1) return;
           var input = e.inputBuffer.getChannelData(0);
+          // Speech vs silence: used to flush end-of-turn pauses to Skip.
+          var sum = 0;
+          var n = 0;
+          for (var k = 0; k < input.length; k += 4) { sum += input[k] * input[k]; n++; }
+          if (n && Math.sqrt(sum / n) > 0.02) lastSpeechAt = Date.now();
           var pcm = downsample(input, ctx.sampleRate, 16000);
-          if (pcm.length) ws.send(JSON.stringify({ type: 'audio', data: b64encode(pcm) }));
+          if (pcm.length) {
+            ws.send(JSON.stringify({ type: 'audio', data: b64encode(pcm) }));
+            audioSentSinceEnd = true;
+          }
         };
         var sink = ctx.createGain();
         sink.gain.value = 0; // keep the processor running without playing mic back
         micSource.connect(micProc);
         micProc.connect(sink);
         sink.connect(ctx.destination);
+        // When the mic goes quiet ~1.2s after speech, flush so Skip replies.
+        lastSpeechAt = Date.now();
+        audioSentSinceEnd = false;
+        if (silenceTimer) clearInterval(silenceTimer);
+        silenceTimer = setInterval(function () {
+          if (audioSentSinceEnd && ws && ws.readyState === 1 && Date.now() - lastSpeechAt > 1200) {
+            try { ws.send(JSON.stringify({ type: 'audioEnd' })); } catch (err) {}
+            audioSentSinceEnd = false;
+          }
+        }, 200);
       })
       .catch(function () {
         setStatus('Mic blocked — allow microphone access and tap Start again.');
@@ -202,6 +223,7 @@
 
   function cleanup() {
     stopPlayback();
+    if (silenceTimer) { clearInterval(silenceTimer); silenceTimer = null; }
     if (micProc) { try { micProc.disconnect(); } catch (e) {} micProc = null; }
     if (micSource) { try { micSource.disconnect(); } catch (e) {} micSource = null; }
     if (micStream) { micStream.getTracks().forEach(function (t) { t.stop(); }); micStream = null; }
