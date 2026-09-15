@@ -133,3 +133,95 @@
       if (none) none.hidden = shown > 0;
     });
   })();
+
+  // ---- Program day navigator (Mon-Fri pills; auto-opens today) ----
+  // Lives here (not inline) because helmet's CSP blocks inline scripts.
+  (function dayNav() {
+    var pills = document.querySelectorAll('[data-daypill]');
+    if (!pills.length) return;
+    var panels = document.querySelectorAll('[data-daypanel]');
+    function show(day) {
+      pills.forEach(function (p) {
+        p.classList.toggle('active', p.getAttribute('data-daypill') === day);
+      });
+      panels.forEach(function (p) {
+        p.hidden = p.getAttribute('data-daypanel') !== day;
+      });
+    }
+    pills.forEach(function (p) {
+      p.addEventListener('click', function () {
+        show(p.getAttribute('data-daypill'));
+      });
+    });
+    var names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    var want = names[new Date().getDay()];
+    var pillDays = Array.prototype.map.call(pills, function (p) {
+      return p.getAttribute('data-daypill');
+    });
+    if (pillDays.indexOf(want) === -1) want = pillDays[0];
+    if (want) show(want);
+  })();
+
+  // ---- Coach program editor: add/remove training blocks (CSP-safe) ----
+  (function progEditor() {
+    var wrap = document.getElementById('prog-cats');
+    if (!wrap) return;
+    var addBtn = document.getElementById('prog-add-cat');
+    var next = parseInt(wrap.getAttribute('data-next') || '0', 10);
+    if (addBtn) {
+      addBtn.addEventListener('click', function () {
+        var div = document.createElement('div');
+        div.className = 'card routine-group prog-cat';
+        div.setAttribute('data-cat', '');
+        div.innerHTML =
+          '<label class="fld">Category<input type="text" name="cat_' + next + '_name" maxlength="60"></label>' +
+          '<label class="fld">Drills — one per line, as <em>Drill</em> or <em>Drill | volume</em>' +
+          '<textarea name="cat_' + next + '_items" rows="4"></textarea></label>' +
+          '<button type="button" class="btn btn-danger btn-sm" data-remove-cat>Remove category</button>';
+        wrap.appendChild(div);
+        next++;
+      });
+    }
+    wrap.addEventListener('click', function (e) {
+      if (e.target && e.target.hasAttribute('data-remove-cat')) {
+        var card = e.target.closest('[data-cat]');
+        if (card) card.remove();
+      }
+    });
+  })();
+
+  // ---- Video library search filter (CSP-safe) ----
+  (function videoSearch() {
+    var box = document.getElementById('video-search');
+    if (!box) return;
+    var none = document.getElementById('video-no-match');
+    box.addEventListener('input', function () {
+      var q = box.value.trim().toLowerCase();
+      var shown = 0;
+      document.querySelectorAll('.video-card').forEach(function (el) {
+        var hit = !q || (el.getAttribute('data-search') || '').indexOf(q) !== -1;
+        el.style.display = hit ? '' : 'none';
+        if (hit) shown++;
+      });
+      if (none) none.hidden = shown !== 0;
+    });
+  })();
+
+  // ---- Notebook prompt chips (CSP-safe) ----
+  document.querySelectorAll('[data-prompt-text]').forEach(function (chip) {
+    chip.addEventListener('click', function () {
+      var box = document.getElementById('note-text');
+      if (box) {
+        box.value = chip.getAttribute('data-prompt-text') || '';
+        box.focus();
+      }
+    });
+  });
+
+  // ---- Confirm before removing a remote hitter (CSP-safe) ----
+  document.querySelectorAll('[data-confirm-remove]').forEach(function (form) {
+    form.addEventListener('submit', function (e) {
+      var name = form.getAttribute('data-confirm-remove') || 'this hitter';
+      if (!window.confirm('Remove ' + name + ' and their program?')) e.preventDefault();
+    });
+  });

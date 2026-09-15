@@ -1644,6 +1644,27 @@ function hitterSnapshot(userId) {
   return { lines, avg, total, trend, top, bestDay };
 }
 
+// Remote hitters: their program's cues + focus, so Skip coaches FROM the
+// program instead of the page showing static cues (removed Sep 15 2026).
+function programCueBlock(userId) {
+  const u = db.prepare('SELECT remote_program_id FROM users WHERE id = ?').get(userId) || {};
+  if (!u.remote_program_id) return '';
+  const row = db.prepare('SELECT program_json FROM remote_programs WHERE id = ?').get(u.remote_program_id);
+  if (!row) return '';
+  let prog = {};
+  try { prog = JSON.parse(row.program_json || '{}'); } catch (e) { return ''; }
+  const cues = prog.cues && typeof prog.cues === 'object' ? prog.cues : {};
+  const bits = [];
+  if (prog.adjustment) bits.push(`Focus: ${String(prog.adjustment).slice(0, 220)}`);
+  const cueBits = [];
+  if (cues.movement) cueBits.push(`Movement: "${String(cues.movement).slice(0, 180)}"`);
+  if (cues.timing) cueBits.push(`Timing: "${String(cues.timing).slice(0, 180)}"`);
+  if (cues.game) cueBits.push(`Game: "${String(cues.game).slice(0, 180)}"`);
+  if (cueBits.length) bits.push(`His cues (from his coach — use these in your coaching): ${cueBits.join(' · ')}`);
+  if (!bits.length) return '';
+  return `\nHIS PROGRAM (his coach wrote this — coach FROM it, don't recite it back at him):\n${bits.join('\n')}`;
+}
+
 function skipDataBlock(userId) {
   const snap = hitterSnapshot(userId);
   const u = db.prepare('SELECT first_name FROM users WHERE id = ?').get(userId) || {};
@@ -1667,6 +1688,7 @@ function skipDataBlock(userId) {
         .map((r) => `- ${r.player_name}${r.takeaway ? ` — "${String(r.takeaway).slice(0, 200)}"` : ''}`)
         .join('\n')}`
     : '';
+  const progBlock = programCueBlock(userId);
   return snap.lines.length
     ? `HITTER DATA (newest first):\n${snap.lines.join('\n')}\nSessions logged: ${snap.total}${
         snap.avg != null ? ` · Average level: ${scoreTier(snap.avg)}` : ''
@@ -1678,8 +1700,8 @@ function skipDataBlock(userId) {
         snap.bestDay
           ? `\nHIS BEST DAY — when he's struggling, take him back to exactly this (this is your #1 job):\n${snap.bestDay}`
           : ''
-      }${memBlock}${learnBlock}${playersBlock}`
-    : 'HITTER DATA: no check-ins logged yet — this is a brand-new hitter. Ask what they are working on.';
+      }${memBlock}${learnBlock}${playersBlock}${progBlock}`
+    : `HITTER DATA: no check-ins logged yet — this is a brand-new hitter. Ask what they are working on.${progBlock}`;
 }
 
 const COACH_SYSTEM = `You are Coach Skip, the AI hitting coach inside The Daily Hitter. You are talking to BOBBY ATKINSON — your head coach, the man whose brain you coach with. He is training you right now: giving feedback on your coaching, correcting your answers, teaching you how he wants his hitters coached. Listen carefully, take every correction seriously, and confirm specifically how you will apply what he tells you going forward. Talk to him like a trusted assistant coach — direct, no fluff, no motivational-poster talk. Keep replies short (2-4 sentences) unless he asks for more. Never mention you are an AI model. You are Coach Skip.

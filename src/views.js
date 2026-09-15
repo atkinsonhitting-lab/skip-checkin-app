@@ -425,9 +425,9 @@ function notebookPage(user, checkins, notes, players, justSubmitted) {
       </label>
       <div class="chip-row">${catChips}</div>
       <div class="prompt-row">
-        <button type="button" class="prompt-chip" onclick="document.getElementById('note-text').value='What\u2019s working for me right now: '">What's working</button>
-        <button type="button" class="prompt-chip" onclick="document.getElementById('note-text').value='What I want to figure out: '">Figure out</button>
-        <button type="button" class="prompt-chip" onclick="document.getElementById('note-text').value='Something I need to remember: '">Remember</button>
+        <button type="button" class="prompt-chip" data-prompt-text="What\u2019s working for me right now: ">What's working</button>
+        <button type="button" class="prompt-chip" data-prompt-text="What I want to figure out: ">Figure out</button>
+        <button type="button" class="prompt-chip" data-prompt-text="Something I need to remember: ">Remember</button>
       </div>
       <button type="submit" class="btn-primary">Save it</button>
     </form></div>
@@ -686,15 +686,6 @@ function programPage(user, p) {
     .map(([k, v]) => `<span class="grade-chip"><strong>${esc(k)}</strong> ${esc(String(v))}</span>`)
     .join('');
   const strengths = Array.isArray(prog.strengths) ? prog.strengths.filter(Boolean) : [];
-  const cues = prog.cues && typeof prog.cues === 'object' ? prog.cues : {};
-  const cueRows = [
-    ['Movement', cues.movement],
-    ['Timing', cues.timing],
-    ['Game', cues.game],
-  ]
-    .filter(([, v]) => v)
-    .map(([k, v]) => `<div class="cue-row"><span class="cue-label">${esc(k)}</span><span>${esc(v)}</span></div>`)
-    .join('');
   const routine = Array.isArray(prog.routine) ? prog.routine : [];
   const sectionCard = (name, items) => {
     const rows = (items || [])
@@ -772,20 +763,6 @@ function programPage(user, p) {
     trainingNav = `<div id="training" class="prog-anchor">
       <div class="day-pills">${pillHtml}</div>
       ${panelHtml}
-      <script>(function(){
-        var pills = document.querySelectorAll('[data-daypill]');
-        var panels = document.querySelectorAll('[data-daypanel]');
-        function show(day){
-          pills.forEach(function(p){ p.classList.toggle('active', p.getAttribute('data-daypill') === day); });
-          panels.forEach(function(p){ p.hidden = p.getAttribute('data-daypanel') !== day; });
-        }
-        pills.forEach(function(p){ p.addEventListener('click', function(){ show(p.getAttribute('data-daypill')); }); });
-        var names = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-        var want = names[new Date().getDay()];
-        var pillDays = Array.prototype.map.call(pills, function(p){ return p.getAttribute('data-daypill'); });
-        if (pillDays.indexOf(want) === -1) want = pillDays[0];
-        if (want) show(want);
-      })();</script>
     </div>`;
   }
   const schedRows = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -801,7 +778,6 @@ function programPage(user, p) {
     ['focus', 'Focus', !!prog.adjustment],
     ['grades', 'Grades', !!gradeChips],
     ['strengths', 'Strengths', strengths.length > 0],
-    ['cues', 'Cues', !!cueRows],
     ['training', 'Training', routine.length > 0],
     ['mindset', 'Mindset', !!prog.mental_framework],
     ['schedule', 'Schedule', trainMode === 'flat' && !!schedRows],
@@ -824,7 +800,6 @@ function programPage(user, p) {
       strengths.length ? `<ul class="works-list">${strengths.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '',
       'strengths'
     )}
-    ${programSection('Cues', cueRows ? `<div class="cue-list">${cueRows}</div>` : '', 'cues')}
     ${trainingNav}
     ${programSection('Mental framework', prog.mental_framework ? `<p>${esc(prog.mental_framework)}</p>` : '', 'mindset')}
     ${trainMode === 'flat' ? programSection('Schedule', schedRows ? `<div class="cue-list">${schedRows}</div>` : '', 'schedule') : ''}
@@ -903,33 +878,11 @@ function programEditPage(user, p) {
         </label>
       </div>
       <h2 class="section-head">Training blocks</h2>
-      <div id="prog-cats">${catBlocks}</div>
+      <div id="prog-cats" data-next="${routine.length}">${catBlocks}</div>
       <p><button type="button" class="btn" id="prog-add-cat">+ Add block</button></p>
       <p><button type="submit" class="btn btn-primary">Save program</button></p>
     </form>
-    <script>
-    (function () {
-      var wrap = document.getElementById('prog-cats');
-      var next = ${routine.length};
-      document.getElementById('prog-add-cat').addEventListener('click', function () {
-        var div = document.createElement('div');
-        div.className = 'card routine-group prog-cat';
-        div.setAttribute('data-cat', '');
-        div.innerHTML =
-          '<label class="fld">Category<input type="text" name="cat_' + next + '_name" maxlength="60"></label>' +
-          '<label class="fld">Drills — one per line, as <em>Drill</em> or <em>Drill | volume</em>' +
-          '<textarea name="cat_' + next + '_items" rows="4"></textarea></label>' +
-          '<button type="button" class="btn btn-danger btn-sm" data-remove-cat>Remove category</button>';
-        wrap.appendChild(div);
-        next++;
-      });
-      wrap.addEventListener('click', function (e) {
-        if (e.target && e.target.hasAttribute('data-remove-cat')) {
-          e.target.closest('[data-cat]').remove();
-        }
-      });
-    })();
-    </script>`,
+`,
   });
 }
 
@@ -963,7 +916,7 @@ function remoteProgramsSection(list) {
               ? `<form method="post" action="/coach/remote/unlink" class="inline-form"><input type="hidden" name="id" value="${r.id}"><button class="btn btn-sm" type="submit">Unlink</button></form>`
               : `<form method="post" action="/coach/remote/link" class="inline-form"><input type="email" name="email" placeholder="hitter email" required class="input-sm"><input type="hidden" name="id" value="${r.id}"><button class="btn btn-sm" type="submit">Link</button></form>`
           }
-          <form method="post" action="/coach/remote/remove" class="inline-form" onsubmit="return confirm('Remove ${esc(r.athlete_name)} and their program?')"><input type="hidden" name="id" value="${r.id}"><button class="btn btn-sm btn-danger" type="submit">Remove</button></form>
+          <form method="post" action="/coach/remote/remove" class="inline-form" data-confirm-remove="${esc(r.athlete_name)}"><input type="hidden" name="id" value="${r.id}"><button class="btn btn-sm btn-danger" type="submit">Remove</button></form>
         </div>
       </div>`;
     })
@@ -1010,23 +963,7 @@ function videosPage(user, cats, activeCat, videos) {
     <div class="pill-row">${pills}</div>
     <div class="video-grid">${cards || '<div class="card empty">No videos yet — they\u2019ll appear here after the next sync.</div>'}</div>
     <div class="card empty" id="video-no-match" hidden>No videos match that search.</div>
-    <script>
-    (function () {
-      var box = document.getElementById('video-search');
-      if (!box) return;
-      var none = document.getElementById('video-no-match');
-      box.addEventListener('input', function () {
-        var q = box.value.trim().toLowerCase();
-        var shown = 0;
-        document.querySelectorAll('.video-card').forEach(function (el) {
-          var hit = !q || (el.getAttribute('data-search') || '').indexOf(q) !== -1;
-          el.style.display = hit ? '' : 'none';
-          if (hit) shown++;
-        });
-        none.hidden = shown !== 0;
-      });
-    })();
-    </script>`,
+`,
   });
 }
 
