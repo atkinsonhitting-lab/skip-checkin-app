@@ -207,19 +207,13 @@ a:active { color: #ff3b30; }
 .level-head { margin: 12px 0; }
 .level-head .hint { margin-bottom: 6px; }
 .level-hero-meter { margin: 16px auto; max-width: 440px; }
-/* Coach feed — hitting-only social */
-.post { margin-bottom: 12px; }
-.post-coach { font-weight: 800; font-size: 13px; text-transform: uppercase; letter-spacing: .5px; color: var(--red); }
-.post-title { font-weight: 800; font-size: 17px; margin: 4px 0; }
-.post-body { margin: 6px 0 12px; font-size: 15px; }
-.post-actions { display: flex; gap: 8px; }
-.react-btn {
-  background: var(--bg2); border: 1px solid var(--line); border-radius: 999px;
-  padding: 7px 16px; font-size: 14px; font-weight: 700; color: var(--muted); cursor: pointer;
-}
-.react-btn.active-like { border-color: #00e676; color: #00e676; }
-.react-btn.active-dislike { border-color: #ff5252; color: #ff5252; }
 /* Learn page — hitting notebook + players studied */
+.prompt-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 2px 0 10px; }
+.prompt-chip {
+  background: transparent; border: 1px dashed var(--line); border-radius: 999px;
+  padding: 6px 14px; font-size: 13px; font-weight: 600; color: var(--muted); cursor: pointer;
+}
+.prompt-chip:active { border-color: var(--red); color: var(--fg); }
 .chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
 .chip-radio input { display: none; }
 .chip-radio span {

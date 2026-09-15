@@ -170,7 +170,7 @@ if (!db.prepare("SELECT value FROM settings WHERE key = 'test_cleanup_20260915'"
   const ids = victims.map((r) => r.id);
   if (ids.length) {
     const ph = ids.map(() => '?').join(',');
-    for (const t of ['chat_messages', 'checkins', 'routine_drills', 'password_reset_tokens', 'learning_notes', 'study_players', 'post_reactions']) {
+    for (const t of ['chat_messages', 'checkins', 'routine_drills', 'password_reset_tokens', 'learning_notes', 'study_players']) {
       db.prepare(`DELETE FROM ${t} WHERE user_id IN (${ph})`).run(...ids);
     }
     db.prepare(`DELETE FROM users WHERE id IN (${ph})`).run(...ids);
@@ -188,7 +188,7 @@ if (!db.prepare("SELECT value FROM settings WHERE key = 'test_cleanup_e2e_202609
   const ids = victims.map((r) => r.id);
   if (ids.length) {
     const ph = ids.map(() => '?').join(',');
-    for (const t of ['chat_messages', 'checkins', 'routine_drills', 'password_reset_tokens', 'learning_notes', 'study_players', 'post_reactions']) {
+    for (const t of ['chat_messages', 'checkins', 'routine_drills', 'password_reset_tokens', 'learning_notes', 'study_players']) {
       db.prepare(`DELETE FROM ${t} WHERE user_id IN (${ph})`).run(...ids);
     }
     db.prepare(`DELETE FROM users WHERE id IN (${ph})`).run(...ids);
@@ -219,101 +219,8 @@ CREATE TABLE IF NOT EXISTS study_players (
 CREATE INDEX IF NOT EXISTS idx_players_user_time ON study_players(user_id, created_at);
 `);
 
-// Coach feed (Sep 15 2026): posts from elite hitting coaches — a hitting-only
-// feed inside the Learn tab. Hitters like/dislike; Skip learns what clicks.
-db.exec(`
-CREATE TABLE IF NOT EXISTS coach_posts (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  coach_name TEXT NOT NULL,
-  title TEXT NOT NULL,
-  body TEXT NOT NULL,
-  source_url TEXT NOT NULL DEFAULT '',
-  created_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS post_reactions (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  post_id INTEGER NOT NULL REFERENCES coach_posts(id),
-  user_id INTEGER NOT NULL REFERENCES users(id),
-  reaction TEXT NOT NULL CHECK(reaction IN ('like','dislike')),
-  created_at TEXT NOT NULL,
-  UNIQUE(post_id, user_id)
-);
-CREATE INDEX IF NOT EXISTS idx_reactions_post ON post_reactions(post_id);
-CREATE INDEX IF NOT EXISTS idx_reactions_user ON post_reactions(user_id);
-`);
-
-// One-time seed: original write-ups distilled from these coaches' public
-// teachings (not copied content), credited with a follow link.
-if (!db.prepare('SELECT COUNT(*) AS n FROM coach_posts').get().n) {
-  const seed = [
-    ['Trey Hannam', 'What works today might not work in 3 days',
-      "Hitting is adaptation. Don't marry a feel, a drill, or a cue — the best hitters are the fastest adjusters. When something stops working, you don't force it. You move on.",
-      'https://treyhannam.com'],
-    ['Trey Hannam', 'Speak less',
-      "The best coaching cue is usually no cue at all. A hitter with five thoughts in his head can't compete with one who's just seeing it. One clear thought — or better, let the video do the talking.",
-      'https://treyhannam.com'],
-    ['Trey Hannam', "You're a psychologist more than a hitting coach",
-      'Most swing problems are really human problems: pressing, fear, frustration. Fix what\u2019s going on upstairs and the swing often fixes itself.',
-      'https://treyhannam.com'],
-    ['Trey Hannam', "More reps isn't more better",
-      "Mindless swings just groove bad patterns deeper. Every rep needs intent — a target, a job, a reason. Train with a plan or don't train.",
-      'https://treyhannam.com'],
-    ['Anderson Miller', 'Win the fastball up',
-      "If you can't handle velocity at the top of the zone, nothing else matters. Set your swing up to win up there — short and direct — and everything else gets easier.",
-      'https://www.unfinishedpd.com'],
-    ['Anderson Miller', 'The ground is your friend. Use it.',
-      'Most hitters leak power because they never use the ground. Drive through your legs and the barrel whips through for free.',
-      'https://www.unfinishedpd.com'],
-    ['Anderson Miller', 'Narrow focus, big results',
-      'In the game, less thinking wins. One simple approach, repeated every single pitch, beats five swing thoughts. Simplify to be dangerous.',
-      'https://www.unfinishedpd.com'],
-    ['Anderson Miller', 'Hitting is an art, not an algorithm',
-      'Stop chasing numbers on a screen. Feel the swing, trust your eyes, compete. The data serves the hitter — never the other way around.',
-      'https://www.unfinishedpd.com'],
-  ];
-  const ins = db.prepare(
-    "INSERT INTO coach_posts (coach_name, title, body, source_url, created_at) VALUES (?, ?, ?, ?, datetime('now'))"
-  );
-  for (const p of seed) ins.run(p[0], p[1], p[2], p[3]);
-  console.log(`SEED: ${seed.length} coach feed posts`);
-}
-
-// Atkinson Hitting's own voice in the feed — shown as just another coaching
-// voice in the lineup, with no indication it owns the app.
-if (
-  !db.prepare("SELECT COUNT(*) AS n FROM coach_posts WHERE coach_name = 'Atkinson Hitting'").get().n
-) {
-  const seed = [
-    [
-      'Atkinson Hitting',
-      'Get back to your best day',
-      "When you're struggling, don't rebuild your swing. Go find what you were doing, thinking, and feeling the last time you were locked in — and do that again. Your best swing is already in you.",
-      'https://www.instagram.com/atkinsonhitting',
-    ],
-    [
-      'Atkinson Hitting',
-      'One fix at a time',
-      'Trying to fix five things fixes nothing. Pick the ONE thing that matters most today, own it, and let the rest wait. Hitters who chase everything catch nothing.',
-      'https://www.instagram.com/atkinsonhitting',
-    ],
-    [
-      'Atkinson Hitting',
-      'Aim at something, not somewhere in your body',
-      "External beats internal every time. Don't think about your hands — think about driving it through the pitcher's chest. A target outside your body frees your swing up.",
-      'https://www.instagram.com/atkinsonhitting',
-    ],
-    [
-      'Atkinson Hitting',
-      'Mental before mechanical',
-      'In a real at-bat, your plan and your intent matter more than your mechanics. Clear mind, simple plan, full commit. Most slumps are between the ears, not in the swing.',
-      'https://www.instagram.com/atkinsonhitting',
-    ],
-  ];
-  const ins2 = db.prepare(
-    "INSERT INTO coach_posts (coach_name, title, body, source_url, created_at) VALUES (?, ?, ?, ?, datetime('now'))"
-  );
-  for (const p of seed) ins2.run(p[0], p[1], p[2], p[3]);
-  console.log(`SEED: ${seed.length} Atkinson Hitting feed posts`);
-}
+// Coach feed REMOVED Sep 15 2026 (Bobby: Learn tab is a personal notebook, no social layer).
+// Drop the tables if a previous deploy created them.
+db.exec(`DROP TABLE IF EXISTS post_reactions; DROP TABLE IF EXISTS coach_posts;`);
 
 module.exports = db;
