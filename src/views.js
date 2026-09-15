@@ -316,12 +316,10 @@ function drillChip(d) {
 // Skip's journal rating: posted by the assistant after reading the hitter's
 // journal text. Shown once rated; a subtle placeholder before that.
 function skipReadBlock(c) {
-  if (c.skip_journal_score != null) {
-    const s = Number(c.skip_journal_score);
+  if (c.skip_journal_note) {
     return `<div class="skip-read">
       <div class="skip-read-head">Skip's read</div>
-      <div class="skip-read-score">${esc(Number.isFinite(s) ? s.toFixed(1) : s)}<span class="skip-read-of">/10</span></div>
-      ${c.skip_journal_note ? `<p>${esc(c.skip_journal_note)}</p>` : ''}
+      <p>${esc(c.skip_journal_note)}</p>
     </div>`;
   }
   return `<p class="skip-pending">Skip's reviewing your entry — his read lands here.</p>`;

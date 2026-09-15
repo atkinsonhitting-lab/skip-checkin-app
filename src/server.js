@@ -584,8 +584,8 @@ app.get('/api/checkins', (req, res) => {
 
 // POST /api/checkins/:id/skip-rating — the AI assistant (Skip) posts its read
 // of a hitter's journal after reading session_notes / what_worked.
-// Body: { "score": <1-10 number>, "note": "<1-2 sentences in Skip's voice>" }.
-// Sets skip_journal_score, skip_journal_note, skip_rated_at (now, ISO).
+// Body: { "note": "<2-3 sentence summary in Skip's voice>", "score": <optional 1-10> }.
+// Sets skip_journal_note, skip_rated_at (now, ISO); score optional, no longer shown in-app.
 // 401 = bad key, 404 = unknown check-in id, 400 = bad body.
 app.post('/api/checkins/:id/skip-rating', (req, res) => {
   if (!checkApiKey(req, res)) return;
@@ -598,9 +598,9 @@ app.post('/api/checkins/:id/skip-rating', (req, res) => {
   if (!existing) return res.status(404).json({ error: 'check-in not found' });
 
   const b = req.body || {};
-  const score = typeof b.score === 'number' ? b.score : Number(b.score);
+  const scoreRaw = b.score === undefined || b.score === null ? null : Number(b.score);
   const note = typeof b.note === 'string' ? b.note.trim() : '';
-  if (!Number.isFinite(score) || score < 1 || score > 10) {
+  if (scoreRaw !== null && (!Number.isFinite(scoreRaw) || scoreRaw < 1 || scoreRaw > 10)) {
     return res.status(400).json({ error: 'score must be a number from 1 to 10' });
   }
   if (!note) {
@@ -613,7 +613,7 @@ app.post('/api/checkins/:id/skip-rating', (req, res) => {
   const ratedAt = new Date().toISOString();
   db.prepare(
     `UPDATE checkins SET skip_journal_score = ?, skip_journal_note = ?, skip_rated_at = ? WHERE id = ?`
-  ).run(score, note, ratedAt, id);
+  ).run(scoreRaw, note, ratedAt, id);
 
   const row = db
     .prepare(`SELECT ${CHECKIN_COLS} FROM checkins c JOIN users u ON u.id = c.user_id WHERE c.id = ?`)
@@ -1015,7 +1015,7 @@ async function geminiText(systemText, userText, maxTokens) {
     .trim();
 }
 
-const JOURNAL_SYSTEM = `You are Skip, a direct no-fluff hitting coach in the Bobby Atkinson mold. You read a hitter's journal entry and give it a 1-10 score plus a 1-2 sentence coach's note, like a margin note on their entry. Judge by what the hitter WROTE first — their words, their honesty, their approach — then their numbers. Mental approach before mechanics: a grinder who battled honestly outscores a talented day with no intent. Be specific to what they said. Never generic. Reply ONLY as JSON: {"score": 8.5, "note": "..."}`;
+const JOURNAL_SYSTEM = `You are Skip, a direct no-fluff hitting coach in the Bobby Atkinson mold. Read this hitter's journal entry and write a 2-3 sentence summary of the session, like a coach's margin note on their entry. Capture what actually happened: how they felt, what worked, what was off, and the one thing to carry forward. Judge by what the hitter WROTE first — their words, their honesty, their approach — then their numbers. Mental approach before mechanics. Be specific to what they said, never generic. Reply with ONLY the summary — no score, no rating, no number.`;
 
 function drillNamesOf(c) {
   try {
@@ -1044,13 +1044,12 @@ async function journalRead(c) {
     .filter(Boolean)
     .join('\n');
   const raw = await geminiText(JOURNAL_SYSTEM, entry, 300);
-  const m = raw.match(/\{[\s\S]*\}/);
-  if (!m) throw new Error('llm_bad_json');
-  const parsed = JSON.parse(m[0]);
-  const score = Math.round(Math.min(10, Math.max(1, Number(parsed.score))) * 10) / 10;
-  const note = String(parsed.note || '').trim().slice(0, 400);
-  if (!Number.isFinite(score) || !note) throw new Error('llm_bad_json');
-  return { score, note };
+  const note = raw
+    .replace(/^["'\s]+|["'\s]+$/g, '')
+    .trim()
+    .slice(0, 500);
+  if (!note) throw new Error('llm_empty');
+  return { note };
 }
 
 let journalRunning = false;
@@ -1059,15 +1058,15 @@ async function ratePendingJournals() {
   journalRunning = true;
   try {
     const pending = db
-      .prepare('SELECT * FROM checkins WHERE skip_journal_score IS NULL ORDER BY created_at ASC LIMIT 8')
+      .prepare('SELECT * FROM checkins WHERE skip_journal_note IS NULL ORDER BY created_at ASC LIMIT 8')
       .all();
     for (const c of pending) {
       try {
         const r = await journalRead(c);
         db.prepare(
-          'UPDATE checkins SET skip_journal_score = ?, skip_journal_note = ?, skip_rated_at = ? WHERE id = ? AND skip_journal_score IS NULL'
-        ).run(r.score, r.note, new Date().toISOString(), c.id);
-        console.log(`journal rated checkin ${c.id}: ${r.score}`);
+          'UPDATE checkins SET skip_journal_note = ?, skip_rated_at = ? WHERE id = ? AND skip_journal_note IS NULL'
+        ).run(r.note, new Date().toISOString(), c.id);
+        console.log(`journal summarized checkin ${c.id}`);
       } catch (e) {
         console.error(`journal read failed for checkin ${c.id}: ${e.message}`);
       }
