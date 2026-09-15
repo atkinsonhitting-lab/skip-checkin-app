@@ -135,6 +135,7 @@ a:active { color: #ff3b30; }
 .cues .cue { margin: 8px 0; font-size: 15px; }
 
 .hint { color: var(--muted); font-size: 14px; }
+.fld .hint { display: block; margin-top: 5px; font-weight: 400; }
 .hint-inline { color: var(--muted); font-size: 12px; font-weight: 400; }
 
 /* Forms */
