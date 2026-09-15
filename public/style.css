@@ -496,3 +496,7 @@ a:active { color: #ff3b30; }
 .btn-small { display: inline-block; background: var(--red); color: #fff; border: none; border-radius: 8px; padding: 8px 14px; font-size: 14px; font-weight: 700; cursor: pointer; text-decoration: none; }
 .btn-small:active { background: var(--red-dark); }
 .btn-small.btn-quiet { background: var(--bg2); color: var(--muted); border: 1px solid var(--line); }
+
+/* ---- View-as-hitter preview banner ---- */
+.viewas-banner { background: #3a2b00; color: #ffd970; text-align: center; padding: 10px 12px; font-size: 14px; border-bottom: 1px solid #6b5310; }
+.viewas-exit { background: #ffd970; color: #111; border: none; border-radius: 6px; padding: 4px 12px; font-weight: 700; cursor: pointer; margin-left: 8px; }

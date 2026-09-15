@@ -43,6 +43,7 @@ function layout({ title, user, tabs, body }) {
   ${user ? `<div class="userbox">${esc(user.displayName)} · <a href="/logout">Log out</a></div>` : ''}
 </header>
 ${tabHtml ? `<nav class="tabs">${tabHtml}</nav>` : ''}
+${user && user.viewAs ? `<div class="viewas-banner">Previewing as <strong>${esc(user.viewAsName)}</strong> — actions are disabled. <form method="post" action="/coach/view-as/exit" style="display:inline;margin:0"><button type="submit" class="viewas-exit">Exit preview</button></form></div>` : ''}
 <main class="wrap">${body}</main>
 <script src="/app.js"></script>
 </body>
@@ -629,11 +630,17 @@ function coachDashboard(user, userStats, latest, pending, remotePrograms, librar
   const totalCheckins = userStats.reduce((s, u) => s + u.total, 0);
   const cards = userStats
     .map(
-      (a) => `<a class="card athlete-card" data-search="${esc(`${a.name} ${a.email}`.toLowerCase())}" href="/coach/user/${encodeURIComponent(a.email)}">
-        <div class="athlete-card-name">${esc(a.name)}</div>
-        <div class="athlete-card-email">${esc(a.email)}</div>
-        <div class="athlete-card-meta">${a.total} check-in${a.total === 1 ? '' : 's'}${a.last ? ` · last ${fmtDate(a.last)}` : ' · none yet'}</div>
-      </a>`
+      (a) => `<div class="card athlete-card" data-search="${esc(`${a.name} ${a.email}`.toLowerCase())}">
+        <a href="/coach/user/${encodeURIComponent(a.email)}" style="display:block;color:inherit;text-decoration:none">
+          <div class="athlete-card-name">${esc(a.name)}</div>
+          <div class="athlete-card-email">${esc(a.email)}</div>
+          <div class="athlete-card-meta">${a.total} check-in${a.total === 1 ? '' : 's'}${a.last ? ` · last ${fmtDate(a.last)}` : ' · none yet'}</div>
+        </a>
+        <form method="post" action="/coach/view-as" style="margin:8px 0 0">
+          <input type="hidden" name="id" value="${a.id}">
+          <button class="btn-small btn-quiet" type="submit">View as hitter</button>
+        </form>
+      </div>`
     )
     .join('');
   const feed = latest.length

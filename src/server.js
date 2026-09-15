@@ -64,25 +64,55 @@ if (process.env.SEED_ON_BOOT === 'true' && userCount() === 0) {
 
 // ---- Auth helpers ----
 
+function toReqUser(row) {
+  return {
+    id: row.id,
+    email: row.email,
+    role: row.role,
+    athleteName: row.athlete_name,
+    firstName: row.first_name || null,
+    displayName: row.first_name || row.athlete_name || 'Coach',
+    status: row.status || 'approved',
+    remoteProgramId: row.remote_program_id || null,
+  };
+}
 function attachUser(req, res, next) {
   if (req.session && req.session.userId) {
     const row = db.prepare('SELECT id, email, role, athlete_name, first_name, last_name, status, remote_program_id FROM users WHERE id = ?').get(req.session.userId);
     if (row) {
-      req.user = {
-        id: row.id,
-        email: row.email,
-        role: row.role,
-        athleteName: row.athlete_name,
-        firstName: row.first_name || null,
-        displayName: row.first_name || row.athlete_name || 'Coach',
-        status: row.status || 'approved',
-        remoteProgramId: row.remote_program_id || null,
-      };
+      req.user = toReqUser(row);
+      // "View as hitter": the coach browses the app exactly as this hitter
+      // sees it. req.user becomes the hitter; the real coach stays on
+      // req.coachUser so coach-only routes keep working.
+      if (row.role === 'coach' && req.session.viewAsUserId) {
+        const t = db.prepare('SELECT id, email, role, athlete_name, first_name, last_name, status, remote_program_id FROM users WHERE id = ? AND role != \'coach\'').get(req.session.viewAsUserId);
+        if (t) {
+          req.coachUser = req.user;
+          req.user = toReqUser(t);
+          req.user.viewAs = true;
+          req.user.viewAsName = req.user.displayName;
+        } else {
+          delete req.session.viewAsUserId;
+        }
+      }
     }
   }
   next();
 }
 app.use(attachUser);
+
+// The real logged-in user (the coach) even while viewing as a hitter.
+function realUser(req) {
+  return req.coachUser || req.user;
+}
+// In view-as mode the preview is read-only: no check-ins, chats, or edits
+// can be submitted as the hitter by accident.
+app.use((req, res, next) => {
+  if (req.user && req.user.viewAs && req.method === 'POST' && req.path !== '/coach/view-as/exit') {
+    return res.redirect('/');
+  }
+  next();
+});
 
 function requireLogin(req, res, next) {
   if (!req.user) return res.redirect('/login');
@@ -94,8 +124,9 @@ function requireLogin(req, res, next) {
 }
 
 function requireCoach(req, res, next) {
-  if (!req.user) return res.redirect('/login');
-  if (req.user.role !== 'coach') return res.status(403).send('Forbidden');
+  const u = realUser(req);
+  if (!u) return res.redirect('/login');
+  if (u.role !== 'coach') return res.status(403).send('Forbidden');
   next();
 }
 
@@ -768,7 +799,7 @@ app.get('/coach/program/:id/edit', requireCoach, (req, res) => {
   setApprovalCount(req);
   const p = getProgram(req.params.id);
   if (!p) return res.redirect('/coach');
-  res.send(views.programEditPage(req.user, p));
+  res.send(views.programEditPage(realUser(req), p));
 });
 
 app.post('/coach/program/:id/save', requireCoach, (req, res) => {
@@ -971,6 +1002,20 @@ app.get('/videos/watch/:id', requireLogin, requireRemote, (req, res) => {
   res.send(views.videoWatchPage(req.user, v));
 });
 
+// ---- View as hitter ----
+app.post('/coach/view-as', requireCoach, (req, res) => {
+  const id = Number(req.body.id);
+  const t = id ? db.prepare("SELECT id FROM users WHERE id = ? AND role != 'coach'").get(id) : null;
+  if (t) req.session.viewAsUserId = t.id;
+  res.redirect('/');
+});
+app.post('/coach/view-as/exit', (req, res) => {
+  const u = realUser(req);
+  if (!u || u.role !== 'coach') return res.redirect('/login');
+  delete req.session.viewAsUserId;
+  res.redirect('/coach');
+});
+
 // ---- Coach video library manager ----
 app.get('/coach/library', requireCoach, (req, res) => {
   const cats = db
@@ -983,7 +1028,7 @@ app.get('/coach/library', requireCoach, (req, res) => {
         .all(active)
     : [];
   const playing = req.query.play ? db.prepare('SELECT * FROM video_library WHERE id = ?').get(req.query.play) : null;
-  res.send(views.coachLibraryPage(req.user, cats, active, videos, playing));
+  res.send(views.coachLibraryPage(realUser(req), cats, active, videos, playing));
 });
 
 app.post('/coach/library/rename', requireCoach, (req, res) => {
@@ -1184,7 +1229,7 @@ app.get('/coach', requireCoach, (req, res) => {
     .all();
   const librarySync = db.prepare("SELECT value FROM library_sync_state WHERE key = 'last_sync_at'").get();
   res.send(
-    views.coachDashboard(req.user, stats, latest, pending, remotePrograms, {
+    views.coachDashboard(realUser(req), stats, latest, pending, remotePrograms, {
       cats: libraryCats,
       lastSync: librarySync ? librarySync.value : '',
     })
@@ -1194,7 +1239,7 @@ app.get('/coach', requireCoach, (req, res) => {
 // Approvals tab: approve or decline waiting hitters right here.
 app.get('/coach/approvals', requireCoach, (req, res) => {
   setApprovalCount(req);
-  res.send(views.coachApprovalsPage(req.user, pendingList()));
+  res.send(views.coachApprovalsPage(realUser(req), pendingList()));
 });
 
 // Approve a waiting hitter — they can log in from here on.
@@ -1235,7 +1280,7 @@ app.get('/coach/user/:email', requireCoach, (req, res) => {
   const thread = db
     .prepare('SELECT role, content, created_at FROM chat_messages WHERE user_id = ? ORDER BY created_at ASC LIMIT 200')
     .all(user.id);
-  res.send(views.coachUser(req.user, name, rows, whatWorksData(name, user.id), thread, user.email, brain.listMemory(db, user.id), getRoutine(user.id)));
+  res.send(views.coachUser(realUser(req), name, rows, whatWorksData(name, user.id), thread, user.email, brain.listMemory(db, user.id), getRoutine(user.id)));
 });
 
 // Skip's memory of a hitter: Bobby's durable notes on what works for them.
@@ -1263,7 +1308,7 @@ app.get('/coach/user/:email/delete', requireCoach, (req, res) => {
   if (!user) return res.status(404).send('Unknown user.');
   const n = db.prepare('SELECT COUNT(*) AS n FROM checkins WHERE user_id = ?').get(user.id).n;
   const name = [user.first_name, user.last_name].filter(Boolean).join(' ') || user.athlete_name || user.email;
-  res.send(views.coachDeleteHitterPage(req.user, user, name, n));
+  res.send(views.coachDeleteHitterPage(realUser(req), user, name, n));
 });
 
 app.post('/coach/user/:email/delete', requireCoach, (req, res) => {
@@ -1329,7 +1374,7 @@ app.get('/coach/skip', requireCoach, (req, res) => {
   const thread = db
     .prepare('SELECT role, content, created_at FROM chat_messages WHERE user_id = ? ORDER BY created_at ASC LIMIT 100')
     .all(req.user.id);
-  res.send(views.coachSkipPage(req.user, entries, hitters, thread, !!process.env.LLM_API_KEY, req.query.saved === '1'));
+  res.send(views.coachSkipPage(realUser(req), entries, hitters, thread, !!process.env.LLM_API_KEY, req.query.saved === '1'));
 });
 
 // ---- Skip's Brain: Bobby's structured coaching library ----
