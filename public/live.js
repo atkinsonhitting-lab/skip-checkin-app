@@ -185,6 +185,8 @@
     try { msg = JSON.parse(ev.data); } catch (e) { return; }
     if (msg.type === 'ready') {
       setStatus('You\u2019re live — just start talking.');
+      var card = document.querySelector('.live-card');
+      if (card) card.classList.add('live-on');
       startMic();
       endBtn.hidden = false;
     } else if (msg.type === 'audio') {
@@ -233,6 +235,8 @@
 
   function cleanup() {
     stopPlayback();
+    var card = document.querySelector('.live-card');
+    if (card) card.classList.remove('live-on');
     if (silenceTimer) { clearInterval(silenceTimer); silenceTimer = null; }
     if (micProc) { try { micProc.disconnect(); } catch (e) {} micProc = null; }
     if (micSource) { try { micSource.disconnect(); } catch (e) {} micSource = null; }
