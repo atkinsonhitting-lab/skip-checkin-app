@@ -17,7 +17,7 @@ function fmtDate(iso) {
 
 function layout({ title, user, tabs, body }) {
   const tabHtml = (tabs || [])
-    .map((t) => `<a href="${t.href}" class="drawer-link${t.active ? ' active' : ''}">${esc(t.label)}${t.badge ? `<span class="tab-badge">${esc(t.badge)}</span>` : ''}</a>`)
+    .map((t) => `<a href="${t.href}" class="drawer-link${t.active ? ' active' : ''}"><span class="drawer-link-text">${esc(t.label)}${t.sub ? `<span class="drawer-sub">${esc(t.sub)}</span>` : ''}</span>${t.badge ? `<span class="tab-badge">${esc(t.badge)}</span>` : ''}</a>`)
     .join('');
   const drawer = tabHtml
     ? `<div id="drawer-overlay" hidden></div>
@@ -68,7 +68,7 @@ function userTabs(active, user) {
     { href: '/checkin', label: 'Check In', active: active === 'checkin' },
     { href: '/notebook', label: 'Notebook', active: active === 'notebook' },
     { href: '/mental-game', label: 'Mental Game', active: active === 'mental' },
-    { href: '/chat', label: 'Coach Skip', active: active === 'chat' },
+    { href: '/chat', label: 'Talk to Skip', sub: 'your personally trained hitting coach', active: active === 'chat' },
     { href: '/settings', label: 'Settings', active: active === 'settings' },
   ];
   // Bobby's remote hitters only — nobody else ever sees this tab.

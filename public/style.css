@@ -97,6 +97,9 @@ body.drawer-open #drawer { transform: none; }
   font-size: 16px; font-weight: 600; border-left: 3px solid transparent;
 }
 .drawer-link.active { color: var(--red); border-left-color: var(--red); background: rgba(255,255,255,.03); }
+.drawer-link-text { display: flex; flex-direction: column; }
+.drawer-sub { font-size: 12px; font-weight: 400; color: var(--muted); margin-top: 2px; }
+.drawer-link.active .drawer-sub { color: var(--red); opacity: .8; }
 /* ---- Floating Skip chat button ---- */
 .skip-fab {
   position: fixed; right: 16px; bottom: calc(18px + env(safe-area-inset-bottom));
