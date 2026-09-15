@@ -55,6 +55,7 @@ function userTabs(active, user) {
     { href: '/', label: 'Home', active: active === 'home' },
     { href: '/checkin', label: 'Check In', active: active === 'checkin' },
     { href: '/notebook', label: 'Notebook', active: active === 'notebook' },
+    { href: '/mental-game', label: 'Mental Game', active: active === 'mental' },
     { href: '/chat', label: 'Coach Skip', active: active === 'chat' },
   ];
   // Bobby's remote hitters only — nobody else ever sees this tab.
@@ -808,7 +809,6 @@ function programPage(user, p) {
     ['grades', 'Grades', !!gradeChips],
     ['strengths', 'Strengths', strengths.length > 0],
     ['training', 'Training', routine.length > 0],
-    ['mindset', 'Mindset', !!prog.mental_framework],
     ['schedule', 'Schedule', trainMode === 'flat' && !!schedRows],
     ['notes', 'Notes', progNotes.length > 0],
   ].filter(([, , show]) => show);
@@ -830,7 +830,6 @@ function programPage(user, p) {
       'strengths'
     )}
     ${trainingNav}
-    ${programSection('Mental framework', prog.mental_framework ? `<p>${esc(prog.mental_framework)}</p>` : '', 'mindset')}
     ${trainMode === 'flat' ? programSection('Schedule', schedRows ? `<div class="cue-list">${schedRows}</div>` : '', 'schedule') : ''}
     ${programSection(
       'Notes',
@@ -862,6 +861,36 @@ function programRoutinePage(user, p) {
     body: `<h1 class="page-title">Daily Routine</h1>
     <p class="lede">Every day, before the work below — no thinking, just go.</p>
     ${blocks.length ? blocks.map((c) => sectionCard(c.category, c.items)).join('') : '<div class="card empty">No daily routine set yet.</div>'}`,
+  });
+}
+
+// Hitter-facing: Mental Game — Skip's baseline of the hitter's mental routines,
+// so he can recommend practices when the hitter feels sped up. All hitters.
+function mentalGamePage(user, baseline, saved) {
+  const b = baseline || {};
+  const fld = (name, label, hint, val) => `
+    <label class="fld">${esc(label)}<span class="hint">${esc(hint)}</span>
+      <textarea name="${name}" rows="2" maxlength="600" placeholder="${esc(hint)}">${esc(val || '')}</textarea>
+    </label>`;
+  return layout({
+    title: 'Mental Game',
+    user,
+    tabs: userTabs('mental', user),
+    body: `<h1 class="page-title">Mental Game</h1>
+    <p class="lede">Tell Coach Skip what you already do — he'll build on it when you need him.</p>
+    ${saved ? '<div class="notice">Saved — Skip knows your baseline now.</div>' : ''}
+    <form method="post" action="/mental-game/save" class="form">
+      <div class="card">
+        ${fld('pregame_routine', 'Pre-game routine', 'Do you have one? Walk through it.', b.pregame_routine)}
+        ${fld('morning_routine', 'Morning routine', 'Game day or every day — what does it look like?', b.morning_routine)}
+        ${fld('breath_work', 'Breath work', 'Do you do any? What kind?', b.breath_work)}
+        ${fld('when_sped_up', 'When you feel sped up', 'Rushed in a game — what do you do right now?', b.when_sped_up)}
+      </div>
+      <p><button type="submit" class="btn btn-primary">Save my baseline</button></p>
+    </form>
+    <div class="card">
+      <p style="margin:0">Feeling sped up or rushing? <a href="/chat">Talk to Coach Skip →</a> — he'll give you one thing to lock back in, built on what you wrote above.</p>
+    </div>`,
   });
 }
 
@@ -1373,6 +1402,7 @@ module.exports = {
   resetPasswordPage,
   programPage,
   programRoutinePage,
+  mentalGamePage,
   programEditPage,
   videosPage,
   videoWatchPage,

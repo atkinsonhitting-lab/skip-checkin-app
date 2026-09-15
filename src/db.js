@@ -407,6 +407,14 @@ CREATE TABLE IF NOT EXISTS study_players (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_players_user_time ON study_players(user_id, created_at);
+CREATE TABLE IF NOT EXISTS mental_baseline (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id),
+  pregame_routine TEXT NOT NULL DEFAULT '',
+  morning_routine TEXT NOT NULL DEFAULT '',
+  breath_work TEXT NOT NULL DEFAULT '',
+  when_sped_up TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT ''
+);
 `);
 
 // Coach feed REMOVED Sep 15 2026 (Bobby: Learn tab is a personal notebook, no social layer).

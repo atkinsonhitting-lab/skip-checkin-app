@@ -794,6 +794,31 @@ app.get('/program', requireLogin, (req, res) => {
   res.send(views.programPage(req.user, p));
 });
 
+// Mental Game — every hitter's baseline. Skip coaches from this.
+function getMentalBaseline(userId) {
+  return db.prepare('SELECT * FROM mental_baseline WHERE user_id = ?').get(userId) || null;
+}
+app.get('/mental-game', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.redirect('/coach');
+  res.send(views.mentalGamePage(req.user, getMentalBaseline(req.user.id), req.query.saved === '1'));
+});
+app.post('/mental-game/save', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.redirect('/coach');
+  const b = req.body || {};
+  const clean = (v) => String(v || '').trim().slice(0, 600);
+  db.prepare(
+    `INSERT INTO mental_baseline (user_id, pregame_routine, morning_routine, breath_work, when_sped_up, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(user_id) DO UPDATE SET pregame_routine=excluded.pregame_routine, morning_routine=excluded.morning_routine,
+       breath_work=excluded.breath_work, when_sped_up=excluded.when_sped_up, updated_at=excluded.updated_at`
+  ).run(
+    req.user.id,
+    clean(b.pregame_routine), clean(b.morning_routine), clean(b.breath_work), clean(b.when_sped_up),
+    new Date().toISOString()
+  );
+  res.redirect('/mental-game?saved=1');
+});
+
 // Hitter's daily routine tab — every-day blocks of their program. Remote athletes only.
 app.get('/program/routine', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
@@ -1670,6 +1695,7 @@ function programCueBlock(userId) {
   if (cues.timing) cueBits.push(`Timing: "${String(cues.timing).slice(0, 180)}"`);
   if (cues.game) cueBits.push(`Game: "${String(cues.game).slice(0, 180)}"`);
   if (cueBits.length) bits.push(`His cues (from his coach — use these in your coaching): ${cueBits.join(' · ')}`);
+  if (prog.mental_framework) bits.push(`Mental framework: ${String(prog.mental_framework).slice(0, 220)}`);
   if (!bits.length) return '';
   return `\nHIS PROGRAM (his coach wrote this — coach FROM it, don't recite it back at him):\n${bits.join('\n')}`;
 }
@@ -1698,6 +1724,16 @@ function skipDataBlock(userId) {
         .join('\n')}`
     : '';
   const progBlock = programCueBlock(userId);
+  const mb = getMentalBaseline(userId);
+  let mentalBlock = '';
+  if (mb && (mb.pregame_routine || mb.morning_routine || mb.breath_work || mb.when_sped_up)) {
+    const bits = [];
+    if (mb.pregame_routine) bits.push(`Pre-game routine: "${mb.pregame_routine.slice(0, 200)}"`);
+    if (mb.morning_routine) bits.push(`Morning routine: "${mb.morning_routine.slice(0, 200)}"`);
+    if (mb.breath_work) bits.push(`Breath work: "${mb.breath_work.slice(0, 200)}"`);
+    if (mb.when_sped_up) bits.push(`When he feels sped up now: "${mb.when_sped_up.slice(0, 200)}"`);
+    mentalBlock = `\nMENTAL GAME BASELINE (what he already does — build on this, one small practice at a time):\n${bits.join('\n')}\nWhen he feels sped up or rushed in a game, recommend ONE concrete practice anchored to what he already does above. Never lecture — one thing, in his language.`;
+  }
   return snap.lines.length
     ? `HITTER DATA (newest first):\n${snap.lines.join('\n')}\nSessions logged: ${snap.total}${
         snap.avg != null ? ` · Average level: ${scoreTier(snap.avg)}` : ''
@@ -1709,8 +1745,8 @@ function skipDataBlock(userId) {
         snap.bestDay
           ? `\nHIS BEST DAY — when he's struggling, take him back to exactly this (this is your #1 job):\n${snap.bestDay}`
           : ''
-      }${memBlock}${learnBlock}${playersBlock}${progBlock}`
-    : `HITTER DATA: no check-ins logged yet — this is a brand-new hitter. Ask what they are working on.${progBlock}`;
+      }${memBlock}${learnBlock}${playersBlock}${progBlock}${mentalBlock}`
+    : `HITTER DATA: no check-ins logged yet — this is a brand-new hitter. Ask what they are working on.${progBlock}${mentalBlock}`;
 }
 
 const COACH_SYSTEM = `You are Coach Skip, the AI hitting coach inside The Daily Hitter. You are talking to BOBBY ATKINSON — your head coach, the man whose brain you coach with. He is training you right now: giving feedback on your coaching, correcting your answers, teaching you how he wants his hitters coached. Listen carefully, take every correction seriously, and confirm specifically how you will apply what he tells you going forward. Talk to him like a trusted assistant coach — direct, no fluff, no motivational-poster talk. Keep replies short (2-4 sentences) unless he asks for more. Never mention you are an AI model. You are Coach Skip.
