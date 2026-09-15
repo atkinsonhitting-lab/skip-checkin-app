@@ -115,3 +115,21 @@
       input.focus();
     });
   })();
+
+  // ---- Coach dashboard: filter hitters as you type ----
+  (function hitterSearch() {
+    const input = document.getElementById('hitter-search');
+    if (!input) return;
+    const cards = Array.from(document.querySelectorAll('.athlete-card[data-search]'));
+    const none = document.getElementById('hitter-no-match');
+    input.addEventListener('input', () => {
+      const q = input.value.trim().toLowerCase();
+      let shown = 0;
+      cards.forEach((c) => {
+        const hit = !q || (c.getAttribute('data-search') || '').includes(q);
+        c.style.display = hit ? '' : 'none';
+        if (hit) shown++;
+      });
+      if (none) none.hidden = shown > 0;
+    });
+  })();

@@ -330,6 +330,12 @@ a:active { color: #ff3b30; }
 
 /* Coach */
 .athlete-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.searchbar {
+  display: block; width: 100%; margin: 0 0 10px; box-sizing: border-box;
+  background: var(--bg2); border: 1px solid var(--line); border-radius: 10px;
+  color: var(--text); font-size: 16px; padding: 12px 14px; font-family: inherit;
+}
+.searchbar:focus { outline: none; border-color: var(--red); }
 .athlete-card { display: block; color: var(--text); }
 .athlete-card:active { border-color: var(--red); }
 .athlete-card-name { font-weight: 800; font-size: 17px; }

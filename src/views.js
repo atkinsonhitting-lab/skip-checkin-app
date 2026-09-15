@@ -557,7 +557,7 @@ function coachDashboard(user, userStats, latest, pending) {
   const totalCheckins = userStats.reduce((s, u) => s + u.total, 0);
   const cards = userStats
     .map(
-      (a) => `<a class="card athlete-card" href="/coach/user/${encodeURIComponent(a.email)}">
+      (a) => `<a class="card athlete-card" data-search="${esc(`${a.name} ${a.email}`.toLowerCase())}" href="/coach/user/${encodeURIComponent(a.email)}">
         <div class="athlete-card-name">${esc(a.name)}</div>
         <div class="athlete-card-email">${esc(a.email)}</div>
         <div class="athlete-card-meta">${a.total} check-in${a.total === 1 ? '' : 's'}${a.last ? ` · last ${fmtDate(a.last)}` : ' · none yet'}</div>
@@ -581,7 +581,9 @@ function coachDashboard(user, userStats, latest, pending) {
     </div>
     ${approvalNudge}
     <h2 class="section-head">Hitters</h2>
+    ${userStats.length ? `<input type="search" id="hitter-search" class="searchbar" placeholder="Search hitters…" autocomplete="off">` : ''}
     <div class="athlete-grid">${cards || '<div class="card empty">Nobody has signed up yet.</div>'}</div>
+    <div class="card empty" id="hitter-no-match" hidden>No hitters match that search.</div>
     <h2 class="section-head">Latest check-ins</h2>
     ${feed}`,
   });
