@@ -69,6 +69,7 @@ function userTabs(active, user) {
     { href: '/notebook', label: 'Notebook', active: active === 'notebook' },
     { href: '/mental-game', label: 'Mental Game', active: active === 'mental' },
     { href: '/chat', label: 'Coach Skip', active: active === 'chat' },
+    { href: '/settings', label: 'Settings', active: active === 'settings' },
   ];
   // Bobby's remote hitters only — nobody else ever sees this tab.
   if (user && user.remoteProgramId) {
@@ -84,6 +85,7 @@ function coachTabs(active, approvalCount) {
     { href: '/coach', label: 'Dashboard', active: active === 'dashboard' },
     { href: '/coach/approvals', label: 'Approvals', active: active === 'approvals', badge: approvalCount > 0 ? String(approvalCount) : null },
     { href: '/coach/skip', label: 'Train Skip', active: active === 'skip' },
+    { href: '/settings', label: 'Settings', active: active === 'settings' },
   ];
 }
 
@@ -1434,6 +1436,58 @@ function resetPasswordPage(token, error) {
   });
 }
 
+// ---------- Settings ----------
+
+function settingsPage(user, opts) {
+  const o = opts || {};
+  const sub = o.subscription || null;
+  const isCoach = user.role === 'coach';
+  const tabs = isCoach ? coachTabs('settings', user.approvalCount) : userTabs('settings', user);
+  return layout({
+    title: 'Settings',
+    user,
+    tabs,
+    body: `<h1 class="page-title">Settings</h1>
+    ${o.error ? `<div class="error">${esc(o.error)}</div>` : ''}
+    ${o.notice ? `<div class="notice">${esc(o.notice)}</div>` : ''}
+    <div class="card">
+      <h2 class="section-head">Account</h2>
+      <form method="post" action="/settings/profile" class="form">
+        <label>First name<input name="first_name" value="${esc(user.firstName || '')}" required maxlength="40"></label>
+        <label>Last name<input name="last_name" value="${esc(user.lastName || '')}" required maxlength="40"></label>
+        <label>Email<input type="email" name="email" value="${esc(user.email)}" required></label>
+        <button class="btn-primary" type="submit">Save changes</button>
+      </form>
+    </div>
+    <div class="card">
+      <h2 class="section-head">Password</h2>
+      <form method="post" action="/settings/password" class="form">
+        <label>Current password<input type="password" name="current_password" autocomplete="current-password" required></label>
+        <label>New password<input type="password" name="new_password" autocomplete="new-password" required minlength="8"></label>
+        <button class="btn-primary" type="submit">Change password</button>
+      </form>
+    </div>
+    <div class="card">
+      <h2 class="section-head">Subscription</h2>
+      ${sub && sub.status === 'active'
+        ? `<p>You&apos;re on the <strong>${esc(sub.plan || 'paid')}</strong> plan.</p>
+           <form method="post" action="/settings/subscription/cancel" class="form">
+             <button class="btn-danger" type="submit">End subscription</button>
+           </form>
+           <p class="hint">You keep full access until the end of the current billing period.</p>`
+        : `<p class="hint">You&apos;re on the free plan. When paid subscriptions launch, you&apos;ll manage your plan and billing right here.</p>`}
+    </div>
+    ${isCoach ? '' : `<div class="card danger-zone">
+      <h2 class="section-head">Danger zone</h2>
+      <p class="hint">Deleting your account permanently removes your check-ins, notes, chat history, streak, and everything else tied to it. This can&apos;t be undone.</p>
+      <form method="post" action="/settings/delete" class="form">
+        <label>Type DELETE to confirm<input name="confirm" autocomplete="off" required></label>
+        <button class="btn-danger" type="submit">Delete my account</button>
+      </form>
+    </div>`}`,
+  });
+}
+
 module.exports = {
   layout,
   userTabs,
@@ -1462,4 +1516,5 @@ module.exports = {
   videoWatchPage,
   coachLibraryPage,
   esc,
+  settingsPage,
 };

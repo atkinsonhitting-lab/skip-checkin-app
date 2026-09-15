@@ -437,7 +437,6 @@ CREATE TABLE IF NOT EXISTS study_players (
   takeaway TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_drill_insights_drill ON drill_insights(drill);
 CREATE TABLE IF NOT EXISTS push_subscriptions (
   user_id INTEGER NOT NULL REFERENCES users(id),
   endpoint TEXT PRIMARY KEY,
@@ -465,6 +464,19 @@ CREATE TABLE IF NOT EXISTS mental_baseline (
     if (!cols.includes(c)) db.exec(`ALTER TABLE mental_baseline ADD COLUMN ${c} TEXT NOT NULL DEFAULT '';`);
   }
 }
+
+// Subscriptions (Sep 15 2026): account-level billing state lives here once
+// payments launch. Settings reads it (plan + End subscription); the cancel
+// route flips an active sub to canceled. No provider wired up yet.
+db.exec(`
+CREATE TABLE IF NOT EXISTS user_subscriptions (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id),
+  status TEXT NOT NULL DEFAULT 'none',
+  plan TEXT NOT NULL DEFAULT '',
+  current_period_end TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT ''
+);
+`);
 
 // Coach feed REMOVED Sep 15 2026 (Bobby: Learn tab is a personal notebook, no social layer).
 // Drop the tables if a previous deploy created them.

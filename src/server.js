@@ -83,6 +83,7 @@ function toReqUser(row) {
     role: row.role,
     athleteName: row.athlete_name,
     firstName: row.first_name || null,
+    lastName: row.last_name || null,
     displayName: row.first_name || row.athlete_name || 'Coach',
     status: row.status || 'approved',
     remoteProgramId: row.remote_program_id || null,
@@ -200,6 +201,7 @@ function validEmail(v) {
 app.get('/login', (req, res) => {
   if (req.user) return res.redirect('/');
   if (req.query.reset) return res.send(views.loginPage(null, 'Password reset — log in with your new password.'));
+  if (req.query.deleted) return res.send(views.loginPage(null, 'Account deleted. You\u2019re always welcome back.'));
   res.send(views.loginPage(req.query.error));
 });
 
@@ -1291,6 +1293,76 @@ app.post('/checkin', requireLogin, (req, res) => {
 });
 
 // ---- Notebook: check-ins + hitting notes in one place ----
+
+// ---------- Settings ----------
+function getSubscription(userId) {
+  try {
+    return db.prepare('SELECT status, plan, current_period_end FROM user_subscriptions WHERE user_id = ?').get(userId) || null;
+  } catch (e) { return null; }
+}
+
+app.get('/settings', requireLogin, (req, res) => {
+  if (req.user.viewAs) return res.redirect('/coach');
+  res.send(views.settingsPage(req.user, {
+    subscription: getSubscription(req.user.id),
+    notice: req.query.saved ? 'Account updated.' : (req.query.pw ? 'Password changed.' : null),
+  }));
+});
+
+app.post('/settings/profile', requireLogin, (req, res) => {
+  const firstName = String(req.body.first_name || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+  const lastName = String(req.body.last_name || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+  const email = String(req.body.email || '').trim().toLowerCase();
+  const fail = (msg) => res.send(views.settingsPage(req.user, { subscription: getSubscription(req.user.id), error: msg }));
+  if (!firstName || !lastName) return fail('First and last name are required.');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail('That email doesn\u2019t look right.');
+  const taken = db.prepare('SELECT id FROM users WHERE email = ? AND id != ?').get(email, req.user.id);
+  if (taken) return fail('That email is already on another account.');
+  const athleteName = req.user.role === 'coach' ? req.user.athleteName : `${firstName} ${lastName}`;
+  db.prepare('UPDATE users SET first_name = ?, last_name = ?, email = ?, athlete_name = ? WHERE id = ?')
+    .run(firstName, lastName, email, athleteName, req.user.id);
+  res.redirect('/settings?saved=1');
+});
+
+app.post('/settings/password', requireLogin, (req, res) => {
+  const fail = (msg) => res.send(views.settingsPage(req.user, { subscription: getSubscription(req.user.id), error: msg }));
+  const row = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(req.user.id);
+  if (!row || !bcrypt.compareSync(String(req.body.current_password || ''), row.password_hash)) {
+    return fail('Current password didn\u2019t match.');
+  }
+  const next = String(req.body.new_password || '');
+  if (next.length < 8) return fail('New password needs at least 8 characters.');
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(next, 12), req.user.id);
+  res.redirect('/settings?pw=1');
+});
+
+app.post('/settings/subscription/cancel', requireLogin, (req, res) => {
+  const sub = getSubscription(req.user.id);
+  if (!sub || sub.status !== 'active') {
+    return res.send(views.settingsPage(req.user, { subscription: sub, notice: 'No active subscription \u2014 nothing to cancel.' }));
+  }
+  db.prepare("UPDATE user_subscriptions SET status = 'canceled', updated_at = datetime('now') WHERE user_id = ?").run(req.user.id);
+  res.send(views.settingsPage(req.user, {
+    subscription: getSubscription(req.user.id),
+    notice: 'Subscription ended. You keep full access until the end of the billing period.',
+  }));
+});
+
+app.post('/settings/delete', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.status(403).send('Forbidden');
+  const fail = (msg) => res.send(views.settingsPage(req.user, { subscription: getSubscription(req.user.id), error: msg }));
+  if (String(req.body.confirm || '').trim() !== 'DELETE') return fail('Type DELETE exactly to confirm.');
+  const id = req.user.id;
+  const del = db.transaction(() => {
+    for (const t of ['chat_messages', 'checkins', 'routine_drills', 'password_reset_tokens', 'learning_notes', 'study_players', 'push_subscriptions', 'mental_baseline', 'hitter_memory', 'user_subscriptions']) {
+      db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(id);
+    }
+    db.prepare('DELETE FROM users WHERE id = ?').run(id);
+  });
+  del();
+  req.session.destroy(() => res.redirect('/login?deleted=1'));
+});
+
 app.get('/notebook', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
   const checkins = db
