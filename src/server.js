@@ -10,6 +10,7 @@ const express = require('express');
 const session = require('express-session');
 const helmet = require('helmet');
 const bcrypt = require('bcryptjs');
+const { pollCoachVideos, POLL_MS } = require('./feed');
 
 const db = require('./db');
 const SQLiteStore = require('./store');
@@ -577,7 +578,7 @@ app.get('/learn', requireLogin, (req, res) => {
         (SELECT COUNT(*) FROM post_reactions r WHERE r.post_id = p.id AND r.reaction = 'like') AS likes,
         (SELECT COUNT(*) FROM post_reactions r WHERE r.post_id = p.id AND r.reaction = 'dislike') AS dislikes,
         (SELECT reaction FROM post_reactions r WHERE r.post_id = p.id AND r.user_id = ?) AS mine
-       FROM coach_posts p ORDER BY p.created_at DESC`
+       FROM coach_posts p ORDER BY p.id DESC`
     )
     .all(req.user.id);
   res.send(views.learnPage(req.user, notes, players, posts));
@@ -746,10 +747,12 @@ function setApprovalCount(req) {
 app.post('/coach/post', requireCoach, (req, res) => {
   const title = String(req.body.title || '').trim().slice(0, 120);
   const body = String(req.body.body || '').trim().slice(0, 1000);
+  let link = String(req.body.link || '').trim().slice(0, 300);
+  if (link && !/^https?:\/\//i.test(link)) link = '';
   if (title && body) {
     db.prepare(
-      "INSERT INTO coach_posts (coach_name, title, body, source_url, created_at) VALUES ('Atkinson Hitting', ?, ?, '', datetime('now'))"
-    ).run(title, body);
+      "INSERT INTO coach_posts (coach_name, title, body, source_url, created_at) VALUES ('Atkinson Hitting', ?, ?, ?, datetime('now'))"
+    ).run(title, body, link);
   }
   res.redirect('/coach');
 });
@@ -1673,6 +1676,9 @@ const server = app.listen(PORT, () => {
   // Skip's journal reads: first pass shortly after boot, then every 5 min.
   setTimeout(ratePendingJournals, 20000);
   setInterval(ratePendingJournals, 5 * 60 * 1000);
+  // Coach feed auto-pull: YouTube uploads from the featured coaches, every 6h.
+  setTimeout(() => pollCoachVideos(db), 60000);
+  setInterval(() => pollCoachVideos(db), POLL_MS);
 });
 
 // Live voice conversations removed Sep 15 2026 — Bobby: stick with text.

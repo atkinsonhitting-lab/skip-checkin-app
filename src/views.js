@@ -330,9 +330,11 @@ function learnPage(user, notes, players, posts) {
     )
     .join('');
   const postCards = (posts || [])
-    .map(
-      (p) => `<div class="card post">
-        <div class="post-head"><span class="post-coach">${esc(p.coach_name)}</span>${p.source_url ? ` <a class="hint-inline" href="${esc(p.source_url)}" target="_blank" rel="noopener">follow →</a>` : ''}</div>
+    .map((p) => {
+      const isVideo = /youtube\.com|youtu\.be/i.test(p.source_url || '');
+      const linkLabel = isVideo ? 'watch →' : 'follow →';
+      return `<div class="card post">
+        <div class="post-head"><span class="post-coach">${esc(p.coach_name)}</span>${p.source_url ? ` <a class="hint-inline" href="${esc(p.source_url)}" target="_blank" rel="noopener">${linkLabel}</a>` : ''}</div>
         <div class="post-title">${esc(p.title)}</div>
         <p class="post-body">${esc(p.body)}</p>
         <div class="post-actions">
@@ -345,8 +347,8 @@ function learnPage(user, notes, players, posts) {
             <button type="submit" class="react-btn${p.mine === 'dislike' ? ' active-dislike' : ''}" aria-label="Not for me">👎 ${p.dislikes}</button>
           </form>
         </div>
-      </div>`
-    )
+      </div>`;
+    })
     .join('');
   return layout({
     title: 'Learn',
@@ -608,6 +610,9 @@ function coachDashboard(user, userStats, latest, pending) {
       </label>
       <label>Body
         <textarea name="body" rows="3" maxlength="1000" placeholder="Say it like you'd say it in the cage." required></textarea>
+      </label>
+      <label>Link (optional — YouTube, Instagram, X…)
+        <input name="link" maxlength="300" placeholder="https://…">
       </label>
       <button type="submit" class="btn-primary">Post it</button>
     </form></div>
