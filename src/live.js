@@ -137,6 +137,11 @@ function handleSession(client, user, opts) {
     } catch (e) {
       return;
     }
+    // TEMP-DEBUG: surface Google's structured error payloads while diagnosing.
+    if (msg.error) {
+      googleDown(`payload ${JSON.stringify(msg.error).slice(0, 200)}`);
+      return;
+    }
     if (msg.setupComplete) {
       ready = true;
       send(client, { type: 'ready' });
@@ -177,7 +182,8 @@ function handleSession(client, user, opts) {
   const googleDown = (why) => {
     if (closed) return;
     console.error('live voice upstream closed:', why);
-    send(client, { type: 'error', message: 'Lost connection to the voice service — try again.' });
+    // TEMP-DEBUG: include upstream detail in the client error while diagnosing.
+    send(client, { type: 'error', message: `Voice service dropped the call (${why}).` });
     closeBoth();
   };
   google.on('close', (code, reason) => googleDown(`code ${code} ${reason || ''}`.trim()));
