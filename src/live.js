@@ -206,7 +206,13 @@ function handleSession(client, user, opts) {
       } catch (e) {}
       return;
     }
-    // Text nudge mid-call (also useful for clients without a mic).
+    // Explicit end-of-audio signal (flushes VAD-buffered audio server-side).
+    if (msg.type === 'audioEnd') {
+      try {
+        google.send(JSON.stringify({ realtimeInput: { audioStreamEnd: true } }));
+      } catch (e) {}
+      return;
+    }
     if (msg.type === 'text' && typeof msg.data === 'string' && msg.data.trim()) {
       try {
         google.send(
