@@ -204,6 +204,20 @@ function handleSession(client, user, opts) {
           })
         );
       } catch (e) {}
+      return;
+    }
+    // Text nudge mid-call (also useful for clients without a mic).
+    if (msg.type === 'text' && typeof msg.data === 'string' && msg.data.trim()) {
+      try {
+        google.send(
+          JSON.stringify({
+            clientContent: {
+              turns: [{ role: 'user', parts: [{ text: msg.data.trim().slice(0, 500) }] }],
+              turnComplete: true,
+            },
+          })
+        );
+      } catch (e) {}
     }
   });
 
