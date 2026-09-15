@@ -86,6 +86,12 @@ function registerPage(error) {
       <p class="hint">Free. Use your email, set a password, start checking in.</p>
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
       <form method="post" action="/register" class="form">
+        <label>First name
+          <input type="text" name="first_name" autocomplete="given-name" required maxlength="40">
+        </label>
+        <label>Last name
+          <input type="text" name="last_name" autocomplete="family-name" required maxlength="40">
+        </label>
         <label>Email
           <input type="email" name="email" autocomplete="email" required>
         </label>

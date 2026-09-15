@@ -65,14 +65,15 @@ if (process.env.SEED_ON_BOOT === 'true' && userCount() === 0) {
 
 function attachUser(req, res, next) {
   if (req.session && req.session.userId) {
-    const row = db.prepare('SELECT id, email, role, athlete_name FROM users WHERE id = ?').get(req.session.userId);
+    const row = db.prepare('SELECT id, email, role, athlete_name, first_name, last_name FROM users WHERE id = ?').get(req.session.userId);
     if (row) {
       req.user = {
         id: row.id,
         email: row.email,
         role: row.role,
         athleteName: row.athlete_name,
-        displayName: row.athlete_name || 'Bobby',
+        firstName: row.first_name || null,
+        displayName: row.first_name || row.athlete_name || 'Bobby',
       };
     }
   }
@@ -173,6 +174,11 @@ app.post('/register', (req, res) => {
   const email = (req.body.email || '').trim().toLowerCase();
   const password = req.body.password || '';
   const confirm = req.body.confirm_password || '';
+  const firstName = (req.body.first_name || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+  const lastName = (req.body.last_name || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+  if (!firstName || !lastName) {
+    return fail('Enter your first and last name.');
+  }
   if (!validEmail(email)) {
     return fail('Enter a valid email address.');
   }
@@ -187,12 +193,12 @@ app.post('/register', (req, res) => {
     return fail('An account with that email already exists. Try logging in.');
   }
   const hash = bcrypt.hashSync(password, 12);
-  const athleteName = email.split('@')[0];
+  const athleteName = `${firstName} ${lastName}`;
   const info = db
     .prepare(
-      'INSERT INTO users (email, password_hash, role, athlete_name, created_at) VALUES (?, ?, ?, ?, ?)'
+      'INSERT INTO users (email, password_hash, role, athlete_name, first_name, last_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
     )
-    .run(email, hash, 'athlete', athleteName, new Date().toISOString());
+    .run(email, hash, 'athlete', athleteName, firstName, lastName, new Date().toISOString());
   req.session.userId = info.lastInsertRowid;
   res.redirect('/');
 });
@@ -605,13 +611,14 @@ app.get('/history', requireLogin, (req, res) => {
 
 app.get('/coach', requireCoach, (req, res) => {
   const users = db
-    .prepare("SELECT id, email, athlete_name, created_at FROM users WHERE role != 'coach' ORDER BY created_at ASC")
+    .prepare("SELECT id, email, athlete_name, first_name, last_name, created_at FROM users WHERE role != 'coach' ORDER BY created_at ASC")
     .all();
   const stats = users.map((u) => {
     const row = db
       .prepare('SELECT COUNT(*) AS total, MAX(created_at) AS last FROM checkins WHERE user_id = ?')
       .get(u.id);
-    return { id: u.id, email: u.email, name: u.athlete_name || u.email, total: row.total, last: row.last };
+    const name = [u.first_name, u.last_name].filter(Boolean).join(' ') || u.athlete_name || u.email;
+    return { id: u.id, email: u.email, name, total: row.total, last: row.last };
   });
   const latest = db
     .prepare('SELECT * FROM checkins ORDER BY created_at DESC LIMIT 20')
@@ -622,7 +629,7 @@ app.get('/coach', requireCoach, (req, res) => {
 app.get('/coach/user/:email', requireCoach, (req, res) => {
   const em = (req.params.email || '').toLowerCase();
   const user = db
-    .prepare("SELECT id, email, athlete_name FROM users WHERE email = ? AND role != 'coach'")
+    .prepare("SELECT id, email, athlete_name, first_name, last_name FROM users WHERE email = ? AND role != 'coach'")
     .get(em);
   if (!user) return res.status(404).send('Unknown user.');
   const rows = db
@@ -845,7 +852,8 @@ function skipDataBlock(userId) {
     : 'HITTER DATA: no check-ins logged yet — this is a brand-new hitter. Ask what they are working on.';
 }
 
-async function askSkip(userId, userMessage) {
+async function askSkip(user, userMessage) {
+  const userId = user.id;
   const apiKey = process.env.LLM_API_KEY;
   if (!apiKey) {
     const err = new Error('chat_not_configured');
@@ -856,6 +864,9 @@ async function askSkip(userId, userMessage) {
     .prepare('SELECT role, content FROM chat_messages WHERE user_id = ? ORDER BY created_at DESC LIMIT 20')
     .all(userId)
     .reverse();
+  const nameLine = user.firstName
+    ? `The hitter you're talking to is named "${user.firstName}". Call them ${user.firstName} — use their first name naturally, the way a coach would.\n\n`
+    : '';
   const dataBlock = skipDataBlock(userId);
   // Gemini roles are "user"/"model" (our DB stores "assistant").
   const contents = [
@@ -874,7 +885,7 @@ async function askSkip(userId, userMessage) {
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: `${SKIP_SYSTEM}\n\n${dataBlock}` }] },
+        systemInstruction: { parts: [{ text: `${SKIP_SYSTEM}\n\n${nameLine}${dataBlock}` }] },
         contents,
         generationConfig: { maxOutputTokens: 500, temperature: 0.7 },
       }),
@@ -928,7 +939,7 @@ app.post('/api/chat', requireLogin, async (req, res) => {
   db.prepare('INSERT INTO chat_messages (user_id, role, content, created_at) VALUES (?, ?, ?, ?)')
     .run(req.user.id, 'user', message, now);
   try {
-    const reply = await askSkip(req.user.id, message);
+    const reply = await askSkip(req.user, message);
     db.prepare('INSERT INTO chat_messages (user_id, role, content, created_at) VALUES (?, ?, ?, ?)')
       .run(req.user.id, 'assistant', reply, new Date().toISOString());
     res.json({ reply });

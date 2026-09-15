@@ -31,7 +31,7 @@ function setupLive(server, db, opts) {
         return;
       }
       const user = db
-        .prepare('SELECT id, email, role, athlete_name FROM users WHERE id = ?')
+        .prepare('SELECT id, email, role, athlete_name, first_name FROM users WHERE id = ?')
         .get(sess.userId);
       if (!user || user.role !== 'athlete') {
         try {
@@ -110,7 +110,10 @@ function handleSession(client, user, opts) {
   }
 
   google.on('open', () => {
-    const systemText = `${opts.systemPrompt()}\n\n${opts.dataBlock(user.id)}\n\nYou are speaking LIVE with this hitter by voice. Keep every reply short and conversational — 1 to 3 sentences, like talking on the phone. No lists, no long breakdowns. If they need a drill or a plan, give one thing at a time and offer to go deeper. Speak fast and energetic, like a coach talking in the cage — quick natural pace, no slow dragging delivery, no long pauses between thoughts.`;
+    const nameLine = user.first_name
+      ? `The hitter you're talking to is named "${user.first_name}". Call them ${user.first_name} — use their first name naturally, the way a coach would.\n\n`
+      : '';
+    const systemText = `${opts.systemPrompt()}\n\n${nameLine}${opts.dataBlock(user.id)}\n\nYou are speaking LIVE with this hitter by voice. Keep every reply short and conversational — 1 to 3 sentences, like talking on the phone. No lists, no long breakdowns. If they need a drill or a plan, give one thing at a time and offer to go deeper. Speak fast and energetic, like a coach talking in the cage — quick natural pace, no slow dragging delivery, no long pauses between thoughts.`;
     google.send(
       JSON.stringify({
         setup: {

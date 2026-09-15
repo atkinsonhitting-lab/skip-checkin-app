@@ -15,10 +15,18 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL CHECK(role IN ('coach','athlete')),
   athlete_name TEXT,
+  first_name TEXT,
+  last_name TEXT,
   created_at TEXT NOT NULL
 );
 `;
 db.exec(USERS_SCHEMA);
+
+// Migration: add first_name / last_name to existing users tables (non-destructive).
+for (const col of ['first_name', 'last_name']) {
+  const cols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+  if (!cols.includes(col)) db.exec(`ALTER TABLE users ADD COLUMN ${col} TEXT;`);
+}
 
 // Check-ins: the full Skip flow — environment, drills done, Feel/Confidence/
 // Focus (1-10), instant session score + tier, journal fields, and Skip's
