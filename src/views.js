@@ -59,6 +59,7 @@ function userTabs(active, user) {
   // Bobby's remote hitters only — nobody else ever sees this tab.
   if (user && user.remoteProgramId) {
     tabs.splice(3, 0, { href: '/program', label: 'Program', active: active === 'program' });
+    tabs.splice(4, 0, { href: '/videos', label: 'Videos', active: active === 'videos' });
   }
   return tabs;
 }
@@ -624,7 +625,7 @@ function coachApprovalsPage(user, pending) {
   });
 }
 
-function coachDashboard(user, userStats, latest, pending, remotePrograms) {
+function coachDashboard(user, userStats, latest, pending, remotePrograms, library) {
   const totalCheckins = userStats.reduce((s, u) => s + u.total, 0);
   const cards = userStats
     .map(
@@ -656,6 +657,7 @@ function coachDashboard(user, userStats, latest, pending, remotePrograms) {
     <div class="athlete-grid">${cards || '<div class="card empty">Nobody has signed up yet.</div>'}</div>
     <div class="card empty" id="hitter-no-match" hidden>No hitters match that search.</div>
     ${remoteProgramsSection(remotePrograms || [])}
+    ${librarySection(library || { cats: [], lastSync: '' })}
     <h2 class="section-head">Latest check-ins</h2>
     ${feed}`,
   });
@@ -861,6 +863,85 @@ function remoteProgramsSection(list) {
       <input type="text" name="name" placeholder="Full name" required maxlength="80" class="input-sm">
       <button class="btn btn-sm" type="submit">Add remote hitter</button>
     </form>
+  </div>`;
+}
+
+// ---- Video library ----
+
+function cleanCat(c) {
+  return String(c || '').replace(/^#\d+\s*/, '');
+}
+
+function videosPage(user, cats, activeCat, videos) {
+  const pills = cats
+    .map(
+      (c) =>
+        `<a class="pill-link${c.category === activeCat ? ' active' : ''}" href="/videos?cat=${encodeURIComponent(c.category)}">${esc(cleanCat(c.category))} <span class="hint-inline">${c.n}</span></a>`
+    )
+    .join('');
+  const isVideo = (m) => String(m || '').startsWith('video/');
+  const cards = videos
+    .map(
+      (v) => `<a class="card video-card" data-search="${esc(v.name.toLowerCase())}" href="/videos/watch/${v.id}">
+        <div class="video-thumb">${isVideo(v.mime_type) ? '\u25B6' : '\uD83D\uDCC4'}</div>
+        <div class="video-name">${esc(v.name)}</div>
+      </a>`
+    )
+    .join('');
+  return layout({
+    title: 'Training Videos',
+    user,
+    tabs: userTabs('videos', user),
+    body: `<h1 class="page-title">Training Videos</h1>
+    ${cats.length ? `<input type="search" id="video-search" class="searchbar" placeholder="Search videos\u2026" autocomplete="off">` : ''}
+    <div class="pill-row">${pills}</div>
+    <div class="video-grid">${cards || '<div class="card empty">No videos yet — they\u2019ll appear here after the next sync.</div>'}</div>
+    <div class="card empty" id="video-no-match" hidden>No videos match that search.</div>
+    <script>
+    (function () {
+      var box = document.getElementById('video-search');
+      if (!box) return;
+      var none = document.getElementById('video-no-match');
+      box.addEventListener('input', function () {
+        var q = box.value.trim().toLowerCase();
+        var shown = 0;
+        document.querySelectorAll('.video-card').forEach(function (el) {
+          var hit = !q || (el.getAttribute('data-search') || '').indexOf(q) !== -1;
+          el.style.display = hit ? '' : 'none';
+          if (hit) shown++;
+        });
+        none.hidden = shown !== 0;
+      });
+    })();
+    </script>`,
+  });
+}
+
+function videoWatchPage(user, v) {
+  const src = `https://drive.google.com/file/d/${encodeURIComponent(v.drive_file_id)}/preview`;
+  return layout({
+    title: v.name,
+    user,
+    tabs: userTabs('videos', user),
+    body: `<p><a href="/videos?cat=${encodeURIComponent(v.category)}">\u2190 ${esc(cleanCat(v.category))}</a></p>
+    <h1 class="page-title">${esc(v.name)}</h1>
+    <div class="video-player"><iframe src="${src}" allow="autoplay; fullscreen" allowfullscreen></iframe></div>`,
+  });
+}
+
+function librarySection(library) {
+  const cats = library.cats || [];
+  const rows = cats
+    .map((c) => `<div class="remote-row"><div><strong>${esc(cleanCat(c.category))}</strong></div><div class="hint-inline">${c.n} file${c.n === 1 ? '' : 's'}</div></div>`)
+    .join('');
+  const syncLine = library.lastSync
+    ? `Last synced ${esc(library.lastSync.slice(0, 16).replace('T', ' '))}`
+    : 'Not synced yet';
+  const total = cats.reduce((t, c) => t + c.n, 0);
+  return `<h2 class="section-head">Video library</h2>
+  <div class="card">
+    <div class="hint-inline">${total} file${total === 1 ? '' : 's'} · ${syncLine} · syncs automatically from Drive</div>
+    ${rows || '<div class="empty">Empty.</div>'}
   </div>`;
 }
 
@@ -1135,5 +1216,7 @@ module.exports = {
   resetPasswordPage,
   programPage,
   programEditPage,
+  videosPage,
+  videoWatchPage,
   esc,
 };

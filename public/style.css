@@ -459,16 +459,27 @@ a:active { color: #ff3b30; }
 /* ---- Remote programs ---- */
 .lede { color: var(--muted); margin: -6px 0 14px; }
 .grade-row { display: flex; flex-wrap: wrap; gap: 8px; }
-.grade-chip { background: var(--card); border: 1px solid var(--border); border-radius: 999px; padding: 6px 12px; font-size: 14px; }
+.grade-chip { background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; font-size: 14px; }
 .grade-chip strong { margin-right: 6px; }
 .grade-edit-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; }
 .fld-inline { margin-bottom: 0; }
 .cue-list { display: grid; gap: 10px; }
 .cue-row { display: grid; grid-template-columns: 90px 1fr; gap: 10px; align-items: baseline; }
 .cue-label { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
-.remote-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.remote-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .remote-row:last-of-type { border-bottom: none; }
 .remote-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .inline-form { display: inline-flex; gap: 6px; align-items: center; margin: 0; }
 .input-sm { width: 170px; padding: 6px 10px; font-size: 14px; }
-.remote-add { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.remote-add { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+
+/* ---- Video library ---- */
+.pill-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 16px; }
+.pill-link { background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 8px 14px; font-size: 14px; color: var(--text); text-decoration: none; }
+.pill-link.active { background: var(--red); border-color: var(--red); color: #fff; }
+.video-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.video-card { display: block; text-decoration: none; color: var(--text); padding: 0; overflow: hidden; }
+.video-thumb { height: 90px; display: flex; align-items: center; justify-content: center; font-size: 28px; background: #111; color: #fff; }
+.video-name { padding: 10px 12px; font-size: 14px; }
+.video-player { position: relative; padding-top: 56.25%; border-radius: 12px; overflow: hidden; background: #000; }
+.video-player iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; }

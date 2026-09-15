@@ -204,6 +204,27 @@ db.exec(`CREATE TABLE IF NOT EXISTS remote_programs (
   }
 }
 
+// Video library: Bobby's "Atkinson Hitting Development System" Drive folder,
+// synced in by the VM cron (see workspace/video-library-sync). Remote
+// hitters only.
+db.exec(`CREATE TABLE IF NOT EXISTS video_library (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  drive_file_id TEXT UNIQUE NOT NULL,
+  name TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT '',
+  mime_type TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT ''
+);`);
+db.exec('CREATE INDEX IF NOT EXISTS idx_video_cat ON video_library(category, name);');
+db.exec(`CREATE TABLE IF NOT EXISTS library_sync_state (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL DEFAULT ''
+);`);
+function getLibrarySync(key) {
+  const r = db.prepare('SELECT value FROM library_sync_state WHERE key = ?').get(key);
+  return r ? r.value : '';
+}
+
 // Daily routine drills: each hitter's everyday drill list, each drill tagged
 // with how it's done (tee / side toss / front toss / BP / machine).
 db.exec(`CREATE TABLE IF NOT EXISTS routine_drills (

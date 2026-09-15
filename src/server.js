@@ -867,6 +867,71 @@ app.post('/coach/remote/unlink', requireCoach, (req, res) => {
   res.redirect('/coach');
 });
 
+// ---- Video library: Bobby's Development System, synced from Drive by the
+// VM cron. Remote hitters only.
+function requireRemote(req, res, next) {
+  if (req.user.role === 'coach') return res.redirect('/coach');
+  if (!req.user.remoteProgramId) return res.redirect('/');
+  next();
+}
+
+// Sync endpoint for the VM cron — guarded by shared secret.
+app.post('/api/library/sync', (req, res) => {
+  const secret = process.env.LIBRARY_SYNC_SECRET;
+  if (!secret || req.body.secret !== secret) return res.status(403).json({ ok: false });
+  const videos = Array.isArray(req.body.videos) ? req.body.videos : [];
+  const ids = [];
+  for (const v of videos) {
+    const fid = String((v && v.drive_file_id) || '').trim();
+    if (fid && !ids.includes(fid)) ids.push(fid);
+  }
+  if (!ids.length) return res.status(400).json({ ok: false, error: 'empty list — refusing to wipe' });
+  const byId = {};
+  for (const v of videos) byId[String(v.drive_file_id).trim()] = v;
+  const now = new Date().toISOString();
+  const upsert = db.prepare(
+    `INSERT INTO video_library (drive_file_id, name, category, mime_type, updated_at)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(drive_file_id) DO UPDATE SET
+       name = excluded.name, category = excluded.category,
+       mime_type = excluded.mime_type, updated_at = excluded.updated_at`
+  );
+  for (const fid of ids) {
+    const v = byId[fid] || {};
+    upsert.run(
+      fid,
+      String(v.name || 'Untitled').slice(0, 200),
+      String(v.category || '').slice(0, 120),
+      String(v.mime_type || '').slice(0, 80),
+      now
+    );
+  }
+  const placeholders = ids.map(() => '?').join(',');
+  db.prepare(`DELETE FROM video_library WHERE drive_file_id NOT IN (${placeholders})`).run(...ids);
+  db.prepare(
+    `INSERT INTO library_sync_state (key, value) VALUES ('last_sync_at', ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+  ).run(now);
+  res.json({ ok: true, count: ids.length });
+});
+
+app.get('/videos', requireLogin, requireRemote, (req, res) => {
+  const cats = db
+    .prepare('SELECT category, COUNT(*) AS n FROM video_library GROUP BY category ORDER BY category')
+    .all();
+  const active = req.query.cat || (cats[0] ? cats[0].category : '');
+  const videos = active
+    ? db.prepare('SELECT * FROM video_library WHERE category = ? ORDER BY name').all(active)
+    : [];
+  res.send(views.videosPage(req.user, cats, active, videos));
+});
+
+app.get('/videos/watch/:id', requireLogin, requireRemote, (req, res) => {
+  const v = db.prepare('SELECT * FROM video_library WHERE id = ?').get(req.params.id);
+  if (!v) return res.redirect('/videos');
+  res.send(views.videoWatchPage(req.user, v));
+});
+
 app.post('/learn/note', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.status(403).send('Forbidden');
   const note = String(req.body.note || '').trim().slice(0, 1000);
@@ -1047,7 +1112,16 @@ app.get('/coach', requireCoach, (req, res) => {
        FROM remote_programs p ORDER BY p.athlete_name`
     )
     .all();
-  res.send(views.coachDashboard(req.user, stats, latest, pending, remotePrograms));
+  const libraryCats = db
+    .prepare('SELECT category, COUNT(*) AS n FROM video_library GROUP BY category ORDER BY category')
+    .all();
+  const librarySync = db.prepare("SELECT value FROM library_sync_state WHERE key = 'last_sync_at'").get();
+  res.send(
+    views.coachDashboard(req.user, stats, latest, pending, remotePrograms, {
+      cats: libraryCats,
+      lastSync: librarySync ? librarySync.value : '',
+    })
+  );
 });
 
 // Approvals tab: approve or decline waiting hitters right here.
