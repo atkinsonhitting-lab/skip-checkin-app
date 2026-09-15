@@ -782,7 +782,7 @@ app.get('/coach/user/:email', requireCoach, (req, res) => {
   const thread = db
     .prepare('SELECT role, content, created_at FROM chat_messages WHERE user_id = ? ORDER BY created_at ASC LIMIT 200')
     .all(user.id);
-  res.send(views.coachUser(req.user, name, rows, drillStats(name), thoughtStats(name), thread, user.email, brain.listMemory(db, user.id)));
+  res.send(views.coachUser(req.user, name, rows, drillStats(name), thoughtStats(name), thread, user.email, brain.listMemory(db, user.id), getRoutine(user.id)));
 });
 
 // Skip's memory of a hitter: Bobby's durable notes on what works for them.

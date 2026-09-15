@@ -587,7 +587,7 @@ function coachDashboard(user, userStats, latest, pending) {
   });
 }
 
-function coachUser(user, name, checkins, stats, thoughts, thread, email, memories) {
+function coachUser(user, name, checkins, stats, thoughts, thread, email, memories, routine) {
   const skipImg = `<img src="/skip-avatar.webp" class="skip-avatar" alt="Skip">`;
   const convo =
     thread && thread.length
@@ -607,12 +607,33 @@ function coachUser(user, name, checkins, stats, thoughts, thread, email, memorie
     tabs: coachTabs('dashboard', user.approvalCount),
     body: `<h1 class="page-title">${esc(name)}</h1>
     <p><a href="/coach">← Back to dashboard</a></p>
+    ${routineReadonly(routine)}
     ${memorySection(email, memories)}
     ${whatWorksSection(stats || [], thoughts || [], null, 0)}
     ${convo}
     ${checkins.length ? checkins.map(checkinCard).join('') : '<div class="card empty">No check-ins yet.</div>'}
     <p style="margin-top:28px;text-align:center"><a href="/coach/user/${encodeURIComponent(email)}/delete" style="color:#8a8a8a;font-size:14px">Delete hitter from the platform</a></p>`,
   });
+}
+
+// Read-only daily routine for the coach's per-hitter view.
+function routineReadonly(drills) {
+  const groups = [];
+  for (const d of drills || []) {
+    const st = d.station || 'Unsorted';
+    let g = groups.find((x) => x.station === st);
+    if (!g) {
+      g = { station: st, drills: [] };
+      groups.push(g);
+    }
+    g.drills.push(d);
+  }
+  return `<h2 class="section-head">Daily routine</h2>
+  ${groups.length ? groups.map((g) => `
+    <div class="card routine-group">
+      <h2 class="routine-station">${esc(g.station)}</h2>
+      ${g.drills.map((d) => `<div class="routine-row"><span class="routine-name">${esc(d.name)}</span></div>`).join('')}
+    </div>`).join('') : `<div class="card empty">No routine set yet.</div>`}`;
 }
 
 // What Skip has learned about this hitter over time — Bobby's durable notes,
