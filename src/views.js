@@ -1423,22 +1423,43 @@ function coachOrganizationsPage(user, organizations, error, addedId) {
         ? `<div class="notice">Organization added. Hand this code to their coaches: <strong>${esc(c.code)}</strong></div>`
         : '';
       const teamCards = (c.teams || []).map((t) => teamCard(c, t)).join('');
-      // Founder org only (Bobby's): player rows with an "Edit program" link
-      // that opens the existing remote program editor for that player. Only
-      // Bobby (full coach) gets the links — the editor is full-coach only.
-      const playerRows = (c.players || [])
-        .map((pl) => {
-          const name = [pl.first_name, pl.last_name].filter(Boolean).join(' ') || pl.athlete_name || pl.email;
-          const editLink =
-            isBobby && pl.remote_program_id
-              ? `<a class="btn btn-sm" href="/coach/program/${pl.remote_program_id}/edit" style="text-decoration:none">Edit program</a>`
-              : '';
-          return `<div class="remote-row"><div><strong>${athleteLink(pl.email, esc(name))}</strong><div class="hint-inline">${esc(pl.email)}${pl.remote_program_id ? '' : ' · no program'}</div></div><div class="remote-actions">${editLink}</div></div>`;
-        })
-        .join('');
-      const playersSection = c.isFounder
-        ? `<h3 class="section-head" style="margin-top:14px">Players</h3>\n        ${playerRows || '<p class="hint">No players yet.</p>'}`
-        : '';
+      // Roster dropdown on every org card: collapsed by default, compact with
+      // internal scroll, players grouped by team when the org has teams.
+      // Founder org keeps its per-player "Edit program" link (Bobby only).
+      const rosterRow = (pl) => {
+        const name = [pl.first_name, pl.last_name].filter(Boolean).join(' ') || pl.athlete_name || pl.email;
+        const editLink =
+          c.isFounder && isBobby && pl.remote_program_id
+            ? `<a class="btn btn-sm" href="/coach/program/${pl.remote_program_id}/edit" style="text-decoration:none">Edit program</a>`
+            : '';
+        return `<div class="remote-row" style="padding:5px 0"><div><strong>${athleteLink(pl.email, esc(name))}</strong></div><div class="remote-actions">${editLink}</div></div>`;
+      };
+      const rosterDropdown = (() => {
+        const roster = c.roster || [];
+        if (!roster.length) return '';
+        const teams = c.teams || [];
+        let body;
+        if (teams.length) {
+          const groups = teams
+            .map((t) => {
+              const members = roster.filter((p) => p.team_id === t.id);
+              if (!members.length) return '';
+              return `<div class="hint" style="margin:8px 0 2px;font-weight:600">${esc(t.name)}</div>${members.map(rosterRow).join('')}`;
+            })
+            .join('');
+          const unteamed = roster.filter((p) => !p.team_id);
+          const unteamedHtml = unteamed.length
+            ? `<div class="hint" style="margin:8px 0 2px;font-weight:600">No team</div>${unteamed.map(rosterRow).join('')}`
+            : '';
+          body = groups + unteamedHtml;
+        } else {
+          body = roster.map(rosterRow).join('');
+        }
+        return `<details style="margin-top:10px">
+          <summary class="hint" style="cursor:pointer">Roster (${roster.length}) &mdash; tap to expand</summary>
+          <div style="max-height:230px;overflow-y:auto;margin-top:6px;padding:2px 12px;border:1px solid var(--line);border-radius:10px">${body}</div>
+        </details>`;
+      })();
       return `<div class="card">
         ${added}
         <div style="display:flex;justify-content:space-between;align-items:start;gap:12px;flex-wrap:wrap">
@@ -1462,7 +1483,7 @@ function coachOrganizationsPage(user, organizations, error, addedId) {
           <a class="btn-small btn-quiet" href="/coach/organizations/${c.id}/delete" style="text-decoration:none;display:inline-block">Delete</a>
           </div>` : ''}
         </div>
-        ${playersSection}
+        ${rosterDropdown}
         <h3 class="section-head" style="margin-top:14px">Program coaches</h3>
         ${coachRows || '<p class="hint">No program coaches yet \u2014 they see every team in the program.</p>'}
         ${managesTeams ? `<details style="margin-top:10px">

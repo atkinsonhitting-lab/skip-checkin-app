@@ -2537,6 +2537,27 @@ app.get('/coach/organizations', requireCoachAny, (req, res) => {
   const rows = onlyOrgId
     ? db.prepare('SELECT * FROM organizations WHERE id = ?').all(onlyOrgId)
     : db.prepare('SELECT * FROM organizations ORDER BY name ASC').all();
+  // One roster query for every visible org (no N+1 per card). Team-scoped
+  // coaches only ever see their own team's players.
+  const orgIds = rows.map((r) => r.id);
+  let roster = [];
+  if (orgIds.length) {
+    const ph = orgIds.map(() => '?').join(',');
+    let sql = `SELECT id, first_name, last_name, athlete_name, email, organization_id, team_id, remote_program_id
+               FROM users WHERE organization_id IN (${ph}) AND role = 'athlete'`;
+    const params = [...orgIds];
+    if (me.teamId) {
+      sql += ' AND team_id = ?';
+      params.push(me.teamId);
+    }
+    sql += ' ORDER BY first_name ASC, last_name ASC';
+    roster = db.prepare(sql).all(...params);
+  }
+  const rosterByOrg = new Map();
+  for (const p of roster) {
+    if (!rosterByOrg.has(p.organization_id)) rosterByOrg.set(p.organization_id, []);
+    rosterByOrg.get(p.organization_id).push(p);
+  }
   const organizations = rows
     .map((c) => {
       const isFounder = c.name === FOUNDER_ORG_NAME;
@@ -2546,18 +2567,8 @@ app.get('/coach/organizations', requireCoachAny, (req, res) => {
         playerCount: db.prepare("SELECT COUNT(*) AS n FROM users WHERE organization_id = ? AND role = 'athlete'").get(c.id).n,
         coaches: db.prepare("SELECT id, email, first_name, last_name FROM users WHERE organization_id = ? AND team_id IS NULL AND role = 'coach' ORDER BY created_at ASC").all(c.id),
         teams: organizationTeams(c.id),
+        roster: rosterByOrg.get(c.id) || [],
       };
-      // Founder org only: its players, so Bobby can jump straight to each
-      // player's remote program editor from the org card.
-      if (isFounder) {
-        org.players = db
-          .prepare(
-            `SELECT id, first_name, last_name, athlete_name, email, remote_program_id FROM users
-             WHERE organization_id = ? AND role = 'athlete'
-             ORDER BY first_name ASC, last_name ASC`
-          )
-          .all(c.id);
-      }
       return org;
     })
     // Bobby's org pinned at the top, above every other org.
