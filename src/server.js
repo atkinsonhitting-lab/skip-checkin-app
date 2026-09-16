@@ -2037,6 +2037,105 @@ function coachUserStats(scope) {
   });
 }
 
+// Analytics strip for the top of the Coach Dashboard: players in scope,
+// check-ins today, check-ins + avg score over the last 7 Chicago days vs the
+// prior 7 (trends), plus business stats for global coaches: organization
+// count, revenue collected, and a per-organization player breakdown.
+// Scope-aware: global coaches see everyone, org coaches their program,
+// team coaches their team.
+function coachAnalytics(scope, stats) {
+  const sp = scopeParams(scope);
+  const today = chiDay(new Date());
+  const todayUTC = ymdToUTC(today);
+  const weekStartUTC = ymdToUTC(chiDay(new Date(Date.now() - 6 * 864e5)));
+  const prevStartUTC = ymdToUTC(chiDay(new Date(Date.now() - 13 * 864e5)));
+  const since = new Date(Date.now() - 15 * 864e5).toISOString().slice(0, 19).replace('T', ' ');
+  const rows = db
+    .prepare(
+      `SELECT c.session_score, c.created_at FROM checkins c JOIN users u ON u.id = c.user_id
+       WHERE (? IS NULL OR u.organization_id = ?) AND (? IS NULL OR u.team_id = ?)
+         AND c.created_at >= ?`
+    )
+    .all(...sp, since);
+  let todayN = 0;
+  let weekN = 0, prevN = 0;
+  let scoreSum = 0, scoreN = 0, prevScoreSum = 0, prevScoreN = 0;
+  for (const r of rows) {
+    let day;
+    try {
+      day = ymdToUTC(chiDay(r.created_at));
+    } catch {
+      continue;
+    }
+    if (day === todayUTC) todayN++;
+    if (day >= weekStartUTC) {
+      weekN++;
+      if (r.session_score != null) { scoreSum += r.session_score; scoreN++; }
+    } else if (day >= prevStartUTC) {
+      prevN++;
+      if (r.session_score != null) { prevScoreSum += r.session_score; prevScoreN++; }
+    }
+  }
+  const out = {
+    players: stats.length,
+    checkedInToday: todayN,
+    checkinsWeek: weekN,
+    checkinsPrevWeek: prevN,
+    avgScore: scoreN ? Math.round((scoreSum / scoreN) * 10) / 10 : null,
+    avgScorePrev: prevScoreN ? Math.round((prevScoreSum / prevScoreN) * 10) / 10 : null,
+    orgs: null,
+    orgCount: 0,
+    revenueCents: 0,
+  };
+  if (!scope) {
+    // Global coaches get the business view: every organization with its
+    // player count, this week's check-ins, and deal/paid status, plus a
+    // standalone row for players outside any organization.
+    const orgRows = db.prepare('SELECT id, name, deal_cents, paid_cents FROM organizations ORDER BY name ASC').all();
+    const breakdown = orgRows.map((o) => ({
+      id: o.id,
+      name: o.name,
+      dealCents: o.deal_cents || 0,
+      paidCents: o.paid_cents || 0,
+      players: db.prepare("SELECT COUNT(*) AS n FROM users WHERE organization_id = ? AND role = 'athlete'").get(o.id).n,
+      weekCheckins: db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM checkins c JOIN users u ON u.id = c.user_id
+           WHERE u.organization_id = ? AND c.created_at >= ?`
+        )
+        .get(o.id, new Date(Date.now() - 8 * 864e5).toISOString().slice(0, 19).replace('T', ' ')).n,
+    }));
+    const standalonePlayers = db.prepare("SELECT COUNT(*) AS n FROM users WHERE organization_id IS NULL AND role = 'athlete' AND status = 'approved'").get().n;
+    if (standalonePlayers) {
+      breakdown.push({
+        id: null, name: 'Standalone (no organization)', dealCents: 0, paidCents: 0,
+        players: standalonePlayers,
+        weekCheckins: db.prepare(
+          `SELECT COUNT(*) AS n FROM checkins c JOIN users u ON u.id = c.user_id
+           WHERE u.organization_id IS NULL AND c.created_at >= ?`
+        ).get(new Date(Date.now() - 8 * 864e5).toISOString().slice(0, 19).replace('T', ' ')).n,
+      });
+    }
+    out.orgs = breakdown;
+    out.orgCount = orgRows.length;
+    out.revenueCents = orgRows.reduce((sum, o) => sum + (o.paid_cents || 0), 0);
+  }
+  return out;
+}
+
+// Set an organization's deal price and collected revenue (Bobby only).
+app.post('/coach/organizations/:id/deal', requireCoach, (req, res) => {
+  const c = db.prepare('SELECT id FROM organizations WHERE id = ?').get(Number(req.params.id));
+  if (!c) return res.redirect('/coach/organizations');
+  const dollars = (v) => {
+    const n = Math.round(Number(String(v).replace(/[^0-9.]/g, '')) * 100);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  };
+  db.prepare('UPDATE organizations SET deal_cents = ?, paid_cents = ? WHERE id = ?')
+    .run(dollars(req.body.deal), dollars(req.body.paid), c.id);
+  res.redirect('/coach/organizations');
+});
+
 // Hitters gone quiet: at least one check-in, but none in 3+ Chicago days.
 function coachQuietHitters(stats) {
   const today = chiDay(new Date());
@@ -2081,8 +2180,9 @@ app.get('/coach', requireCoachAny, (req, res) => {
     .all(...sp);
   const pending = pendingList(scope);
   const me = realUser(req);
+  const analytics = coachAnalytics(scope, stats);
   res.send(
-    views.coachHomePage(me, quiet, latest, pending, userPushSubscriptions(req.user.id).length > 0)
+    views.coachHomePage(me, quiet, latest, pending, userPushSubscriptions(req.user.id).length > 0, analytics)
   );
 });
 

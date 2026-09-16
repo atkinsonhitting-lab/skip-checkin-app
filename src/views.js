@@ -1145,6 +1145,15 @@ function coachOrganizationsPage(user, organizations, error, addedId) {
           <div>
             <div class="athlete-card-name">${esc(c.name)}</div>
             <div class="athlete-card-meta">signup code: <strong style="font-size:18px;letter-spacing:1px">${esc(c.code)}</strong> \u00b7 ${c.playerCount} player${c.playerCount === 1 ? '' : 's'}</div>
+            <div class="hint-inline" style="margin-top:4px">Deal: <strong>${fmtMoney(c.deal_cents)}</strong> \u00b7 Collected: <strong>${fmtMoney(c.paid_cents)}</strong></div>
+            ${isBobby ? `<details style="margin-top:6px">
+              <summary class="hint" style="cursor:pointer">Set deal / collected</summary>
+              <form method="post" action="/coach/organizations/${c.id}/deal" class="deal-form" style="margin-top:8px">
+                <label>Deal $<input name="deal" inputmode="decimal" placeholder="1500" value="${c.deal_cents ? (c.deal_cents / 100) : ''}" style="width:90px"></label>
+                <label>Collected $<input name="paid" inputmode="decimal" placeholder="0" value="${c.paid_cents ? (c.paid_cents / 100) : ''}" style="width:90px"></label>
+                <button class="btn-small" type="submit">Save</button>
+              </form>
+            </details>` : ''}
           </div>
           ${isBobby ? `<div style="display:flex;gap:8px;align-items:center">
           <form method="post" action="/coach/organizations/${c.id}/skip" style="margin:0">
@@ -1197,11 +1206,59 @@ function coachOrganizationsPage(user, organizations, error, addedId) {
 
 // Coach Home: "needs your attention" — approvals waiting, hitters gone
 // quiet (no check-in in 3+ Chicago days), and the compact latest feed.
-function coachHomePage(user, quiet, latest, pending, pushOn) {
+function coachHomePage(user, quiet, latest, pending, pushOn, analytics) {
   const canEdit = user.role === 'coach' && user.canEdit !== false;
   // Organization coaches see which program (and team) they're scoped to.
   const orgBanner = user.role === 'coach' && user.organizationName
     ? `<div class="notice">${esc(user.organizationName)}${user.teamName ? ` · ${esc(user.teamName)}` : ''} — you\u2019re seeing ${user.teamName ? 'this team' : 'this program'}\u2019s players only.</div>`
+    : '';
+  const a = analytics || {};
+  const trendSub = (cur, prev) => {
+    if (prev == null || prev === 0) return cur > 0 ? '<div class="stat-sub up">new</div>' : '';
+    const pct = Math.round(((cur - prev) / prev) * 100);
+    if (pct === 0) return '<div class="stat-sub">flat</div>';
+    const arrow = pct > 0 ? '\u25b2' : '\u25bc';
+    return `<div class="stat-sub ${pct > 0 ? 'up' : 'down'}">${arrow} ${Math.abs(pct)}% vs prior 7d</div>`;
+  };
+  const scoreSub = (cur, prev) => {
+    if (cur == null || prev == null) return '';
+    const d = Math.round((cur - prev) * 10) / 10;
+    if (d === 0) return '<div class="stat-sub">flat</div>';
+    const arrow = d > 0 ? '\u25b2' : '\u25bc';
+    return `<div class="stat-sub ${d > 0 ? 'up' : 'down'}">${arrow} ${Math.abs(d)} vs prior 7d</div>`;
+  };
+  const statCard = (num, label, sub, href) => {
+    const inner = `<div class="stat-num">${num}</div><div class="stat-label">${label}</div>${sub || ''}`;
+    return href
+      ? `<a class="stat-card" href="${href}">${inner}</a>`
+      : `<div class="stat-card">${inner}</div>`;
+  };
+  const isGlobal = !user.organizationId;
+  const cards = [
+    statCard(a.players || 0, 'Players'),
+    ...(isGlobal
+      ? [statCard(a.orgCount || 0, 'Organizations', '', '/coach/organizations'),
+         statCard(fmtMoney(a.revenueCents), 'Collected', '', '/coach/organizations')]
+      : []),
+    statCard(a.checkedInToday || 0, 'Checked in today'),
+    statCard(a.checkinsWeek || 0, 'Check-ins \u00b7 7d', trendSub(a.checkinsWeek || 0, a.checkinsPrevWeek)),
+    statCard(a.avgScore == null ? '\u2014' : a.avgScore, 'Avg score \u00b7 7d', scoreSub(a.avgScore, a.avgScorePrev)),
+    statCard((quiet || []).length, 'Gone quiet', '', '#gone-quiet'),
+    statCard((pending || []).length, 'Waiting approval', '', '/coach/approvals'),
+  ].join('');
+  const analyticsStrip = `<div class="stat-grid">${cards}</div>`;
+  const orgBreakdown = isGlobal && a.orgs && a.orgs.length
+    ? `<h2 class="section-head">Players by organization</h2>
+    <div class="card org-breakdown">${a.orgs
+      .map(
+        (o) => `<div class="org-row">
+          <div><strong>${esc(o.name)}</strong>
+            <div class="hint-inline">${o.players} player${o.players === 1 ? '' : 's'} \u00b7 ${o.weekCheckins} check-in${o.weekCheckins === 1 ? '' : 's'} \u00b7 7d</div>
+          </div>
+          <div class="org-money">${o.paidCents ? `<span class="badge ok">${fmtMoney(o.paidCents)} paid</span>` : o.dealCents ? `<span class="badge warn">${fmtMoney(o.dealCents)} deal \u00b7 unpaid</span>` : '<span class="hint-inline">no deal set</span>'}</div>
+        </div>`
+      )
+      .join('')}</div>`
     : '';
   const approvalNudge = pending && pending.length
     ? `<a class="card approval-nudge" href="/coach/approvals">${pending.length} player${pending.length === 1 ? '' : 's'} waiting for approval →</a>`
@@ -1223,9 +1280,11 @@ function coachHomePage(user, quiet, latest, pending, pushOn) {
     tabs: coachTabs('home', user.approvalCount, user),
     body: `<h1 class="page-title">Coach Dashboard</h1>
     ${orgBanner}
+    ${analyticsStrip}
     ${canEdit && !pushOn ? '<p><button type="button" class="btn-small" id="push-enable-btn">Turn on notifications</button> <span class="hint-inline">get a push when a player needs approval</span></p>' : ''}
     ${approvalNudge}
-    <h2 class="section-head">Gone quiet</h2>
+    ${orgBreakdown}
+    <h2 class="section-head" id="gone-quiet">Gone quiet</h2>
     ${quietCards || '<div class="card empty">Everyone\u2019s checking in.</div>'}
     <h2 class="section-head">Latest check-ins</h2>
     ${feed}`,
@@ -1235,6 +1294,10 @@ function coachHomePage(user, quiet, latest, pending, pushOn) {
 // Coach Hitters tab: the search bar + athlete cards.
 function roleLabel(t) {
   return t === 'pitcher' ? 'Pitcher' : t === 'two_way' ? 'Two-way' : 'Hitter';
+}
+function fmtMoney(cents) {
+  const n = Math.round(Number(cents) || 0) / 100;
+  return '$' + n.toLocaleString('en-US', { maximumFractionDigits: n % 1 ? 2 : 0 });
 }
 function rolePill(t) {
   const cls = t === 'pitcher' ? 'pitcher' : t === 'two_way' ? 'twoway' : 'hitter';

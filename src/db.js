@@ -85,6 +85,14 @@ db.exec(`CREATE TABLE IF NOT EXISTS organizations (
   created_at TEXT NOT NULL
 );`);
 
+// Deal tracking (Sep 2026): agreed price + collected revenue per organization,
+// set by Bobby on the Organizations page. Powers the revenue stat on the
+// Coach Dashboard.
+for (const col of ['deal_cents', 'paid_cents']) {
+  const cols = db.prepare('PRAGMA table_info(organizations)').all().map((c) => c.name);
+  if (!cols.includes(col)) db.exec(`ALTER TABLE organizations ADD COLUMN ${col} INTEGER NOT NULL DEFAULT 0;`);
+}
+
 // Organization link + birthdate on users. A coach row with organization_id set
 // is an organization coach: view-only, scoped to their organization's
 // players. date_of_birth is YYYY-MM-DD, collected at signup for every player.
