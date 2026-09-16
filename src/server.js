@@ -1563,7 +1563,7 @@ app.post('/checkin', requireLogin, (req, res) => {
   }
   const didDrills = b.did_drills;
   if (didDrills !== 'yes' && didDrills !== 'no') {
-    return fail('Tell Skip whether you did any drills.');
+    return fail('Say whether you did any drills.');
   }
   const drills = parseDrillsDone(b.drills_done);
   if (didDrills === 'yes' && !drills.length) {
@@ -1721,7 +1721,7 @@ app.post('/checkin/combined', requireLogin, (req, res) => {
   const viewValues = { ...b, pitches_thrown: parsePitchesThrown(b.pitches_thrown) };
   const fail = (msg) => res.send(views.combinedCheckinForm(req.user, msg, viewValues));
   if (!didHit && !didThrow) {
-    return fail('Tell Skip what you did today — hitting, throwing, or both.');
+    return fail('Say what you did today — hitting, throwing, or both.');
   }
   const feel = parseRating(b.feel);
   const focus = parseRating(b.focus);

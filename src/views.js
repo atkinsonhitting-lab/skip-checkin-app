@@ -92,11 +92,6 @@ ${tabbarHtml}
 ${user && user.viewAs ? `<div class="viewas-banner">Previewing as <strong>${esc(user.viewAsName)}</strong> — actions are disabled. <form method="post" action="/coach/view-as/exit" style="display:inline;margin:0"><button type="submit" class="viewas-exit">Exit preview</button></form></div>` : ''}
 ${user && user.role === 'coach' && user.canEdit === false ? '<div class="viewonly-banner">View-only coach — you can look at everything, but changes are disabled.</div>' : ''}
 <main class="wrap">${body}</main>
-${(() => {
-  const chatTab = (tabs || []).find((t) => t.href === '/chat');
-  if (!chatTab || chatTab.active) return '';
-  return `<a href="/chat" class="skip-fab" aria-label="Talk to Coach Skip"><img src="${skipAvatar(user)}" alt="Skip"><span class="skip-fab-bubble" aria-hidden="true">\uD83D\uDCAC</span></a>`;
-})()}
 <script src="/app.js"></script>
 </body>
 </html>`;
@@ -108,7 +103,7 @@ function userTabs(active, user) {
     { href: '/checkin', label: 'Check In', active: active === 'checkin' },
     { href: '/notebook', label: 'Notebook', active: active === 'notebook' },
     { href: '/mental-game', label: 'Mental Game', active: active === 'mental' },
-    { href: '/chat', label: 'Talk to Skip', sub: 'your personally trained hitting coach', active: active === 'chat' },
+    { href: '/chat', label: 'Talk to Skip', sub: 'your personally trained coach', active: active === 'chat' },
     { href: '/settings', label: 'Settings', active: active === 'settings' },
   ];
   // Bobby's remote hitters only — nobody else ever sees this tab.
@@ -161,7 +156,7 @@ function loginPage(error, notice) {
     tabs: [],
     body: `<div class="login-card card">
       <img src="/diamond-daily-logo.jpg" class="brand-logo-full" alt="Diamond Daily — A Baseball Journal">
-      <p class="hint">Step into Diamond Daily. Skip reads your sessions and learns what your best days look like.</p>
+      <p class="hint">Step into Diamond Daily. Log your sessions — the app learns what your best days look like.</p>
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
       ${notice ? `<div class="notice">${esc(notice)}</div>` : ''}
       <form method="post" action="/login" class="form">
@@ -254,13 +249,13 @@ function userHome(user, extras) {
   }
   const pushCard = (pushEnabled && !pushOn)
     ? `<div class="card push-card">
-        <p style="margin:0 0 10px"><strong>Never miss a day.</strong> <span class="hint">Turn on reminders \u2014 Skip nudges you on days you haven\u2019t checked in.</span></p>
+        <p style="margin:0 0 10px"><strong>Never miss a day.</strong> <span class="hint">Turn on reminders \u2014 get a nudge on days you haven\u2019t checked in.</span></p>
         <p style="margin:0"><button type="button" class="btn-primary" id="push-enable-btn" style="margin-top:0">Turn on reminders</button></p>
       </div>`
     : '';
   const head = avgScore !== null
-    ? `<div class="level-head"><p class="hint">Skip's read on you across ${checkinCount} session${checkinCount === 1 ? '' : 's'}:</p>${levelLine(avgScore)}</div>`
-    : `<p class="hint">No check-ins yet. Log your first session and Skip starts learning your game.</p>`;
+    ? `<div class="level-head"><p class="hint">Your read across ${checkinCount} session${checkinCount === 1 ? '' : 's'}:</p>${levelLine(avgScore)}</div>`
+    : `<p class="hint">No check-ins yet. Log your first session and the app starts learning your game.</p>`;
   const preCard = precheckin
     ? `<div class="card"><p style="margin:0 0 6px"><strong>Today's intent</strong> <span class="hint-inline">${precheckin.kind === 'game' ? 'Pregame / Live ABs' : 'Cage'}</span></p>
         ${precheckin.focus ? `<p style="margin:0 0 4px">&ldquo;${esc(precheckin.focus)}&rdquo;</p>` : ''}
@@ -274,7 +269,7 @@ function userHome(user, extras) {
     tabs: userTabs('home', user),
     body: `<h1 class="page-title">What's up, ${esc(user.displayName)}</h1>
     <div class="card cta-card">
-      <p class="skip-intro">Check in with Skip. He'll rate every session and learn what your best days look like.</p>
+      <p class="skip-intro">Check in daily. Every session gets a read, and the app learns what your best days look like.</p>
       <a href="/checkin" class="btn-primary">Check in today's session</a>
     </div>
     ${preCard}
@@ -376,10 +371,10 @@ function whatWorksSection(data, opts) {
        ${suggested}
        ${addable}
        ${drills ? `<div class="works-sub">Your drills</div><div class="works-rows">${drills}</div>` : ''}`
-    : `<p class="hint">Check in 3+ times and Skip will start spotting your patterns.</p>`;
+    : `<p class="hint">Check in 3+ times and your patterns start to show.</p>`;
   return `<section id="what-works" class="card">
     <h2>What works for you</h2>
-    <p class="hint">Skip's read on your sessions \u2014 what to keep, what to trash, and what your routine is doing for you.</p>
+    <p class="hint">Your read on your sessions \u2014 what to keep, what to trash, and what your routine is doing for you.</p>
     ${body}
   </section>`;
 }
@@ -441,8 +436,8 @@ function checkinForm(user, error, values, drillNames, routine) {
     title: 'Check In',
     user,
     tabs: userTabs('checkin', user),
-    body: `<h1 class="page-title">Check in with Skip</h1>
-    <div class="card"><p class="hint skip-intro">Tell Skip about your session. Give as much detail as you can — the more he knows, the better his reads get.</p>
+    body: `<h1 class="page-title">Check In</h1>
+    <div class="card"><p class="hint skip-intro">Log your session. Give as much detail as you can — the more detail, the better the reads get.</p>
     <form method="post" action="/checkin" class="form">
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
       <div class="field-label">Where were you?</div>
@@ -488,8 +483,8 @@ function combinedCheckinForm(user, error, values) {
     title: 'Check In',
     user,
     tabs: userTabs('checkin', user),
-    body: `<h1 class="page-title">Check in with Skip</h1>
-    <div class="card"><p class="hint skip-intro">One check-in for the whole day. Tell Skip what you did — hitting, throwing, or both.</p>
+    body: `<h1 class="page-title">Check In</h1>
+    <div class="card"><p class="hint skip-intro">One check-in for the whole day. Say what you did — hitting, throwing, or both.</p>
     <form method="post" action="/checkin/combined" class="form" id="combined-form" data-throw-sync>
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
       <div class="field-label">What did you do today?</div>
@@ -514,7 +509,7 @@ function combinedCheckinForm(user, error, values) {
       </div>
       <label>What felt good?<span class="talk-wrap"><textarea id="felt_good" name="felt_good" rows="2" placeholder="What clicked today, hitting or throwing?">${esc(v.felt_good || '')}</textarea>${mic('felt_good')}</span></label>
       <label>What was working?<span class="talk-wrap"><textarea id="what_was_working" name="what_was_working" rows="2" placeholder="Which feel, which pitch, which cue?">${esc(v.what_was_working || '')}</textarea>${mic('what_was_working')}</span></label>
-      <label>What was your biggest struggle?<span class="talk-wrap"><textarea id="biggest_struggle" name="biggest_struggle" rows="2" placeholder="Be honest — that's how Skip helps.">${esc(v.biggest_struggle || '')}</textarea>${mic('biggest_struggle')}</span></label>
+      <label>What was your biggest struggle?<span class="talk-wrap"><textarea id="biggest_struggle" name="biggest_struggle" rows="2" placeholder="Be honest — that's what makes the read useful.">${esc(v.biggest_struggle || '')}</textarea>${mic('biggest_struggle')}</span></label>
       <script src="/checkin.js"></script>
       <button type="submit" class="btn-primary">Submit check-in</button>
     </form></div>`,
@@ -577,8 +572,8 @@ function pitchingCheckinForm(user, error, values) {
     title: 'Check In',
     user,
     tabs: userTabs('checkin', user),
-    body: `<h1 class="page-title">Check in with Skip</h1>
-    <div class="card"><p class="hint skip-intro">Tell Skip about your throwing today. The more he knows, the better his reads get.</p>
+    body: `<h1 class="page-title">Check In</h1>
+    <div class="card"><p class="hint skip-intro">Log your throwing today. The more detail, the better the reads get.</p>
     <form method="post" action="/checkin/pitching" class="form" id="pitching-form" data-throw-sync>
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
       ${throwingFields(v, 'pitching-form', '')}
@@ -590,7 +585,7 @@ function pitchingCheckinForm(user, error, values) {
       </div>
       <label>What felt good?<span class="talk-wrap"><textarea id="felt_good" name="felt_good" rows="2" placeholder="What clicked physically?">${esc(v.felt_good || '')}</textarea>${mic('felt_good')}</span></label>
       <label>What was working?<span class="talk-wrap"><textarea id="what_was_working" name="what_was_working" rows="2" placeholder="Which pitch, which feel, which sequence?">${esc(v.what_was_working || '')}</textarea>${mic('what_was_working')}</span></label>
-      <label>What was your biggest struggle?<span class="talk-wrap"><textarea id="biggest_struggle" name="biggest_struggle" rows="2" placeholder="Be honest — that's how Skip helps.">${esc(v.biggest_struggle || '')}</textarea>${mic('biggest_struggle')}</span></label>
+      <label>What was your biggest struggle?<span class="talk-wrap"><textarea id="biggest_struggle" name="biggest_struggle" rows="2" placeholder="Be honest — that's what makes the read useful.">${esc(v.biggest_struggle || '')}</textarea>${mic('biggest_struggle')}</span></label>
       <script src="/checkin.js"></script>
       <button type="submit" class="btn-primary">Submit check-in</button>
     </form></div>`,
@@ -740,7 +735,7 @@ function notebookPage(user, checkins, notes, players, justSubmitted, filter) {
     ? Math.round((scored.reduce((s, c) => s + c.session_score, 0) / scored.length) * 10) / 10
     : null;
   const checkinsHtml = `
-    ${avg !== null ? `<div class="level-head"><p class="hint">Skip's read on you over ${scored.length} session${scored.length === 1 ? '' : 's'}:</p>${levelLine(avg)}</div>` : ''}
+    ${avg !== null ? `<div class="level-head"><p class="hint">Your read over ${scored.length} session${scored.length === 1 ? '' : 's'}:</p>${levelLine(avg)}</div>` : ''}
     ${checkins.length ? checkins.map(checkinCard).join('') : `<div class="card empty">${kindName ? `No ${kindName.toLowerCase()} sessions logged yet.` : `No check-ins yet. <a href="/checkin">Log your first session</a>.`}</div>`}`;
   return layout({
     title: 'Notebook',
@@ -753,7 +748,7 @@ function notebookPage(user, checkins, notes, players, justSubmitted, filter) {
     ${kindPills}
     ${checkinsHtml}
     <h2 class="section-head" id="notes">Notes</h2>
-    <div class="card"><p class="hint skip-intro">Your hitting notebook — jot down anything about your swing and your game, no check-in needed. Skip reads this too.</p>
+    <div class="card"><p class="hint skip-intro">Your hitting notebook — jot down anything about your swing and your game, no check-in needed. Your notes get read too.</p>
     <form method="post" action="/learn/note" class="form">
       <label>Something new I'm learning
         <textarea id="note-text" name="note" rows="2" maxlength="1000" placeholder="e.g. Keeping my front shoulder closed longer lets me stay through it" required></textarea>
@@ -770,7 +765,7 @@ function notebookPage(user, checkins, notes, players, justSubmitted, filter) {
       <h2 class="routine-station">My notes</h2>
       ${noteRows || `<p class="hint">Nothing saved yet. When something clicks — a cue, a feel, an idea — put it here.</p>`}
     </div>
-    <div class="card"><p class="hint skip-intro">Players you study. Skip will connect his coaching to the guys you look up to.</p>
+    <div class="card"><p class="hint skip-intro">Players you study — your reads connect back to the guys you look up to.</p>
     <form method="post" action="/learn/player" class="form">
       <label>Player
         <input name="player_name" maxlength="80" placeholder="e.g. Mookie Betts" required>
@@ -840,11 +835,11 @@ function scorePage(user, c) {
     if (pitchNames.length) throwBits.push(['Pitches', pitchNames.join(', ')]);
   }
   return layout({
-    title: "Skip's Session Level",
+    title: "Session Level",
     user,
     tabs: userTabs('checkin', user),
     body: `<div class="card score-hero">
-      <div class="score-kicker">Skip's Session Level</div>
+      <div class="score-kicker">Session Level</div>
       <div class="level-hero-meter">${levelBar(c.session_score, c.score_tier, true)}</div>
       <div><span class="badge ${tierBadgeClass(c.score_tier)} badge-lg">${esc(c.score_tier)}</span></div>
       <p class="hint skip-note">${esc(TIER_NOTES[c.score_tier] || '')}</p>
@@ -922,11 +917,11 @@ function drillChip(d) {
 function skipReadBlock(c) {
   if (c.skip_journal_note) {
     return `<div class="skip-read">
-      <div class="skip-read-head">Skip's read</div>
+      <div class="skip-read-head">Your read</div>
       <p>${esc(c.skip_journal_note)}</p>
     </div>`;
   }
-  return `<p class="skip-pending">Skip's reviewing your entry — his read lands here.</p>`;
+  return `<p class="skip-pending">Reviewing your entry — your read lands here.</p>`;
 }
 
 function checkinCard(c) {
@@ -1223,10 +1218,10 @@ function coachHomePage(user, quiet, latest, pending, pushOn) {
     ? latest.map((c) => checkinCard({ ...c, showAthlete: true })).join('')
     : '<div class="card empty">No check-ins yet.</div>';
   return layout({
-    title: 'Skip Dashboard',
+    title: 'Coach Dashboard',
     user,
     tabs: coachTabs('home', user.approvalCount, user),
-    body: `<h1 class="page-title">Skip Dashboard</h1>
+    body: `<h1 class="page-title">Coach Dashboard</h1>
     ${orgBanner}
     ${canEdit && !pushOn ? '<p><button type="button" class="btn-small" id="push-enable-btn">Turn on notifications</button> <span class="hint-inline">get a push when a player needs approval</span></p>' : ''}
     ${approvalNudge}
@@ -1534,13 +1529,13 @@ function mentalGamePage(user, baseline, saved, planFailed, keys) {
     user,
     tabs: userTabs('mental', user),
     body: `<h1 class="page-title">Mental Game</h1>
-    <p class="lede">Answer honestly — Coach Skip gauges where your head's at and builds your plan from it.</p>
-    ${saved ? '<div class="notice">Saved — Skip built your plan below.</div>' : ''}
+    <p class="lede">Answer honestly — it gauges where your head's at and builds your plan from it.</p>
+    ${saved ? '<div class="notice">Saved — your plan is below.</div>' : ''}
     ${planFailed ? '<div class="notice">Baseline saved, but the plan didn\u2019t come through — tap the button again.</div>' : ''}
     ${planHtml}
     <div class="card">
       <h2 class="routine-station">Your keys</h2>
-      <p class="hint">Things you and Coach Skip saved from the chat. Tell him <strong>&ldquo;add this to my mental game&rdquo;</strong> and it lands here.</p>
+      <p class="hint">Things you saved from the chat. Tell him <strong>&ldquo;add this to my mental game&rdquo;</strong> and it lands here.</p>
       ${(keys || []).length
         ? `<ul class="keys-list">${(keys || []).map((k) => `<li><span>${esc(k.content)}</span>
             <form method="post" action="/mental-game/keys/delete" style="display:inline;margin:0">
@@ -1838,7 +1833,7 @@ function coachUser(user, name, checkins, whatWorks, thread, email, memories, rou
   const canEdit = user.role === 'coach' && user.canEdit !== false;
   const convo =
     thread && thread.length
-      ? `<h2 class="section-head">Talk to Skip history</h2>
+      ? `<h2 class="section-head">Chat history</h2>
     <div class="chat-log">${thread
       .map(
         (m) =>
@@ -1903,8 +1898,8 @@ function memorySection(email, memories, canEdit) {
     <button type="submit" class="btn-primary">Save to Skip's memory</button>
   </form></div>`
     : '';
-  return `<h2 class="section-head">What Skip has learned about this player</h2>
-  <p class="hint">Durable memory — Skip reads this before every chat with this player. His best-day patterns, cues that work for him, what fixed his slumps. This is how he learns players over time.</p>
+  return `<h2 class="section-head">Learned about this player</h2>
+  <p class="hint">Durable memory — read before every chat with this player. Best-day patterns, cues that work, what fixed slumps. This is how the app learns players over time.</p>
   ${items || '<div class="card empty">Nothing saved yet.</div>'}
   ${addForm}`;
 }
@@ -1992,7 +1987,7 @@ function coachSkipPage(user, entries, hitters, thread, chatEnabled, saved, propo
       </a>`
         )
         .join('')
-    : '<div class="card empty">No hitter has talked to Skip yet.</div>';
+    : '<div class="card empty">No player has talked to Skip yet.</div>';
 
   // Skip's Brain: entries grouped by type, each with edit + archive/restore.
   const typeOrder = brain.LIB_TYPES;
