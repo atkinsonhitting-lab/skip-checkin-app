@@ -716,4 +716,65 @@ CREATE INDEX IF NOT EXISTS idx_precheckins_user_time ON pre_checkins(user_id, cr
 // Drop the tables if a previous deploy created them.
 db.exec(`DROP TABLE IF EXISTS post_reactions; DROP TABLE IF EXISTS coach_posts;`);
 
+// One-time dedup (Sep 16 2026): Bobby reported repeat check-in rows caused
+// by double-submits. Remove STRICT duplicates only: same user, created
+// within 5 minutes of each other, and identical session content — every
+// user-input field must match exactly. Hitters can legitimately log
+// multiple real check-ins per day, so anything outside the window or
+// differing in any field is kept. Keeps the earliest row (lowest id).
+// No child tables reference checkins(id), so nothing else needs cleanup.
+// Guarded by a settings flag so it runs once.
+if (!db.prepare("SELECT value FROM settings WHERE key = 'checkin_dedup_20260916'").get()) {
+  // Every user-input column on checkins. Excluded on purpose:
+  // id/user_id/athlete_name/created_at (identity; time handled by the
+  // 5-minute window below) and score_tier + skip_journal_* (derived fields
+  // Skip backfills later — a scored row and its unscored twin are still
+  // the same double-submit).
+  const DEDUP_FIELDS = [
+    'session_kind', 'pitch_session_type', 'intent', 'command', 'pitch_count',
+    'pitches_thrown', 'velo_max', 'catch_distance', 'environment', 'difficulty',
+    'feel', 'confidence', 'focus', 'session_score', 'drills_done',
+    'session_notes', 'what_worked', 'whats_next', 'recovery_notes',
+    'no_throw_note', 'felt_good', 'what_was_working', 'biggest_struggle',
+    'hitting_score', 'pitching_score',
+  ];
+  const norm = (v) => (v === null || v === undefined ? '' : String(v));
+  const keyOf = (r) => DEDUP_FIELDS.map((f) => norm(r[f])).join('');
+  const rows = db.prepare('SELECT * FROM checkins ORDER BY user_id, created_at, id').all();
+  const toDelete = [];
+  const perUser = {};
+  let keeper = null;
+  for (const r of rows) {
+    const t = Date.parse(r.created_at);
+    const kt = keeper ? Date.parse(keeper.created_at) : NaN;
+    const sameRun =
+      keeper &&
+      keeper.user_id === r.user_id &&
+      !Number.isNaN(t) &&
+      !Number.isNaN(kt) &&
+      t - kt <= 5 * 60 * 1000 &&
+      keyOf(keeper) === keyOf(r);
+    if (sameRun) {
+      toDelete.push(r.id);
+      perUser[r.user_id] = (perUser[r.user_id] || 0) + 1;
+    } else {
+      keeper = r;
+    }
+  }
+  if (toDelete.length) {
+    const ph = toDelete.map(() => '?').join(',');
+    db.prepare(`DELETE FROM checkins WHERE id IN (${ph})`).run(...toDelete);
+  }
+  db.prepare("INSERT INTO settings (key, value) VALUES ('checkin_dedup_20260916', ?)").run(String(toDelete.length));
+  const who = db.prepare('SELECT id, email, first_name, last_name FROM users').all();
+  const nameOf = (id) => {
+    const u = who.find((x) => x.id === id);
+    return u ? `${u.first_name || ''} ${u.last_name || ''} <${u.email}>`.trim() : `user ${id}`;
+  };
+  const detail = Object.entries(perUser)
+    .map(([id, n]) => `${nameOf(Number(id))}: ${n}`)
+    .join('; ');
+  console.log(`CHECKIN DEDUP: removed ${toDelete.length} duplicate check-in row(s)${detail ? ` — ${detail}` : ''}`);
+}
+
 module.exports = db;
