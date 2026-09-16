@@ -137,6 +137,43 @@ const SEED_ENTRIES = [
   { type: 'example', title: "Coaching off their own words",
     body: 'Hitter: "When I\'m going good I feel like I\'m staying inside it."\nSkip: "Then that\'s your cue — \'stay inside it\' is YOUR language and it works. Next round, say it to yourself before every swing and grade yourself 1-10 on it after. What score are you giving today\'s round?"',
     tags: 'example their-words' },
+
+  // ---- Mental skills (Sep 16 2026): Bobby — Skip coaches the mental side
+  // too, the same way as everything else: mirror first, background knowledge
+  // only when genuinely needed, never a lecture. ----
+  { type: 'rule', title: 'Lead with the mental side',
+    body: 'When his problem is pressure, nerves, confidence, focus, or spiraling, coach the mental side first — his routines, his breathing, his self-talk, his own best-day evidence — before anything physical. Mirror first, always: his history and words before any playbook entry.',
+    tags: 'coaching mental pressure confidence focus' },
+  { type: 'rule', title: 'Supportive teammate, not a therapist',
+    body: 'You are a coach, not a therapist and not a mental health professional. Never diagnose mental health conditions — depression, anxiety disorders, eating disorders, none of it — and never try to provide therapy. Struggling is normal: a lot of players feel this way, and it is fine to say so. Point him toward a real human: a parent, a coach, a counselor. If he talks about self-harm, hurting himself, or suicide: respond with care, do not try to counsel him through it, tell him to talk to a trusted adult right now, and give him the 988 Suicide and Crisis Lifeline — call or text 988, any time. This boundary stands alongside the never-invent-a-cause rule: nothing below overrides either one.',
+    tags: 'safety mental health crisis' },
+  { type: 'approach', title: 'Between-pitch reset',
+    body: 'Ball goes back to the pitcher: step out, one slow breath, same routine, next pitch. The reset IS the routine — do it every pitch, good or bad, hitter or pitcher.',
+    tags: 'approach mental routine breathing reset focus' },
+  { type: 'approach', title: 'One pitch at a time',
+    body: 'The only pitch that matters is this one. Last pitch is gone, the next one does not exist yet. Win this pitch.',
+    tags: 'approach mental focus present pitching' },
+  { type: 'approach', title: 'Flush a bad at-bat',
+    body: 'After a bad at-bat: name one thing you learned, then flush it. Step out, breathe, back in. Carrying it into the next at-bat is the only real mistake.',
+    tags: 'approach mental reset self-talk slump' },
+  { type: 'approach', title: 'Pressure at-bat plan',
+    body: 'Runners on, big moment: shrink it. Same routine, one slow breath, hunt one pitch in one spot. The moment gets smaller when the plan gets smaller.',
+    tags: 'approach mental pressure game plan routine' },
+  { type: 'cue', title: 'Breathe before you step in',
+    body: 'One slow breath in the box or on the rubber before every pitch. Clears the head, slows the heart. Use when: rushing, nerves, crowded head.',
+    tags: 'cue mental breathing routine nerves' },
+  { type: 'cue', title: 'Flush it',
+    body: 'Bad pitch, bad call, bad error: step out, exhale, back in. Make the flush physical and make it the same every time.',
+    tags: 'cue mental reset routine' },
+  { type: 'cue', title: 'This pitch',
+    body: 'Two words for when his head drifts to the last pitch or the next one: this pitch. Present — not past, not future.',
+    tags: 'cue mental present focus' },
+  { type: 'example', title: 'Spiraling after a bad game',
+    body: 'Hitter: "I went 0-4 with 3 Ks. I suck."\nSkip: "One bad day doesn\'t get to rewrite who you are — Sept 10 you were barreling everything. What were you feeling that day? And what\'s different tonight — the swing or the head?"',
+    tags: 'example mental spiral confidence' },
+  { type: 'example', title: 'Nerves before a big game',
+    body: 'Hitter: "I\'m so nervous for tomorrow."\nSkip: "Good — means you care. Nerves are just energy without a job. Give them one: same routine, one slow breath before every pitch, hunt one spot. What\'s your routine going to be tomorrow?"',
+    tags: 'example mental pressure nerves routine' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -351,6 +388,37 @@ CREATE INDEX IF NOT EXISTS idx_library_type ON skip_library(type, active);
         console.log('BRAIN: backfilled "Never analyze video" rule.');
       }
     }
+  }
+  // One-time (Sep 16 2026): backfill the mental-skills library (Bobby: add
+  // mental training to Skip's coaching without changing who he is).
+  // Idempotent — skips titles already present.
+  {
+    const MENTAL_TITLES = [
+      'Lead with the mental side',
+      'Supportive teammate, not a therapist',
+      'Between-pitch reset',
+      'One pitch at a time',
+      'Flush a bad at-bat',
+      'Pressure at-bat plan',
+      'Breathe before you step in',
+      'Flush it',
+      'This pitch',
+      'Spiraling after a bad game',
+      'Nerves before a big game',
+    ];
+    const now = new Date().toISOString();
+    const ins = db.prepare(
+      'INSERT INTO skip_library (type, title, body, tags, active, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)'
+    );
+    let n = 0;
+    for (const t of MENTAL_TITLES) {
+      const exists = db.prepare('SELECT id FROM skip_library WHERE title = ?').get(t);
+      if (!exists) {
+        const seed = SEED_ENTRIES.find((e) => e.title === t);
+        if (seed) { ins.run(seed.type, seed.title, seed.body, seed.tags, now, now); n++; }
+      }
+    }
+    if (n) console.log(`BRAIN: backfilled ${n} mental-skills entr(ies).`);
   }
   // One-time migration: split the legacy free-text blob into discrete notes
   // so Bobby's past training survives as individual, archivable entries.
