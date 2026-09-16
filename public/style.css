@@ -606,3 +606,6 @@ body.has-tabbar .skip-fab { bottom: calc(80px + env(safe-area-inset-bottom)); }
   body.has-tabbar { padding-bottom: 0; }
   body.has-tabbar .skip-fab { bottom: calc(18px + env(safe-area-inset-bottom)); }
 }
+
+/* Keep the chat input above the tab bar on the Talk to Skip page. */
+body.has-tabbar .chat-form { bottom: calc(62px + env(safe-area-inset-bottom)); }
