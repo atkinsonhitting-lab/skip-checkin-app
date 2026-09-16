@@ -74,6 +74,32 @@ if (process.env.SEED_ON_BOOT === 'true' && userCount() === 0) {
   console.log('Copy these now, then remove SEED_ON_BOOT and redeploy.');
 }
 
+// One-time coach creation (Sep 2026): set BOOT_CREATE_USER to
+// "email|password|can_edit|first|last" to add a coach on boot, then remove the
+// env var and redeploy. Used to add Cam McDonald as a view-only coach.
+if (process.env.BOOT_CREATE_USER) {
+  const parts = String(process.env.BOOT_CREATE_USER).split('|');
+  const cuEmail = (parts[0] || '').trim().toLowerCase();
+  const cuPassword = parts[1] || '';
+  const cuCanEdit = parts[2] === '1' ? 1 : 0;
+  const cuFirst = parts[3] || null;
+  const cuLast = parts[4] || null;
+  if (cuEmail && cuPassword) {
+    const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(cuEmail);
+    if (!existing) {
+      const cuNow = new Date().toISOString();
+      db.prepare(
+        "INSERT INTO users (email, password_hash, role, athlete_name, first_name, last_name, created_at, status, can_edit) VALUES (?, ?, 'coach', NULL, ?, ?, ?, 'approved', ?)"
+      ).run(cuEmail, bcrypt.hashSync(cuPassword, 12), cuFirst, cuLast, cuNow, cuCanEdit);
+      console.log(`BOOT_CREATE_USER: created coach ${cuEmail} (can_edit=${cuCanEdit})`);
+    } else {
+      console.log(`BOOT_CREATE_USER: ${cuEmail} already exists, skipping`);
+    }
+  } else {
+    console.log('BOOT_CREATE_USER: missing email or password, skipping');
+  }
+}
+
 // ---- Auth helpers ----
 
 function toReqUser(row) {
@@ -87,11 +113,13 @@ function toReqUser(row) {
     displayName: row.first_name || row.athlete_name || 'Coach',
     status: row.status || 'approved',
     remoteProgramId: row.remote_program_id || null,
+    // View-only coaches (can_edit=0) see everything but change nothing.
+    canEdit: row.can_edit == null ? true : row.can_edit !== 0,
   };
 }
 function attachUser(req, res, next) {
   if (req.session && req.session.userId) {
-    const row = db.prepare('SELECT id, email, role, athlete_name, first_name, last_name, status, remote_program_id FROM users WHERE id = ?').get(req.session.userId);
+    const row = db.prepare('SELECT id, email, role, athlete_name, first_name, last_name, status, remote_program_id, can_edit FROM users WHERE id = ?').get(req.session.userId);
     if (row) {
       req.user = toReqUser(row);
       // "View as hitter": the coach browses the app exactly as this hitter
@@ -137,6 +165,16 @@ function requireLogin(req, res, next) {
 }
 
 function requireCoach(req, res, next) {
+  // Full coach only: view-only coaches (can_edit=0) are blocked from every
+  // mutation. Read routes use requireCoachAny below.
+  const u = realUser(req);
+  if (!u) return res.redirect('/login');
+  if (u.role !== 'coach' || !u.canEdit) return res.status(403).send('Forbidden');
+  next();
+}
+
+// Any coach, including view-only: dashboard, hitter views, library, Brain.
+function requireCoachAny(req, res, next) {
   const u = realUser(req);
   if (!u) return res.redirect('/login');
   if (u.role !== 'coach') return res.status(403).send('Forbidden');
@@ -849,6 +887,12 @@ async function pushToCoaches(title, body, url) {
   const coaches = db.prepare("SELECT id FROM users WHERE role = 'coach'").all();
   for (const c of coaches) await pushToUser(c.id, title, body, url);
 }
+// Push to every coach except one (e.g. notify the other coach of a proposal).
+async function pushToCoachesExcept(exceptId, title, body, url) {
+  if (!pushEnabled) return;
+  const coaches = db.prepare("SELECT id FROM users WHERE role = 'coach' AND id != ?").all(exceptId);
+  for (const c of coaches) await pushToUser(c.id, title, body, url);
+}
 app.get('/api/push/vapid-key', (req, res) => res.json({ publicKey: VAPID_PUBLIC_KEY || null }));
 app.get('/api/push/status', requireLogin, (req, res) => {
   res.json({ pushEnabled, subscribed: userPushSubscriptions(req.user.id).length > 0 });
@@ -1180,7 +1224,7 @@ app.get('/videos/watch/:id', requireLogin, requireRemote, (req, res) => {
 });
 
 // ---- View as hitter ----
-app.post('/coach/view-as', requireCoach, (req, res) => {
+app.post('/coach/view-as', requireCoachAny, (req, res) => {
   const id = Number(req.body.id);
   const t = id ? db.prepare("SELECT id FROM users WHERE id = ? AND role != 'coach'").get(id) : null;
   if (t) req.session.viewAsUserId = t.id;
@@ -1194,7 +1238,7 @@ app.post('/coach/view-as/exit', (req, res) => {
 });
 
 // ---- Coach video library manager ----
-app.get('/coach/library', requireCoach, (req, res) => {
+app.get('/coach/library', requireCoachAny, (req, res) => {
   const cats = db
     .prepare('SELECT category, COUNT(*) AS n FROM video_library GROUP BY category ORDER BY category')
     .all();
@@ -1480,7 +1524,7 @@ function setApprovalCount(req) {
   }
 }
 
-app.get('/coach', requireCoach, (req, res) => {
+app.get('/coach', requireCoachAny, (req, res) => {
   setApprovalCount(req);
   const users = db
     .prepare("SELECT id, email, athlete_name, first_name, last_name, created_at FROM users WHERE role != 'coach' AND status = 'approved' ORDER BY created_at ASC")
@@ -1507,17 +1551,37 @@ app.get('/coach', requireCoach, (req, res) => {
     .prepare('SELECT category, COUNT(*) AS n FROM video_library GROUP BY category ORDER BY category')
     .all();
   const librarySync = db.prepare("SELECT value FROM library_sync_state WHERE key = 'last_sync_at'").get();
+  const me = realUser(req);
+  const coaches = me.canEdit
+    ? db.prepare("SELECT id, email, first_name, last_name, can_edit, created_at FROM users WHERE role = 'coach' ORDER BY created_at ASC").all()
+    : null;
   res.send(
-    views.coachDashboard(realUser(req), stats, latest, pending, remotePrograms, {
+    views.coachDashboard(me, stats, latest, pending, remotePrograms, {
       cats: libraryCats,
       lastSync: librarySync ? librarySync.value : '',
       pushOn: userPushSubscriptions(req.user.id).length > 0,
+      coaches,
     })
   );
 });
 
+// Flip a coach between full access and view-only. Full coaches only, never
+// yourself, and never the last full-access coach.
+app.post('/coach/coaches/toggle', requireCoach, (req, res) => {
+  const id = Number(req.body.id);
+  const me = realUser(req);
+  const target = db.prepare("SELECT id, can_edit FROM users WHERE id = ? AND role = 'coach'").get(id);
+  if (!target || target.id === me.id) return res.redirect('/coach');
+  if (target.can_edit !== 0) {
+    const fullCount = db.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'coach' AND can_edit != 0").get().n;
+    if (fullCount <= 1) return res.redirect('/coach');
+  }
+  db.prepare('UPDATE users SET can_edit = ? WHERE id = ?').run(target.can_edit !== 0 ? 0 : 1, target.id);
+  res.redirect('/coach');
+});
+
 // Approvals tab: approve or decline waiting hitters right here.
-app.get('/coach/approvals', requireCoach, (req, res) => {
+app.get('/coach/approvals', requireCoachAny, (req, res) => {
   setApprovalCount(req);
   res.send(views.coachApprovalsPage(realUser(req), pendingList()));
 });
@@ -1546,7 +1610,7 @@ app.post('/coach/decline/:id', requireCoach, (req, res) => {
   res.redirect('/coach/approvals');
 });
 
-app.get('/coach/user/:email', requireCoach, (req, res) => {
+app.get('/coach/user/:email', requireCoachAny, (req, res) => {
   setApprovalCount(req);
   const em = (req.params.email || '').toLowerCase();
   const user = db
@@ -1603,14 +1667,16 @@ app.post('/coach/user/:email/delete', requireCoach, (req, res) => {
 
 // Remove a hitter and everything they created: check-ins, chats, routine, tokens.
 function deleteHitter(userId) {
-  for (const t of ['chat_messages', 'checkins', 'routine_drills', 'password_reset_tokens', 'hitter_memory', 'learning_notes', 'study_players']) {
+  // Every user-scoped table must go — including pre_checkins (Bobby's rule:
+  // a deleted hitter leaves nothing behind).
+  for (const t of ['chat_messages', 'checkins', 'routine_drills', 'password_reset_tokens', 'hitter_memory', 'learning_notes', 'study_players', 'pre_checkins', 'push_subscriptions', 'mental_keys', 'mental_baseline', 'user_subscriptions']) {
     db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(userId);
   }
   db.prepare('DELETE FROM users WHERE id = ?').run(userId);
 }
 
 // Coach-only backup: download every check-in as JSON.
-app.get('/coach/export', requireCoach, (req, res) => {  const rows = db
+app.get('/coach/export', requireCoachAny, (req, res) => {  const rows = db
     .prepare(
       `SELECT c.id, c.athlete_name, u.email, c.created_at, c.environment, c.drills_done,
               c.feel, c.confidence, c.focus, c.session_score, c.score_tier,
@@ -1629,7 +1695,7 @@ app.get('/coach/export', requireCoach, (req, res) => {  const rows = db
 // injected into every hitter's Skip prompt, and reviews Skip's conversations
 // with each hitter.
 
-app.get('/coach/skip', requireCoach, (req, res) => {
+app.get('/coach/skip', requireCoachAny, (req, res) => {
   setApprovalCount(req);
   const entries = brain.listEntries(db);
   const hitters = db
@@ -1656,7 +1722,7 @@ app.get('/coach/skip', requireCoach, (req, res) => {
     .prepare('SELECT role, content, created_at FROM chat_messages WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 100')
     .all(req.user.id)
     .reverse();
-  res.send(views.coachSkipPage(realUser(req), entries, hitters, thread, !!process.env.LLM_API_KEY, req.query.saved === '1'));
+  res.send(views.coachSkipPage(realUser(req), entries, hitters, thread, !!process.env.LLM_API_KEY, req.query.saved === '1', brain.listProposals(db)));
 });
 
 // ---- Skip's Brain: Bobby's structured coaching library ----
@@ -1701,6 +1767,61 @@ app.post('/coach/skip/correction', requireCoach, (req, res) => {
     brain.addEntry(db, { type: 'example', title, body, tags: 'correction' });
   }
   res.redirect('/coach/skip?saved=1');
+});
+
+// Propose a Brain entry. Any coach (including view-only) can propose; the
+// entry goes live only after EVERY coach has approved it. The proposer
+// auto-approves on submit. The other coach gets a push so nothing stalls.
+app.post('/coach/skip/propose', requireCoachAny, (req, res) => {
+  const me = realUser(req);
+  try {
+    const id = brain.createProposal(db, {
+      type: req.body.type,
+      title: req.body.title,
+      body: req.body.body,
+      tags: req.body.tags,
+      proposedBy: me.id,
+    });
+    pushToCoachesExcept(me.id, 'New Skip Brain proposal', `${me.displayName} proposed "${String(req.body.title || '').slice(0, 60)}" — tap to review.`, '/coach/skip');
+    console.log(`brain proposal ${id} by ${me.email}`);
+  } catch (e) { /* bad type — ignore, stay on the page */ }
+  res.redirect('/coach/skip?saved=1');
+});
+
+// Propose a correction as a Brain example (view-only coaches use this;
+// full coaches keep the direct correction form above).
+app.post('/coach/skip/propose-correction', requireCoachAny, (req, res) => {
+  const me = realUser(req);
+  const hitter = (req.body.hitter_said || '').trim().slice(0, 500);
+  const wrong = (req.body.skip_said || '').trim().slice(0, 500);
+  const right = (req.body.should_say || '').trim().slice(0, 1000);
+  if (right) {
+    const title = (hitter || 'Correction').slice(0, 80);
+    const body = `Hitter: "${hitter || '(not specified)'}"\nWrong: "${wrong || '(not specified)'}"\nRight: "${right}"`;
+    brain.createProposal(db, { type: 'example', title, body, tags: 'correction', proposedBy: me.id });
+    pushToCoachesExcept(me.id, 'New Skip correction proposal', `${me.displayName} proposed a correction — tap to review.`, '/coach/skip');
+  }
+  res.redirect('/coach/skip?saved=1');
+});
+
+// Approve a proposal. When every coach has approved, the entry publishes
+// to Skip's Brain and the proposer gets a push.
+app.post('/coach/skip/proposals/:id/approve', requireCoachAny, (req, res) => {
+  const me = realUser(req);
+  const result = brain.approveProposal(db, Number(req.params.id), me.id);
+  if (result === 'live') {
+    const p = db.prepare('SELECT proposed_by, title FROM brain_proposals WHERE id = ?').get(Number(req.params.id));
+    if (p && p.proposed_by !== me.id) {
+      pushToUser(p.proposed_by, 'Proposal approved — live in Skip\u2019s Brain', `"${String(p.title).slice(0, 60)}" now teaches Skip.`, '/coach/skip');
+    }
+  }
+  res.redirect('/coach/skip');
+});
+
+// Reject a proposal (Bobby only). The proposer can revise and propose again.
+app.post('/coach/skip/proposals/:id/reject', requireCoach, (req, res) => {
+  brain.rejectProposal(db, Number(req.params.id));
+  res.redirect('/coach/skip');
 });
 
 // Coach chats with Skip directly (stored as the coach's own thread).

@@ -76,6 +76,7 @@ function layout({ title, user, tabs, body }) {
 ${drawer}
 ${tabbarHtml}
 ${user && user.viewAs ? `<div class="viewas-banner">Previewing as <strong>${esc(user.viewAsName)}</strong> — actions are disabled. <form method="post" action="/coach/view-as/exit" style="display:inline;margin:0"><button type="submit" class="viewas-exit">Exit preview</button></form></div>` : ''}
+${user && user.role === 'coach' && user.canEdit === false ? '<div class="viewonly-banner">View-only coach — you can look at everything, but changes are disabled.</div>' : ''}
 <main class="wrap">${body}</main>
 ${(() => {
   const chatTab = (tabs || []).find((t) => t.href === '/chat');
@@ -708,21 +709,23 @@ function chatPage(user, messages, chatEnabled) {
   });
 }
 
-function pendingApprovalCards(pending) {
+function pendingApprovalCards(pending, canEdit) {
   return (pending || [])
     .map(
       (p) => `<div class="card athlete-card">
         <div class="athlete-card-name">${esc(p.name)}</div>
         <div class="athlete-card-email">${esc(p.email)}</div>
         <div class="athlete-card-meta">signed up ${fmtDate(p.created_at)}</div>
-        <div style="display:flex;gap:8px;margin-top:10px">
+        ${canEdit
+          ? `<div style="display:flex;gap:8px;margin-top:10px">
           <form method="post" action="/coach/approve/${p.id}" style="flex:1;margin:0">
             <button type="submit" class="btn-primary" style="width:100%">Approve</button>
           </form>
           <form method="post" action="/coach/decline/${p.id}" style="flex:1;margin:0">
             <button type="submit" style="width:100%;padding:14px;border-radius:12px;border:1px solid #5a5a5a;background:transparent;color:#b0b0b0;font-size:16px;cursor:pointer">Decline</button>
           </form>
-        </div>
+        </div>`
+          : `<div class="hint-inline" style="margin-top:10px">Waiting for approval.</div>`}
       </div>`
     )
     .join('');
@@ -730,18 +733,21 @@ function pendingApprovalCards(pending) {
 
 function coachApprovalsPage(user, pending) {
   const n = (pending || []).length;
+  const canEdit = user.role === 'coach' && user.canEdit !== false;
   return layout({
     title: 'Approvals',
     user,
     tabs: coachTabs('approvals', user.approvalCount),
     body: `<h1 class="page-title">Approvals</h1>
-    <p class="hint">Every new account waits here until you approve it. Approved hitters can log in right away.</p>
-    ${n ? `<div class="athlete-grid">${pendingApprovalCards(pending)}</div>` : `<div class="card empty">Nobody waiting — you're all caught up.</div>`}`,
+    <p class="hint">${canEdit ? 'Every new account waits here until you approve it. Approved hitters can log in right away.' : 'Every new account waits here until it gets approved.'}</p>
+    ${n ? `<div class="athlete-grid">${pendingApprovalCards(pending, canEdit)}</div>` : `<div class="card empty">Nobody waiting — you're all caught up.</div>`}`,
   });
 }
 
 function coachDashboard(user, userStats, latest, pending, remotePrograms, library, opts) {
   const totalCheckins = userStats.reduce((s, u) => s + u.total, 0);
+  // View-only coaches (can_edit=0) see everything but change nothing.
+  const canEdit = user.role === 'coach' && user.canEdit !== false;
   const cards = userStats
     .map(
       (a) => `<div class="card athlete-card" data-search="${esc(`${a.name} ${a.email}`.toLowerCase())}">
@@ -768,7 +774,7 @@ function coachDashboard(user, userStats, latest, pending, remotePrograms, librar
     user,
     tabs: coachTabs('dashboard', user.approvalCount),
     body: `<h1 class="page-title">Skip Dashboard</h1>
-    ${!(opts && opts.pushOn) ? '<p><button type="button" class="btn-small" id="push-enable-btn">Turn on notifications</button> <span class="hint-inline">get a push when a hitter needs approval</span></p>' : ''}
+    ${canEdit && !(library && library.pushOn) ? '<p><button type="button" class="btn-small" id="push-enable-btn">Turn on notifications</button> <span class="hint-inline">get a push when a hitter needs approval</span></p>' : ''}
     <div class="stat-row">
       <div class="card stat"><div class="stat-num">${userStats.length}</div><div class="stat-label">hitters</div></div>
       <div class="card stat"><div class="stat-num">${totalCheckins}</div><div class="stat-label">check-ins</div></div>
@@ -778,11 +784,33 @@ function coachDashboard(user, userStats, latest, pending, remotePrograms, librar
     ${userStats.length ? `<input type="search" id="hitter-search" class="searchbar" placeholder="Search hitters…" autocomplete="off">` : ''}
     <div class="athlete-grid">${cards || '<div class="card empty">Nobody has signed up yet.</div>'}</div>
     <div class="card empty" id="hitter-no-match" hidden>No hitters match that search.</div>
-    ${remoteProgramsSection(remotePrograms || [])}
+    ${remoteProgramsSection(remotePrograms || [], canEdit)}
     ${librarySection(library || { cats: [], lastSync: '' })}
+    ${canEdit && library && library.coaches ? coachesSection(library.coaches, user.id) : ''}
     <h2 class="section-head">Latest check-ins</h2>
     ${feed}`,
   });
+}
+
+// Coaches with dashboard access — full access or view-only. Only a full
+// coach sees this section, and only they can flip someone's access.
+function coachesSection(coaches, selfId) {
+  const rows = (coaches || [])
+    .map((c) => {
+      const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || c.email;
+      const full = c.can_edit !== 0;
+      const pill = full ? '<span class="pill">Full access</span>' : '<span class="hint-inline">View only</span>';
+      const toggle =
+        c.id === selfId
+          ? '<span class="hint-inline">you</span>'
+          : `<form method="post" action="/coach/coaches/toggle" class="inline-form" style="margin:0"><input type="hidden" name="id" value="${c.id}"><button class="btn-small${full ? ' btn-quiet' : ''}" type="submit">${full ? 'Make view-only' : 'Give full access'}</button></form>`;
+      return `<div class="remote-row"><div><strong>${esc(name)}</strong><div class="hint-inline">${esc(c.email)}</div></div><div class="remote-actions">${pill}${toggle}</div></div>`;
+    })
+    .join('');
+  return `<h2 class="section-head">Coaches</h2>
+  <div class="card">
+    ${rows || '<div class="empty">Just you.</div>'}
+  </div>`;
 }
 
 // ---- Remote programs ----
@@ -1112,7 +1140,7 @@ function programEditPage(user, p) {
 }
 
 // Coach dashboard section: the remote roster and their programs.
-function remoteProgramsSection(list) {
+function remoteProgramsSection(list, canEdit) {
   const rows = list
     .map((r) => {
       const linked = r.user_email
@@ -1126,15 +1154,15 @@ function remoteProgramsSection(list) {
       const aliasLine = aliasNames.length
         ? `<div class="hint-inline">also: ${aliasNames.map((a) => esc(a)).join(', ')}</div>`
         : '';
-      return `<div class="remote-row">
-        <div><strong>${esc(r.athlete_name)}</strong><div class="hint-inline">${linked}${updated}</div>${aliasLine}
-          <form method="post" action="/coach/remote/alias" class="inline-form" style="margin-top:4px">
+      const aliasForm = canEdit
+        ? `<form method="post" action="/coach/remote/alias" class="inline-form" style="margin-top:4px">
             <input type="hidden" name="id" value="${r.id}">
             <input type="text" name="alias" placeholder="also known as" maxlength="80" class="input-sm" style="max-width:130px">
             <button class="btn btn-sm" type="submit">Add name</button>
-          </form>
-        </div>
-        <div class="remote-actions">
+          </form>`
+        : '';
+      const actions = canEdit
+        ? `<div class="remote-actions">
           <a class="btn btn-sm" href="/coach/program/${r.id}/edit">Edit program</a>
           ${
             r.user_email
@@ -1142,17 +1170,26 @@ function remoteProgramsSection(list) {
               : `<form method="post" action="/coach/remote/link" class="inline-form"><input type="email" name="email" placeholder="hitter email" required class="input-sm"><input type="hidden" name="id" value="${r.id}"><button class="btn btn-sm" type="submit">Link</button></form>`
           }
           <form method="post" action="/coach/remote/remove" class="inline-form" data-confirm-remove="${esc(r.athlete_name)}"><input type="hidden" name="id" value="${r.id}"><button class="btn btn-sm btn-danger" type="submit">Remove</button></form>
+        </div>`
+        : '';
+      return `<div class="remote-row">
+        <div><strong>${esc(r.athlete_name)}</strong><div class="hint-inline">${linked}${updated}</div>${aliasLine}
+          ${aliasForm}
         </div>
+        ${actions}
       </div>`;
     })
     .join('');
+  const addForm = canEdit
+    ? `<form method="post" action="/coach/remote/add" class="inline-form remote-add">
+      <input type="text" name="name" placeholder="Full name" required maxlength="80" class="input-sm">
+      <button class="btn btn-sm" type="submit">Add remote hitter</button>
+    </form>`
+    : '';
   return `<h2 class="section-head">Remote programs</h2>
   <div class="card">
     ${rows || '<div class="empty">No remote hitters yet.</div>'}
-    <form method="post" action="/coach/remote/add" class="inline-form remote-add">
-      <input type="text" name="name" placeholder="Full name" required maxlength="80" class="input-sm">
-      <button class="btn btn-sm" type="submit">Add remote hitter</button>
-    </form>
+    ${addForm}
   </div>`;
 }
 
@@ -1223,6 +1260,7 @@ function librarySection(library) {
 }
 
 function coachLibraryPage(user, cats, activeCat, videos, playing) {
+  const canEdit = user.role === 'coach' && user.canEdit !== false;
   const pills = cats
     .map(
       (c) =>
@@ -1240,19 +1278,19 @@ function coachLibraryPage(user, cats, activeCat, videos, playing) {
           ${renamed ? `<div class="hint-inline">Drive name: ${esc(v.name)}</div>` : ''}
           <div class="lib-actions">
             <a class="btn-small" href="/coach/library?cat=${encodeURIComponent(activeCat)}&play=${v.id}">Play</a>
-            <form method="post" action="/coach/library/toggle" style="display:inline">
+            ${canEdit ? `<form method="post" action="/coach/library/toggle" style="display:inline">
               <input type="hidden" name="id" value="${v.id}">
               <input type="hidden" name="cat" value="${esc(activeCat)}">
               <button class="btn-small${v.hidden ? '' : ' btn-quiet'}" type="submit">${v.hidden ? 'Unhide' : 'Hide'}</button>
-            </form>
+            </form>` : ''}
           </div>
         </div>
-        <form method="post" action="/coach/library/rename" class="lib-rename">
+        ${canEdit ? `<form method="post" action="/coach/library/rename" class="lib-rename">
           <input type="hidden" name="id" value="${v.id}">
           <input type="hidden" name="cat" value="${esc(activeCat)}">
           <input type="text" name="custom_name" value="${esc(v.custom_name || '')}" placeholder="Rename\u2026" maxlength="200">
           <button class="btn-small" type="submit">Save</button>
-        </form>
+        </form>` : ''}
       </div>`;
     })
     .join('');
@@ -1275,6 +1313,7 @@ function coachLibraryPage(user, cats, activeCat, videos, playing) {
 
 function coachUser(user, name, checkins, whatWorks, thread, email, memories, routine) {
   const skipImg = `<img src="/skip-avatar.webp" class="skip-avatar" alt="Skip">`;
+  const canEdit = user.role === 'coach' && user.canEdit !== false;
   const convo =
     thread && thread.length
       ? `<h2 class="section-head">Talk to Skip history</h2>
@@ -1294,11 +1333,11 @@ function coachUser(user, name, checkins, whatWorks, thread, email, memories, rou
     body: `<h1 class="page-title">${esc(name)}</h1>
     <p><a href="/coach">← Back to dashboard</a></p>
     ${routineReadonly(routine)}
-    ${memorySection(email, memories)}
+    ${memorySection(email, memories, canEdit)}
     ${whatWorksSection(whatWorks || {}, { readOnly: true })}
     ${convo}
     ${checkins.length ? checkins.map(checkinCard).join('') : '<div class="card empty">No check-ins yet.</div>'}
-    <p style="margin-top:28px;text-align:center"><a href="/coach/user/${encodeURIComponent(email)}/delete" style="color:#8a8a8a;font-size:14px">Delete hitter from the platform</a></p>`,
+    ${canEdit ? `<p style="margin-top:28px;text-align:center"><a href="/coach/user/${encodeURIComponent(email)}/delete" style="color:#8a8a8a;font-size:14px">Delete hitter from the platform</a></p>` : ''}`,
   });
 }
 
@@ -1324,24 +1363,27 @@ function routineReadonly(drills) {
 
 // What Skip has learned about this hitter over time — Bobby's durable notes,
 // injected into every Skip chat with this hitter. This is how Skip learns hitters.
-function memorySection(email, memories) {
+function memorySection(email, memories, canEdit) {
   const items = (memories || [])
     .map(
       (m) => `<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
         <div>${esc(m.fact)}</div>
-        <form method="post" action="/coach/user/${encodeURIComponent(email)}/memory/${m.id}/delete" style="margin:0">
+        ${canEdit ? `<form method="post" action="/coach/user/${encodeURIComponent(email)}/memory/${m.id}/delete" style="margin:0">
           <button type="submit" class="btn-primary" style="padding:4px 10px;font-size:12px;background:#5a5a5a">Remove</button>
-        </form>
+        </form>` : ''}
       </div>`
     )
     .join('');
+  const addForm = canEdit
+    ? `<div class="card"><form method="post" action="/coach/user/${encodeURIComponent(email)}/memory" class="form">
+    <label>Teach Skip something about this hitter<input name="fact" maxlength="500" required placeholder="e.g. When he's rolling over, the cue 'stay inside it' in his own words fixed it — use that before any mechanical cue."></label>
+    <button type="submit" class="btn-primary">Save to Skip's memory</button>
+  </form></div>`
+    : '';
   return `<h2 class="section-head">What Skip has learned about this hitter</h2>
   <p class="hint">Durable memory — Skip reads this before every chat with this hitter. His best-day patterns, cues that work for him, what fixed his slumps. This is how he learns hitters over time.</p>
   ${items || '<div class="card empty">Nothing saved yet.</div>'}
-  <div class="card"><form method="post" action="/coach/user/${encodeURIComponent(email)}/memory" class="form">
-    <label>Teach Skip something about this hitter<input name="fact" maxlength="500" required placeholder="e.g. When he's rolling over, the cue 'stay inside it' in his own words fixed it — use that before any mechanical cue."></label>
-    <button type="submit" class="btn-primary">Save to Skip's memory</button>
-  </form></div>`;
+  ${addForm}`;
 }
 
 // Confirm page before permanently deleting a hitter.
@@ -1363,9 +1405,43 @@ function coachDeleteHitterPage(user, hitter, name, checkinCount) {
 }
 
 // ---- Train Skip: Bobby's HQ for training Skip and reviewing his chats ----
-function coachSkipPage(user, entries, hitters, thread, chatEnabled, saved) {
+// Proposals waiting on dual approval — shown to every coach. Nothing here
+// enters Skip's Brain until every coach has approved it.
+function proposalSection(proposals, user, canEdit) {
+  const list = proposals || [];
+  if (!list.length) return '';
+  const cards = list
+    .map((p) => {
+      const approvedIds = new Set((p.approvals || []).map((a) => a.coach_id));
+      const mine = approvedIds.has(user.id);
+      const approveBtn = mine
+        ? '<span class="hint-inline">You approved ✓</span>'
+        : `<form method="post" action="/coach/skip/proposals/${p.id}/approve" style="margin:0"><button class="btn-small" type="submit">Approve</button></form>`;
+      const rejectBtn = canEdit
+        ? `<form method="post" action="/coach/skip/proposals/${p.id}/reject" style="margin:0"><button class="btn-small btn-quiet" type="submit">Reject</button></form>`
+        : '';
+      const who = (p.approvals || []).map((a) => esc(a.name)).join(', ') || 'nobody yet';
+      return `<div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
+          <strong>${esc(p.title)}</strong><span class="pill">${esc(p.type)}</span>
+        </div>
+        <div class="hint">proposed by ${esc(p.proposer_name)} · ${fmtDate(p.created_at)}</div>
+        <div class="hint" style="white-space:pre-wrap;margin:8px 0">${esc(p.body)}</div>
+        ${p.tags ? `<div class="hint">tags: ${esc(p.tags)}</div>` : ''}
+        <div class="hint-inline" style="margin:8px 0">Approved by: ${who} — goes live when every coach has approved.</div>
+        <div style="display:flex;gap:8px;margin-top:8px;align-items:center">${approveBtn}${rejectBtn}</div>
+      </div>`;
+    })
+    .join('');
+  return `<h2 class="section-head">Proposals waiting on approval</h2>
+  <p class="hint">Nothing here enters Skip's Brain until <strong>every coach</strong> approves it.</p>
+  ${cards}`;
+}
+
+function coachSkipPage(user, entries, hitters, thread, chatEnabled, saved, proposals) {
   const brain = require('./brain');
   const skipImg = `<img src="/skip-avatar.webp" class="skip-avatar" alt="Skip">`;
+  const canEdit = user.role === 'coach' && user.canEdit !== false;
   const msgs = (thread || [])
     .map(
       (m) =>
@@ -1408,21 +1484,21 @@ function coachSkipPage(user, entries, hitters, thread, chatEnabled, saved) {
           (e) => `<div class="card" style="${e.active ? '' : 'opacity:0.55'}">
         <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
           <strong>${esc(e.title)}${e.active ? '' : ' (archived)'}</strong>
-          <form method="post" action="/coach/skip/brain/${e.id}/archive" style="margin:0">
+          ${canEdit ? `<form method="post" action="/coach/skip/brain/${e.id}/archive" style="margin:0">
             <input type="hidden" name="active" value="${e.active ? '0' : '1'}">
             <button type="submit" class="btn-primary" style="padding:4px 10px;font-size:12px;background:${e.active ? '#5a5a5a' : '#1f7a33'}">${e.active ? 'Archive' : 'Restore'}</button>
-          </form>
+          </form>` : ''}
         </div>
         <div class="hint" style="white-space:pre-wrap;margin:8px 0">${esc(e.body)}</div>
         ${e.tags ? `<div class="hint">tags: ${esc(e.tags)}</div>` : ''}
-        <details style="margin-top:8px"><summary class="hint" style="cursor:pointer">Edit</summary>
+        ${canEdit ? `<details style="margin-top:8px"><summary class="hint" style="cursor:pointer">Edit</summary>
           <form method="post" action="/coach/skip/brain/${e.id}" class="form" style="margin-top:8px">
             <label>Title<input name="title" value="${esc(e.title)}" maxlength="120" required></label>
             <label>Body<textarea name="body" rows="3" maxlength="2000" required>${esc(e.body)}</textarea></label>
             <label>Tags (space-separated, used for matching)<input name="tags" value="${esc(e.tags)}" maxlength="200"></label>
             <button type="submit" class="btn-primary" style="padding:6px 12px;font-size:13px">Save changes</button>
           </form>
-        </details>
+        </details>` : ''}
       </div>`
         )
         .join('');
@@ -1441,9 +1517,12 @@ function coachSkipPage(user, entries, hitters, thread, chatEnabled, saved) {
     body: `<h1 class="page-title">Train Skip</h1>
     <p class="hint">Talk to Skip directly. To make training <strong>stick</strong>, put it in his Brain below — small discrete entries he pulls from when they're relevant. That's what fixed the "more training = worse Skip" problem: no more one giant note.</p>
     ${saved ? '<div class="notice">Brain updated — Skip is using it with every hitter now.</div>' : ''}
+    ${proposalSection(proposals, user, canEdit)}
     <h2 class="section-head">Talk to Skip</h2>
     ${
-      chatEnabled
+      !canEdit
+        ? `<div class="card empty">You can read Skip's Brain below and propose additions — a proposal goes live once every coach approves it.</div>`
+        : chatEnabled
         ? `<div id="chat-log" class="chat-log">${
             msgs ||
             `<div class="msg msg-skip">${skipImg}<div class="msg-bubble">Coach — what do you want me doing different with your hitters?</div></div>`
@@ -1454,7 +1533,7 @@ function coachSkipPage(user, entries, hitters, thread, chatEnabled, saved) {
         </form>`
         : `<div class="card empty">Skip's chat isn't switched on yet — check back soon.</div>`
     }
-    <h2 class="section-head">Log a correction</h2>
+    ${canEdit ? `<h2 class="section-head">Log a correction</h2>
     <div class="card">
       <p class="hint">Skip got something wrong with a hitter? Log it here — it becomes an <strong>example</strong> in his Brain so the fix sticks. This is the fastest way to train him now.</p>
       <form method="post" action="/coach/skip/correction" class="form">
@@ -1463,9 +1542,18 @@ function coachSkipPage(user, entries, hitters, thread, chatEnabled, saved) {
         <label>What he should have said<textarea name="should_say" rows="3" maxlength="1000" required placeholder="e.g. That's the bat wrapping around your head at launch — think 'swing down the line'..."></textarea></label>
         <button type="submit" class="btn-primary">Save correction</button>
       </form>
-    </div>
-    <h2 class="section-head">Skip's Brain</h2>
+    </div>` : `<h2 class="section-head">Propose a correction</h2>
     <div class="card">
+      <p class="hint">Skip got something wrong with a hitter? Propose the fix — it becomes an <strong>example</strong> in his Brain once every coach approves it.</p>
+      <form method="post" action="/coach/skip/propose-correction" class="form">
+        <label>What the hitter said<input name="hitter_said" maxlength="500" placeholder="e.g. I'm rolling over everything"></label>
+        <label>What Skip said (wrong)<input name="skip_said" maxlength="500" placeholder="e.g. Widen your stance"></label>
+        <label>What he should have said<textarea name="should_say" rows="3" maxlength="1000" required placeholder="e.g. That's the bat wrapping around your head at launch — think 'swing down the line'..."></textarea></label>
+        <button type="submit" class="btn-primary">Propose correction</button>
+      </form>
+    </div>`}
+    <h2 class="section-head">Skip's Brain</h2>
+    ${canEdit ? `<div class="card">
       <p class="hint"><strong>Rules</strong> always apply. Everything else is pulled in only when it matches what the hitter is talking about. Archive anything stale instead of deleting — you can restore it.</p>
       <form method="post" action="/coach/skip/brain" class="form">
         <label>Type<select name="type">${typeOptions}</select></label>
@@ -1474,7 +1562,16 @@ function coachSkipPage(user, entries, hitters, thread, chatEnabled, saved) {
         <label>Tags (space-separated, used for matching)<input name="tags" maxlength="200" placeholder="e.g. mechanics bat-drag"></label>
         <button type="submit" class="btn-primary">Add to Brain</button>
       </form>
-    </div>
+    </div>` : `<div class="card">
+      <p class="hint"><strong>Rules</strong> always apply. Everything else is pulled in only when it matches what the hitter is talking about. Propose an addition — it goes live once every coach approves.</p>
+      <form method="post" action="/coach/skip/propose" class="form">
+        <label>Type<select name="type">${typeOptions}</select></label>
+        <label>Title<input name="title" maxlength="120" required placeholder="e.g. Bat drag fix"></label>
+        <label>Body<textarea name="body" rows="3" maxlength="2000" required placeholder="The cue, read, or rule — keep it to a sentence or two."></textarea></label>
+        <label>Tags (space-separated, used for matching)<input name="tags" maxlength="200" placeholder="e.g. mechanics bat-drag"></label>
+        <button type="submit" class="btn-primary">Propose to Brain</button>
+      </form>
+    </div>`}
     ${brainSections}
     <h2 class="section-head">His conversations</h2>
     <div class="athlete-grid">${convos}</div>

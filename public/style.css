@@ -555,6 +555,7 @@ body.drawer-open #drawer { transform: none; }
 
 /* ---- View-as-hitter preview banner ---- */
 .viewas-banner { background: #3a2b00; color: #ffd970; text-align: center; padding: 10px 12px; font-size: 14px; border-bottom: 1px solid #6b5310; }
+.viewonly-banner { background: #1c2b3a; color: #9ec7e8; text-align: center; padding: 10px 12px; font-size: 14px; border-bottom: 1px solid #2e4a63; }
 .viewas-exit { background: #ffd970; color: #111; border: none; border-radius: 6px; padding: 4px 12px; font-weight: 700; cursor: pointer; margin-left: 8px; }
 
 /* ---- Program page navigation ---- */

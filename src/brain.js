@@ -292,6 +292,81 @@ function setEntryActive(db, id, active) {
 }
 
 // ---------------------------------------------------------------------------
+// Brain proposals: dual-approval queue. Any coach can propose; the entry goes
+// live only after EVERY coach account has approved it. The proposer
+// auto-approves at submit time. Publishing copies the proposal into
+// skip_library as an active entry and marks the proposal live.
+// ---------------------------------------------------------------------------
+function listProposals(db) {
+  return db
+    .prepare(
+      `SELECT p.id, p.type, p.title, p.body, p.tags, p.proposed_by, p.created_at,
+              COALESCE(u.first_name || ' ' || u.last_name, '') AS proposer_name, u.email AS proposer_email
+       FROM brain_proposals p JOIN users u ON u.id = p.proposed_by
+       WHERE p.status = 'pending' ORDER BY p.created_at ASC`
+    )
+    .all()
+    .map((p) => ({
+      ...p,
+      proposer_name: (p.proposer_name || '').trim() || p.proposer_email,
+      approvals: db
+        .prepare(
+          `SELECT a.coach_id, COALESCE(u.first_name || ' ' || u.last_name, '') AS name, u.email
+           FROM proposal_approvals a JOIN users u ON u.id = a.coach_id
+           WHERE a.proposal_id = ?`
+        )
+        .all(p.id)
+        .map((a) => ({ ...a, name: (a.name || '').trim() || a.email })),
+    }));
+}
+
+function createProposal(db, { type, title, body, tags, proposedBy }) {
+  if (!LIB_TYPES.includes(type)) throw new Error('bad_type');
+  const now = new Date().toISOString();
+  const r = db
+    .prepare(
+      'INSERT INTO brain_proposals (type, title, body, tags, proposed_by, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+    )
+    .run(
+      type,
+      String(title || '').trim().slice(0, 120),
+      String(body || '').trim().slice(0, 2000),
+      String(tags || '').trim().slice(0, 200),
+      proposedBy,
+      now
+    );
+  // Proposer counts as the first approval.
+  db.prepare(
+    'INSERT OR IGNORE INTO proposal_approvals (proposal_id, coach_id, created_at) VALUES (?, ?, ?)'
+  ).run(r.lastInsertRowid, proposedBy, now);
+  return r.lastInsertRowid;
+}
+
+// Returns 'live' if this approval published the entry, 'pending' if still
+// waiting on other coaches, or null if the proposal wasn't pending.
+function approveProposal(db, proposalId, coachId) {
+  const p = db.prepare('SELECT id, status, type, title, body, tags FROM brain_proposals WHERE id = ?').get(proposalId);
+  if (!p || p.status !== 'pending') return null;
+  db.prepare(
+    'INSERT OR IGNORE INTO proposal_approvals (proposal_id, coach_id, created_at) VALUES (?, ?, ?)'
+  ).run(proposalId, coachId, new Date().toISOString());
+  const approvals = db.prepare('SELECT COUNT(*) AS n FROM proposal_approvals WHERE proposal_id = ?').get(proposalId).n;
+  const coaches = db.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'coach'").get().n;
+  if (coaches > 0 && approvals >= coaches) {
+    addEntry(db, { type: p.type, title: p.title, body: p.body, tags: p.tags });
+    db.prepare("UPDATE brain_proposals SET status = 'live', decided_at = ? WHERE id = ?")
+      .run(new Date().toISOString(), proposalId);
+    return 'live';
+  }
+  return 'pending';
+}
+
+function rejectProposal(db, proposalId) {
+  db.prepare("UPDATE brain_proposals SET status = 'rejected', decided_at = ? WHERE id = ? AND status = 'pending'")
+    .run(new Date().toISOString(), proposalId);
+}
+
+// ---------------------------------------------------------------------------
 // Per-hitter durable memory: what Skip has learned about a hitter over time.
 // Bobby writes these on the hitter's coach page; they inject into every chat.
 // ---------------------------------------------------------------------------
@@ -334,6 +409,10 @@ module.exports = {
   addEntry,
   updateEntry,
   setEntryActive,
+  listProposals,
+  createProposal,
+  approveProposal,
+  rejectProposal,
   listMemory,
   addMemory,
   deleteMemory,

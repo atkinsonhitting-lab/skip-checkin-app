@@ -38,6 +38,37 @@ for (const col of ['first_name', 'last_name']) {
   }
 }
 
+// View-only coach access (Sep 2026): can_edit=0 means the coach can look at
+// everything but change nothing. Defaults to 1 so Bobby keeps full access.
+{
+  const cols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+  if (!cols.includes('can_edit')) {
+    db.exec('ALTER TABLE users ADD COLUMN can_edit INTEGER NOT NULL DEFAULT 1;');
+  }
+}
+
+// Brain proposals (Sep 2026): Cam helps build Skip by proposing Brain entries,
+// but nothing goes live until EVERY coach has approved it. The proposer
+// auto-approves on submit; the other coach(es) approve from the Train Skip
+// page. Publishing copies the proposal into skip_library as an active entry.
+db.exec(`CREATE TABLE IF NOT EXISTS brain_proposals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  type TEXT NOT NULL DEFAULT 'rule',
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  tags TEXT NOT NULL DEFAULT '',
+  proposed_by INTEGER NOT NULL REFERENCES users(id),
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL,
+  decided_at TEXT
+);
+CREATE TABLE IF NOT EXISTS proposal_approvals (
+  proposal_id INTEGER NOT NULL REFERENCES brain_proposals(id),
+  coach_id INTEGER NOT NULL REFERENCES users(id),
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (proposal_id, coach_id)
+);`);
+
 // Check-ins: the full Skip flow — environment, drills done, Feel/Confidence/
 // Focus (1-10), instant session score + tier, journal fields, and Skip's
 // journal rating (posted back by the assistant via the API).
