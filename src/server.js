@@ -412,6 +412,10 @@ app.get('/register', (req, res) => {
   res.send(views.registerPage(req.query.error));
 });
 
+// Public legal pages (linked from signup).
+app.get('/terms', (req, res) => res.send(views.termsPage()));
+app.get('/privacy', (req, res) => res.send(views.privacyPage()));
+
 app.post('/register', (req, res) => {
   const ip = req.ip;
   if (!attemptAllowed(ip)) {
@@ -432,6 +436,23 @@ app.post('/register', (req, res) => {
   const dob = String(req.body.date_of_birth || '').trim();
   if (!validDob(dob)) {
     return fail('Enter your date of birth.');
+  }
+  // User agreements (Sep 2026): everyone must accept the Terms + Privacy Policy.
+  const agreed = req.body.agree_terms === '1' || req.body.agree_terms === 'on';
+  if (!agreed) {
+    return fail('Please agree to the Terms of Service and Privacy Policy to create an account.');
+  }
+  // Under 18: a parent/guardian must accept on the player's behalf.
+  const age = ageOn(dob);
+  const parentName = (req.body.parent_name || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+  const parentEmail = (req.body.parent_email || '').trim().toLowerCase();
+  if (age !== null && age < 18) {
+    if (!parentName) {
+      return fail('A parent or guardian\u2019s name is required for players under 18.');
+    }
+    if (!validEmail(parentEmail)) {
+      return fail('A parent or guardian\u2019s valid email is required for players under 18.');
+    }
   }
   const playerType = validPlayerType(req.body.player_type) ? req.body.player_type : 'hitter';
   // Organization code is optional: only players joining through an organization
@@ -464,9 +485,9 @@ app.post('/register', (req, res) => {
   const athleteName = `${firstName} ${lastName}`;
   const info = db
     .prepare(
-      'INSERT INTO users (email, password_hash, role, athlete_name, first_name, last_name, created_at, status, organization_id, team_id, date_of_birth, player_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO users (email, password_hash, role, athlete_name, first_name, last_name, created_at, status, organization_id, team_id, date_of_birth, player_type, accepted_terms_at, terms_version, parent_name, parent_email) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     )
-    .run(email, hash, 'athlete', athleteName, firstName, lastName, new Date().toISOString(), 'pending', organizationId, teamId, dob, playerType);
+    .run(email, hash, 'athlete', athleteName, firstName, lastName, new Date().toISOString(), 'pending', organizationId, teamId, dob, playerType, new Date().toISOString(), '1', parentName || null, parentEmail || null);
   linkRemoteProgram(info.lastInsertRowid, athleteName);
   // Tell Bobby so he can approve (or decline) the new hitter.
   notifyCoachOfSignup(req, email, athleteName, organizationId ? getOrganization(organizationId).name : null).catch((e) =>

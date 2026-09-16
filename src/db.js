@@ -156,6 +156,14 @@ db.exec(`CREATE TABLE IF NOT EXISTS teams (
   }
 }
 
+// User agreements (Sep 2026): Terms of Service + Privacy Policy acceptance at
+// signup. Under-18 signups also record a parent/guardian name + email.
+// Existing users are grandfathered — all columns are nullable.
+for (const col of ['accepted_terms_at', 'terms_version', 'parent_name', 'parent_email']) {
+  const ucols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+  if (!ucols.includes(col)) db.exec(`ALTER TABLE users ADD COLUMN ${col} TEXT;`);
+}
+
 // Brain proposals (Sep 2026): Cam helps build Skip by proposing Brain entries,
 // but nothing goes live until EVERY coach has approved it. The proposer
 // auto-approves on submit; the other coach(es) approve from the Train Skip

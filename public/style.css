@@ -660,3 +660,11 @@ body.has-tabbar .chat-form { bottom: calc(62px + env(safe-area-inset-bottom)); }
   .fin-trow { grid-template-columns: 96px 1fr auto; }
   .fin-trow > :nth-child(3) { display: none; }
 }
+
+/* User agreements (Sep 2026): signup checkbox, parent fields, legal pages. */
+.agree-row { display: flex !important; gap: 10px; align-items: flex-start; font-weight: 400 !important; font-size: 14px; }
+.agree-row input[type="checkbox"] { width: 18px; height: 18px; margin-top: 2px; flex-shrink: 0; }
+#parent-fields { border: 1px solid var(--border, #ddd); border-radius: 10px; padding: 4px 14px 10px; margin: 12px 0; }
+.legal-card { max-width: 720px; margin: 24px auto; }
+.legal-h { font-size: 17px; margin: 22px 0 6px; }
+.legal-p { font-size: 14.5px; line-height: 1.55; margin: 0 0 6px; color: inherit; }

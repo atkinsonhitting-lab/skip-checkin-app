@@ -215,8 +215,44 @@ function registerPage(error) {
         <label>Organization or team code <span class="hint-inline">(optional — only if your coach gave you one)</span>
           <input type="text" name="organization_code" autocomplete="off" maxlength="20" style="text-transform:uppercase">
         </label>
+        <div id="parent-fields" hidden>
+          <p class="hint"><strong>Under 18?</strong> A parent or guardian has to accept the terms for you — have them fill this in.</p>
+          <label>Parent/guardian full name
+            <input type="text" name="parent_name" autocomplete="off" maxlength="80">
+          </label>
+          <label>Parent/guardian email
+            <input type="email" name="parent_email" autocomplete="email" maxlength="120">
+          </label>
+        </div>
+        <label class="agree-row">
+          <input type="checkbox" name="agree_terms" value="1" required>
+          <span>I agree to the <a href="/terms" target="_blank" rel="noopener">Terms of Service</a> and <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</span>
+        </label>
         <button type="submit" class="btn-primary">Create account</button>
       </form>
+      <script>
+      (function () {
+        var dob = document.querySelector('input[name="date_of_birth"]');
+        var box = document.getElementById('parent-fields');
+        function isUnder18() {
+          if (!dob.value) return false;
+          var d = new Date(dob.value + 'T12:00:00');
+          if (isNaN(d.getTime())) return false;
+          var now = new Date(), age = now.getFullYear() - d.getFullYear();
+          var m = now.getMonth() - d.getMonth();
+          if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age--;
+          return age < 18;
+        }
+        function sync() {
+          var u = isUnder18();
+          box.hidden = !u;
+          box.querySelectorAll('input').forEach(function (i) { i.required = u; });
+        }
+        dob.addEventListener('change', sync);
+        dob.addEventListener('input', sync);
+        sync();
+      })();
+      </script>
       <p class="hint" style="text-align:center">Already have one? <a href="/login">Log in</a>.</p>
     </div>`,
   });
@@ -235,6 +271,74 @@ function pendingPage() {
       <p class="hint" style="text-align:center"><a href="/login">Back to log in</a></p>
     </div>`,
   });
+}
+
+function legalPage(title, sections) {
+  const body = sections
+    .map(([h, p]) => `<h2 class="legal-h">${esc(h)}</h2><p class="legal-p">${p}</p>`)
+    .join('');
+  return layout({
+    title,
+    user: null,
+    tabs: [],
+    body: `<div class="card legal-card">
+      <h1 class="page-title">${esc(title)}</h1>
+      <p class="hint">Version 1.0 — September 2026 · <a href="/register">Back to sign up</a></p>
+      ${body}
+    </div>`,
+  });
+}
+
+function termsPage() {
+  return legalPage('Terms of Service', [
+    ['What Diamond Daily is',
+      'Diamond Daily is a daily development platform for baseball players — hitters, pitchers, and two-way players. Players log their training sessions, reflect on what happened, and build a history of their development. An AI coaching assistant called Skip can talk players through their training using their own logged history. Coaches get dashboards showing engagement, check-ins, and trends across players, teams, and organizations. Diamond Daily is operated by Atko Enterprises, Inc., an Illinois company.'],
+    ['Eligibility',
+      'You must be at least 13 years old to use Diamond Daily. If you are under 18, a parent or guardian must accept these terms on your behalf when you sign up.'],
+    ['Parent / guardian consent',
+      'For players under 18, we require a parent or guardian\u2019s full name and email address at signup, and the parent or guardian accepts these terms for the player. For children under 13, we require verifiable parental consent before an account is created — contact us at <a href="mailto:diamonddailyapp@gmail.com">diamonddailyapp@gmail.com</a> to arrange it.'],
+    ['Your account',
+      'Every new account is reviewed and must be approved before use. You are responsible for keeping your password private and for activity on your account. One account per person.'],
+    ['Acceptable use',
+      'Use Diamond Daily for your own training and development. Don\u2019t try to break, overload, or misuse the service, don\u2019t access other people\u2019s accounts, and don\u2019t post anything abusive or unlawful. We may suspend or remove accounts that misuse the service.'],
+    ['Skip is an AI assistant, not a coach',
+      'Skip is an AI coaching assistant. It is not a professional or certified coach, and nothing in the app — from Skip or otherwise — is medical, health, or professional advice. Training guidance is general information based on what you log. Use it at your own risk, and talk to a qualified professional about injuries, pain, or health concerns.'],
+    ['Your content',
+      'You own what you write in your check-ins, notes, and messages. By using the service you allow us to store and display that content to you and to your approved coaches as part of the service. Diamond Daily\u2019s branding, software, and design belong to Atko Enterprises, Inc.'],
+    ['Free during testing',
+      'Diamond Daily is free while it is being tested. There is no paywall and no charge. Paid subscription plans may be introduced in the future; if that happens, we will present the subscription terms before anything is charged and continued use will be governed by those terms.'],
+    ['Limitation of liability',
+      'To the maximum extent permitted by law, Atko Enterprises, Inc. is not liable for indirect or consequential damages arising from your use of the service. The service is provided \u201cas is\u201d without warranties of any kind.'],
+    ['Changes to these terms',
+      'We may update these terms as the service evolves. We will note the new version date here, and for material changes we will notify users in the app. Continued use after changes take effect means you accept the updated terms.'],
+    ['Governing law & contact',
+      'These terms are governed by the laws of the State of Illinois. Questions about these terms: <a href="mailto:diamonddailyapp@gmail.com">diamonddailyapp@gmail.com</a>.'],
+  ]);
+}
+
+function privacyPage() {
+  return legalPage('Privacy Policy', [
+    ['What we collect',
+      'On every player we collect: your name, email address, date of birth, player type (hitter, pitcher, or two-way), and your password (stored securely hashed — never in plain text). We also store everything you put into the app: every check-in (session scores, session notes, what worked, struggles, pitch counts and other training details), your conversations with Skip, your notebook entries, your mental game keys, push notification tokens, and login records. On coaches we collect name, email address, and activity in the app. On organizations we collect the organization name, roster, and deal/payment terms.'],
+    ['Why we collect it',
+      'To run the service: create and protect accounts, keep your check-in history, generate coaching insights, power coach dashboards, and review new signups before approval.'],
+    ['How it is used',
+      'Your entries are shown to you and to your approved coaches — that is the core of the service. We use aggregated, de-identified information to improve the app. We do not sell your personal information to anyone.'],
+    ['Who can see your data',
+      'You, your approved coaches (including organization and team coaches for players on their roster), and the operators of Diamond Daily for support and safety purposes. Service providers that host our infrastructure may process data on our behalf and are not permitted to use it for their own purposes. We disclose information if required by law.'],
+    ['Children\u2019s privacy',
+      'Diamond Daily is for users 13 and older. If you are under 18, a parent or guardian must accept these terms and this policy on your behalf at signup. For children under 13, we require verifiable parental consent before collecting any personal information, consistent with the Children\u2019s Online Privacy Protection Act (COPPA). Parents may contact us at any time to review, correct, or delete their child\u2019s information.'],
+    ['Data retention',
+      'We keep your information for as long as your account is active and as needed to run the service. If you delete your account, we remove your personal information and entries; backup copies are purged on a rolling basis.'],
+    ['Security',
+      'We use reasonable technical and organizational safeguards to protect your information — including hashed passwords, encrypted connections, and approval-gated accounts. No system is perfectly secure, so we cannot guarantee absolute security.'],
+    ['Your rights',
+      'You (or your parent/guardian, for players under 18) can ask us to show, correct, or delete your personal information at any time by emailing <a href="mailto:diamonddailyapp@gmail.com">diamonddailyapp@gmail.com</a>. We will respond to legitimate requests promptly.'],
+    ['Changes to this policy',
+      'We may update this policy as the service evolves. We will note the new version date here and notify users of material changes in the app.'],
+    ['Contact',
+      'Questions about privacy: <a href="mailto:diamonddailyapp@gmail.com">diamonddailyapp@gmail.com</a> — Atko Enterprises, Inc., Illinois.'],
+  ]);
 }
 
 function userHome(user, extras) {
@@ -2402,6 +2506,8 @@ module.exports = {
   loginPage,
   registerPage,
   pendingPage,
+  termsPage,
+  privacyPage,
   userHome,
   checkinForm,
   pitchingCheckinForm,
