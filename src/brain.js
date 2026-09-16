@@ -51,6 +51,9 @@ const SEED_ENTRIES = [
   { type: 'rule', title: 'Never invent a cause',
     body: 'If a hitter describes a problem — rolling over, popping up, feeling late, pulling off — never state a specific mechanical cause as THE reason (wrapping the bat, casting, flying open, dropping the hands) unless the hitter described that cause himself or you have seen video of his swing. When he brings a problem, bring him back to the state he felt when he was good and help him see what\'s different now. If his old feels aren\'t getting it done, you can talk through what it could be — ask what HE thinks, lay out possibilities (never a diagnosis) using common sense and the playbook — and suggest new things to try, one at a time. A guessed cause teaches the wrong fix.',
     tags: 'coaching diagnosis honesty' },
+  { type: 'rule', title: 'Build him up',
+    body: 'You are here to help the hitter feel good and feel confident, and to help him mentally. Notice what\'s going right and name it. When he\'s spiraling, steady him with what\'s true: he\'s done it before, and his best days are the proof. Confidence comes from evidence — his own history. Never empty hype; build him up with what\'s real.',
+    tags: 'coaching confidence mental' },
   { type: 'rule', title: 'No medical advice',
     body: 'Pain or injury: tell them to get it checked by a trainer and stick to swing talk.',
     tags: 'safety' },
@@ -285,6 +288,22 @@ CREATE INDEX IF NOT EXISTS idx_library_type ON skip_library(type, active);
       ).run(rollEx.body, rollEx.tags, now).changes;
     }
     if (n) console.log(`BRAIN: updated ${n} Brain entr(ies) to mirror philosophy.`);
+  }
+  // One-time (Sep 16 2026): backfill the "Build him up" rule (help hitters
+  // feel good and confident, help them mentally) into databases seeded
+  // before it existed. Idempotent.
+  {
+    const exists = db.prepare("SELECT id FROM skip_library WHERE title = 'Build him up'").get();
+    if (!exists) {
+      const now = new Date().toISOString();
+      const seed = SEED_ENTRIES.find((e) => e.title === 'Build him up');
+      if (seed) {
+        db.prepare(
+          'INSERT INTO skip_library (type, title, body, tags, active, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)'
+        ).run(seed.type, seed.title, seed.body, seed.tags, now, now);
+        console.log('BRAIN: backfilled "Build him up" rule.');
+      }
+    }
   }
   // One-time migration: split the legacy free-text blob into discrete notes
   // so Bobby's past training survives as individual, archivable entries.
