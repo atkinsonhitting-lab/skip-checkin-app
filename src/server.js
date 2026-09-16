@@ -121,57 +121,87 @@ function toReqUser(row) {
     displayName: row.first_name || row.athlete_name || 'Coach',
     status: row.status || 'approved',
     remoteProgramId: row.remote_program_id || null,
-    collegeId: row.college_id || null,
+    organizationId: row.organization_id || null,
+    teamId: row.team_id || null,
     dateOfBirth: row.date_of_birth || null,
     // View-only coaches (can_edit=0) see everything but change nothing.
     canEdit: row.can_edit == null ? true : row.can_edit !== 0,
   };
 }
 
-// ---- Colleges (Sep 2026) ----
-function getCollege(id) {
+// ---- Organizations (Sep 2026) ----
+function getOrganization(id) {
   if (!id) return null;
-  return db.prepare('SELECT * FROM colleges WHERE id = ?').get(id) || null;
+  return db.prepare('SELECT * FROM organizations WHERE id = ?').get(id) || null;
 }
-function collegeByCode(code) {
+// A signup code resolves to an organization, or to a team inside one.
+// Returns { organizationId, teamId } or null.
+function codeLookup(code) {
   const c = String(code || '').trim().toUpperCase();
   if (!c) return null;
-  return db.prepare('SELECT * FROM colleges WHERE UPPER(code) = ?').get(c) || null;
+  const t = db.prepare('SELECT id, organization_id FROM teams WHERE UPPER(code) = ?').get(c);
+  if (t) return { organizationId: t.organization_id, teamId: t.id };
+  const o = db.prepare('SELECT id FROM organizations WHERE UPPER(code) = ?').get(c);
+  if (o) return { organizationId: o.id, teamId: null };
+  return null;
 }
-// A coach row with college_id set is a college coach: view-only, scoped to
-// their school's players. Global coaches (Bobby, Cam) have college_id NULL.
-function isCollegeCoach(user) {
-  return !!user && user.role === 'coach' && !!user.collegeId;
+function getTeam(id) {
+  return db.prepare('SELECT * FROM teams WHERE id = ?').get(Number(id)) || null;
 }
-function collegeScopeId(req) {
+// Scoping for organization coaches: null = global coach (Bobby/Cam, sees
+// everything); otherwise { orgId, teamId }. Organization-level coaches
+// (teamId null) see every team in their program; team coaches see one team.
+// In queries: AND (? IS NULL OR organization_id = ?) AND (? IS NULL OR team_id = ?)
+function orgScope(req) {
   const u = realUser(req);
-  return u && u.role === 'coach' && u.collegeId ? u.collegeId : null;
+  if (!u || u.role !== 'coach' || !u.organizationId) return null;
+  return { orgId: u.organizationId, teamId: u.teamId || null };
 }
-// Talk to Skip available for this athlete? Everyone except players whose
-// college turned the switch off.
-function skipChatDisabledFor(user) {
-  if (!user || user.role !== 'athlete' || !user.collegeId) return false;
-  const c = getCollege(user.collegeId);
-  return c ? c.skip_enabled === 0 : false;
+// Params for the scope pattern above: (orgId, orgId, teamId, teamId),
+// or four nulls for a global coach.
+function scopeParams(scope) {
+  if (!scope) return [null, null, null, null];
+  return [scope.orgId, scope.orgId, scope.teamId, scope.teamId];
 }
-// Attach college name + Skip availability after toReqUser builds the object.
+const SCOPE_CLAUSE = 'AND (? IS NULL OR organization_id = ?) AND (? IS NULL OR team_id = ?)';
+// Attach organization + team names and Skip availability after toReqUser
+// builds the object.
 function decorateUser(u) {
-  if (u && u.collegeId) {
-    const c = getCollege(u.collegeId);
-    u.collegeName = c ? c.name : null;
+  if (u && u.organizationId) {
+    const c = getOrganization(u.organizationId);
+    u.organizationName = c ? c.name : null;
     if (u.role === 'athlete') u.skipChatDisabled = c ? c.skip_enabled === 0 : false;
+  }
+  if (u && u.teamId) {
+    const t = db.prepare('SELECT name FROM teams WHERE id = ?').get(u.teamId);
+    u.teamName = t ? t.name : null;
   }
   return u;
 }
 // Signup-code generator: NAME-XXXX with unambiguous characters.
-function makeCollegeCode(name) {
+function makeOrganizationCode(name) {
   const prefix = String(name || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) || 'TEAM';
   const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
   for (let i = 0; i < 20; i++) {
     let suffix = '';
     for (let j = 0; j < 4; j++) suffix += chars[Math.floor(Math.random() * chars.length)];
     const code = `${prefix}-${suffix}`;
-    if (!db.prepare('SELECT id FROM colleges WHERE code = ?').get(code)) return code;
+    if (!db.prepare('SELECT id FROM organizations WHERE code = ?').get(code) &&
+        !db.prepare('SELECT id FROM teams WHERE code = ?').get(code)) return code;
+  }
+  return `${prefix}-${Date.now().toString(36).toUpperCase().slice(-4)}`;
+}
+// Team signup codes: same shape, unique across both tables so a code never
+// resolves ambiguously.
+function makeTeamCode(name) {
+  const prefix = String(name || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) || 'TEAM';
+  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  for (let i = 0; i < 20; i++) {
+    let suffix = '';
+    for (let j = 0; j < 4; j++) suffix += chars[Math.floor(Math.random() * chars.length)];
+    const code = `${prefix}-${suffix}`;
+    if (!db.prepare('SELECT id FROM organizations WHERE code = ?').get(code) &&
+        !db.prepare('SELECT id FROM teams WHERE code = ?').get(code)) return code;
   }
   return `${prefix}-${Date.now().toString(36).toUpperCase().slice(-4)}`;
 }
@@ -198,14 +228,14 @@ function ageOn(dob) {
 }
 function attachUser(req, res, next) {
   if (req.session && req.session.userId) {
-    const row = db.prepare('SELECT id, email, role, athlete_name, first_name, last_name, status, remote_program_id, can_edit, college_id, date_of_birth FROM users WHERE id = ?').get(req.session.userId);
+    const row = db.prepare('SELECT id, email, role, athlete_name, first_name, last_name, status, remote_program_id, can_edit, organization_id, team_id, date_of_birth FROM users WHERE id = ?').get(req.session.userId);
     if (row) {
       req.user = decorateUser(toReqUser(row));
       // "View as hitter": the coach browses the app exactly as this hitter
       // sees it. req.user becomes the hitter; the real coach stays on
       // req.coachUser so coach-only routes keep working.
       if (row.role === 'coach' && req.session.viewAsUserId) {
-        const t = db.prepare("SELECT id, email, role, athlete_name, first_name, last_name, status, remote_program_id, college_id, date_of_birth FROM users WHERE id = ? AND role != 'coach'").get(req.session.viewAsUserId);
+        const t = db.prepare("SELECT id, email, role, athlete_name, first_name, last_name, status, remote_program_id, organization_id, team_id, date_of_birth FROM users WHERE id = ? AND role != 'coach'").get(req.session.viewAsUserId);
         if (t) {
           req.coachUser = req.user;
           req.user = decorateUser(toReqUser(t));
@@ -260,13 +290,13 @@ function requireCoachAny(req, res, next) {
   next();
 }
 
-// Global coaches only (Bobby + Cam): college coaches are scoped to their
-// school, so they never see remote programs, the video library, Train Skip,
-// or the Colleges admin page.
+// Global coaches only (Bobby + Cam): organization coaches are scoped to their
+// organization, so they never see remote programs, the video library, Train Skip,
+// or the Organizations admin page.
 function requireGlobalCoachAny(req, res, next) {
   const u = realUser(req);
   if (!u) return res.redirect('/login');
-  if (u.role !== 'coach' || u.collegeId) return res.status(403).send('Forbidden');
+  if (u.role !== 'coach' || u.organizationId) return res.status(403).send('Forbidden');
   next();
 }
 
@@ -380,15 +410,18 @@ app.post('/register', (req, res) => {
   if (!validDob(dob)) {
     return fail('Enter your date of birth.');
   }
-  // College code is optional: only players joining through a school use one.
-  const collegeCode = String(req.body.college_code || '').trim();
-  let collegeId = null;
-  if (collegeCode) {
-    const college = collegeByCode(collegeCode);
-    if (!college) {
-      return fail('That college code wasn\u2019t recognized. Check it with your coach, or leave it blank.');
+  // Organization code is optional: only players joining through an organization
+  // use one. Accepts an organization code or a team code.
+  const organizationCode = String(req.body.organization_code || '').trim();
+  let organizationId = null;
+  let teamId = null;
+  if (organizationCode) {
+    const found = codeLookup(organizationCode);
+    if (!found) {
+      return fail('That code wasn\u2019t recognized. Check it with your coach, or leave it blank.');
     }
-    collegeId = college.id;
+    organizationId = found.organizationId;
+    teamId = found.teamId;
   }
   if (!validEmail(email)) {
     return fail('Enter a valid email address.');
@@ -407,12 +440,12 @@ app.post('/register', (req, res) => {
   const athleteName = `${firstName} ${lastName}`;
   const info = db
     .prepare(
-      'INSERT INTO users (email, password_hash, role, athlete_name, first_name, last_name, created_at, status, college_id, date_of_birth) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO users (email, password_hash, role, athlete_name, first_name, last_name, created_at, status, organization_id, team_id, date_of_birth) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     )
-    .run(email, hash, 'athlete', athleteName, firstName, lastName, new Date().toISOString(), 'pending', collegeId, dob);
+    .run(email, hash, 'athlete', athleteName, firstName, lastName, new Date().toISOString(), 'pending', organizationId, teamId, dob);
   linkRemoteProgram(info.lastInsertRowid, athleteName);
   // Tell Bobby so he can approve (or decline) the new hitter.
-  notifyCoachOfSignup(req, email, athleteName, collegeId ? getCollege(collegeId).name : null).catch((e) =>
+  notifyCoachOfSignup(req, email, athleteName, organizationId ? getOrganization(organizationId).name : null).catch((e) =>
     console.warn('signup notify failed:', e.message)
   );
   res.redirect('/pending');
@@ -987,15 +1020,15 @@ async function pushToUser(userId, title, body, url) {
 }
 async function pushToCoaches(title, body, url) {
   if (!pushEnabled) return;
-  // Global coaches only: college coaches are scoped to their school and
+  // Global coaches only: organization coaches are scoped to their organization and
   // don't approve signups or Brain proposals.
-  const coaches = db.prepare("SELECT id FROM users WHERE role = 'coach' AND college_id IS NULL").all();
+  const coaches = db.prepare("SELECT id FROM users WHERE role = 'coach' AND organization_id IS NULL").all();
   for (const c of coaches) await pushToUser(c.id, title, body, url);
 }
 // Push to every coach except one (e.g. notify the other coach of a proposal).
 async function pushToCoachesExcept(exceptId, title, body, url) {
   if (!pushEnabled) return;
-  const coaches = db.prepare("SELECT id FROM users WHERE role = 'coach' AND college_id IS NULL AND id != ?").all(exceptId);
+  const coaches = db.prepare("SELECT id FROM users WHERE role = 'coach' AND organization_id IS NULL AND id != ?").all(exceptId);
   for (const c of coaches) await pushToUser(c.id, title, body, url);
 }
 app.get('/api/push/vapid-key', (req, res) => res.json({ publicKey: VAPID_PUBLIC_KEY || null }));
@@ -1331,8 +1364,9 @@ app.get('/videos/watch/:id', requireLogin, requireRemote, (req, res) => {
 // ---- View as hitter ----
 app.post('/coach/view-as', requireCoachAny, (req, res) => {
   const id = Number(req.body.id);
-  const scope = collegeScopeId(req);
-  const t = id ? db.prepare("SELECT id FROM users WHERE id = ? AND role != 'coach' AND (? IS NULL OR college_id = ?)").get(id, scope, scope) : null;
+  const scope = orgScope(req);
+  const sp = scopeParams(scope);
+  const t = id ? db.prepare(`SELECT id FROM users WHERE id = ? AND role != 'coach' ${SCOPE_CLAUSE}`).get(id, ...sp) : null;
   if (t) req.session.viewAsUserId = t.id;
   res.redirect('/');
 });
@@ -1532,7 +1566,7 @@ function coachAdminOpts(req) {
   const me = realUser(req);
   if (req.user.role === 'coach' && me.canEdit) {
     return {
-      coaches: db.prepare("SELECT id, email, first_name, last_name, can_edit, created_at FROM users WHERE role = 'coach' AND college_id IS NULL ORDER BY created_at ASC").all(),
+      coaches: db.prepare("SELECT id, email, first_name, last_name, can_edit, created_at FROM users WHERE role = 'coach' AND organization_id IS NULL ORDER BY created_at ASC").all(),
       selfId: me.id,
     };
   }
@@ -1543,7 +1577,7 @@ app.get('/settings', requireLogin, (req, res) => {
   if (req.user.viewAs) return res.redirect('/coach');
   res.send(views.settingsPage(req.user, {
     subscription: getSubscription(req.user.id),
-    notice: req.query.saved ? 'Account updated.' : (req.query.pw ? 'Password changed.' : null),
+    notice: req.query.saved ? 'Account updated.' : (req.query.pw ? 'Password changed.' : (req.query.organization ? 'Organization updated.' : null)),
     ...coachAdminOpts(req),
   }));
 });
@@ -1566,6 +1600,23 @@ app.post('/settings/profile', requireLogin, (req, res) => {
     db.prepare('UPDATE users SET date_of_birth = ? WHERE id = ?').run(dob, req.user.id);
   }
   res.redirect('/settings?saved=1');
+});
+
+// Hitters can join (or leave) an organization later from Settings. Blank
+// code = leave the organization; a valid organization or team code joins it.
+// Coaches can't use this.
+app.post('/settings/organization', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.status(403).send('Forbidden');
+  const fail = (msg) => res.send(views.settingsPage(req.user, { subscription: getSubscription(req.user.id), error: msg, ...coachAdminOpts(req) }));
+  const code = String(req.body.organization_code || '').trim();
+  if (!code) {
+    db.prepare('UPDATE users SET organization_id = NULL, team_id = NULL WHERE id = ?').run(req.user.id);
+    return res.redirect('/settings?organization=1');
+  }
+  const found = codeLookup(code);
+  if (!found) return fail('That code didn\u2019t match an organization. Check it with your coach and try again.');
+  db.prepare('UPDATE users SET organization_id = ?, team_id = ? WHERE id = ?').run(found.organizationId, found.teamId, req.user.id);
+  res.redirect('/settings?organization=1');
 });
 
 app.post('/settings/password', requireLogin, (req, res) => {
@@ -1635,17 +1686,19 @@ app.get('/learn', requireLogin, (req, res) => {
 // ---- Coach routes ----
 
 // Hitters waiting for Bobby's approval, oldest first.
-function pendingList(collegeId) {
+function pendingList(scope) {
+  const sp = scopeParams(scope);
   return db
     .prepare(
       `SELECT u.id, u.email, u.athlete_name, u.first_name, u.last_name, u.created_at,
-              c.name AS college_name
-       FROM users u LEFT JOIN colleges c ON c.id = u.college_id
+              c.name AS organization_name, t.name AS team_name
+       FROM users u LEFT JOIN organizations c ON c.id = u.organization_id
+                    LEFT JOIN teams t ON t.id = u.team_id
        WHERE u.role = 'athlete' AND u.status = 'pending'
-         AND (? IS NULL OR u.college_id = ?)
+         AND (? IS NULL OR u.organization_id = ?) AND (? IS NULL OR u.team_id = ?)
        ORDER BY u.created_at ASC`
     )
-    .all(collegeId || null, collegeId || null)
+    .all(...sp)
     .map((u) => ({
       ...u,
       name: [u.first_name, u.last_name].filter(Boolean).join(' ') || u.athlete_name || u.email,
@@ -1655,32 +1708,36 @@ function pendingList(collegeId) {
 // Number on the Approvals tab badge.
 function setApprovalCount(req) {
   try {
-    const scope = collegeScopeId(req);
+    const sp = scopeParams(orgScope(req));
     req.user.approvalCount = db
-      .prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'athlete' AND status = 'pending' AND (? IS NULL OR college_id = ?)")
-      .get(scope, scope).n;
+      .prepare(`SELECT COUNT(*) AS n FROM users WHERE role = 'athlete' AND status = 'pending' ${SCOPE_CLAUSE}`)
+      .get(...sp).n;
   } catch {
     req.user.approvalCount = 0;
   }
 }
 
 // Per-hitter check-in stats for the coach views: total + last check-in.
-// College coaches only ever see their own school's players.
-function coachUserStats(collegeId) {
+// Organization coaches only ever see their own program's players; team
+// coaches only their team.
+function coachUserStats(scope) {
+  const sp = scopeParams(scope);
   const users = db
     .prepare(
-      `SELECT id, email, athlete_name, first_name, last_name, created_at, date_of_birth
-       FROM users WHERE role != 'coach' AND status = 'approved'
-         AND (? IS NULL OR college_id = ?)
-       ORDER BY created_at ASC`
+      `SELECT u.id, u.email, u.athlete_name, u.first_name, u.last_name, u.created_at, u.date_of_birth,
+              t.name AS team_name
+       FROM users u LEFT JOIN teams t ON t.id = u.team_id
+       WHERE u.role != 'coach' AND u.status = 'approved'
+         AND (? IS NULL OR u.organization_id = ?) AND (? IS NULL OR u.team_id = ?)
+       ORDER BY u.created_at ASC`
     )
-    .all(collegeId || null, collegeId || null);
+    .all(...sp);
   return users.map((u) => {
     const row = db
       .prepare('SELECT COUNT(*) AS total, MAX(created_at) AS last FROM checkins WHERE user_id = ?')
       .get(u.id);
     const name = [u.first_name, u.last_name].filter(Boolean).join(' ') || u.athlete_name || u.email;
-    return { id: u.id, email: u.email, name, total: row.total, last: row.last, age: ageOn(u.date_of_birth) };
+    return { id: u.id, email: u.email, name, total: row.total, last: row.last, age: ageOn(u.date_of_birth), team: u.team_name || null };
   });
 }
 
@@ -1715,16 +1772,17 @@ function remoteProgramList() {
 // Coach Home: needs-your-attention — approvals, gone-quiet hitters, latest feed.
 app.get('/coach', requireCoachAny, (req, res) => {
   setApprovalCount(req);
-  const scope = collegeScopeId(req);
+  const scope = orgScope(req);
+  const sp = scopeParams(scope);
   const stats = coachUserStats(scope);
   const quiet = coachQuietHitters(stats);
   const latest = db
     .prepare(
       `SELECT c.* FROM checkins c JOIN users u ON u.id = c.user_id
-       WHERE (? IS NULL OR u.college_id = ?)
+       WHERE (? IS NULL OR u.organization_id = ?) AND (? IS NULL OR u.team_id = ?)
        ORDER BY c.created_at DESC LIMIT 8`
     )
-    .all(scope, scope);
+    .all(...sp);
   const pending = pendingList(scope);
   const me = realUser(req);
   res.send(
@@ -1735,7 +1793,7 @@ app.get('/coach', requireCoachAny, (req, res) => {
 // Coach Hitters tab: search + athlete cards.
 app.get('/coach/hitters', requireCoachAny, (req, res) => {
   setApprovalCount(req);
-  res.send(views.coachHittersPage(realUser(req), coachUserStats(collegeScopeId(req))));
+  res.send(views.coachHittersPage(realUser(req), coachUserStats(orgScope(req))));
 });
 
 // Coach Programs tab: remote programs.
@@ -1749,10 +1807,10 @@ app.get('/coach/programs', requireGlobalCoachAny, (req, res) => {
 app.post('/coach/coaches/toggle', requireCoach, (req, res) => {
   const id = Number(req.body.id);
   const me = realUser(req);
-  const target = db.prepare("SELECT id, can_edit FROM users WHERE id = ? AND role = 'coach' AND college_id IS NULL").get(id);
+  const target = db.prepare("SELECT id, can_edit FROM users WHERE id = ? AND role = 'coach' AND organization_id IS NULL").get(id);
   if (!target || target.id === me.id) return res.redirect('/settings');
   if (target.can_edit !== 0) {
-    const fullCount = db.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'coach' AND college_id IS NULL AND can_edit != 0").get().n;
+    const fullCount = db.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'coach' AND organization_id IS NULL AND can_edit != 0").get().n;
     if (fullCount <= 1) return res.redirect('/settings');
   }
   db.prepare('UPDATE users SET can_edit = ? WHERE id = ?').run(target.can_edit !== 0 ? 0 : 1, target.id);
@@ -1762,41 +1820,70 @@ app.post('/coach/coaches/toggle', requireCoach, (req, res) => {
 // Approvals tab: approve or decline waiting hitters right here.
 app.get('/coach/approvals', requireCoachAny, (req, res) => {
   setApprovalCount(req);
-  res.send(views.coachApprovalsPage(realUser(req), pendingList(collegeScopeId(req))));
+  res.send(views.coachApprovalsPage(realUser(req), pendingList(orgScope(req))));
 });
 
-// ---- Colleges (Sep 2026): Bobby's B2B surface ----
-// Add a college, hand its signup code to the program's coaches, flip Talk to
-// Skip per school, and create view-only coach accounts scoped to that school.
-app.get('/coach/colleges', requireGlobalCoachAny, (req, res) => {
-  setApprovalCount(req);
-  const colleges = db.prepare('SELECT * FROM colleges ORDER BY name ASC').all().map((c) => ({
-    ...c,
-    playerCount: db.prepare("SELECT COUNT(*) AS n FROM users WHERE college_id = ? AND role = 'athlete'").get(c.id).n,
-    coaches: db.prepare("SELECT id, email, first_name, last_name FROM users WHERE college_id = ? AND role = 'coach' ORDER BY created_at ASC").all(c.id),
+// Manage an organization's teams and coaches: Bobby (full global coach), or
+// the program's own organization-level coaches (team_id NULL) — the program
+// is the master account. Team coaches and Cam (view-only) are blocked.
+function requireOrgManager(req, res, next) {
+  const u = realUser(req);
+  if (!u) return res.redirect('/login');
+  if (u.role !== 'coach') return res.status(403).send('Forbidden');
+  const orgId = Number(req.params.id);
+  if (u.canEdit && !u.organizationId) return next();
+  if (u.organizationId === orgId && !u.teamId) return next();
+  return res.status(403).send('Forbidden');
+}
+
+function organizationTeams(orgId) {
+  return db.prepare('SELECT * FROM teams WHERE organization_id = ? ORDER BY name ASC').all(orgId).map((t) => ({
+    ...t,
+    playerCount: db.prepare("SELECT COUNT(*) AS n FROM users WHERE team_id = ? AND role = 'athlete'").get(t.id).n,
+    coaches: db.prepare("SELECT id, email, first_name, last_name FROM users WHERE team_id = ? AND role = 'coach' ORDER BY created_at ASC").all(t.id),
   }));
-  res.send(views.coachCollegesPage(realUser(req), colleges, req.query.error || null, req.query.added || null));
+}
+
+// ---- Organizations (Sep 2026): Bobby's B2B surface ----
+// Add a organization, hand its signup code to the program's coaches, flip Talk to
+// Skip per organization, and create view-only coach accounts scoped to that organization.
+// Organization-level coaches see only their own program here so they can run
+// their teams themselves.
+app.get('/coach/organizations', requireCoachAny, (req, res) => {
+  setApprovalCount(req);
+  const me = realUser(req);
+  const onlyOrgId = me.organizationId || null;
+  const rows = onlyOrgId
+    ? db.prepare('SELECT * FROM organizations WHERE id = ?').all(onlyOrgId)
+    : db.prepare('SELECT * FROM organizations ORDER BY name ASC').all();
+  const organizations = rows.map((c) => ({
+    ...c,
+    playerCount: db.prepare("SELECT COUNT(*) AS n FROM users WHERE organization_id = ? AND role = 'athlete'").get(c.id).n,
+    coaches: db.prepare("SELECT id, email, first_name, last_name FROM users WHERE organization_id = ? AND team_id IS NULL AND role = 'coach' ORDER BY created_at ASC").all(c.id),
+    teams: organizationTeams(c.id),
+  }));
+  res.send(views.coachOrganizationsPage(me, organizations, req.query.error || null, req.query.added || null));
 });
 
-app.post('/coach/colleges/add', requireCoach, (req, res) => {
+app.post('/coach/organizations/add', requireCoach, (req, res) => {
   const name = String(req.body.name || '').trim().replace(/\s+/g, ' ').slice(0, 60);
-  if (!name) return res.redirect('/coach/colleges?error=' + encodeURIComponent('Give the college a name.'));
-  const code = makeCollegeCode(name);
-  const info = db.prepare('INSERT INTO colleges (name, code, skip_enabled, created_at) VALUES (?, ?, 0, ?)').run(name, code, new Date().toISOString());
-  res.redirect('/coach/colleges?added=' + info.lastInsertRowid);
+  if (!name) return res.redirect('/coach/organizations?error=' + encodeURIComponent('Give the organization a name.'));
+  const code = makeOrganizationCode(name);
+  const info = db.prepare('INSERT INTO organizations (name, code, skip_enabled, created_at) VALUES (?, ?, 0, ?)').run(name, code, new Date().toISOString());
+  res.redirect('/coach/organizations?added=' + info.lastInsertRowid);
 });
 
-app.post('/coach/colleges/:id/skip', requireCoach, (req, res) => {
-  const c = getCollege(Number(req.params.id));
-  if (!c) return res.redirect('/coach/colleges');
-  db.prepare('UPDATE colleges SET skip_enabled = ? WHERE id = ?').run(c.skip_enabled ? 0 : 1, c.id);
-  res.redirect('/coach/colleges');
+app.post('/coach/organizations/:id/skip', requireCoach, (req, res) => {
+  const c = getOrganization(Number(req.params.id));
+  if (!c) return res.redirect('/coach/organizations');
+  db.prepare('UPDATE organizations SET skip_enabled = ? WHERE id = ?').run(c.skip_enabled ? 0 : 1, c.id);
+  res.redirect('/coach/organizations');
 });
 
-app.post('/coach/colleges/:id/coaches/add', requireCoach, (req, res) => {
-  const c = getCollege(Number(req.params.id));
-  if (!c) return res.redirect('/coach/colleges');
-  const fail = (msg) => res.redirect('/coach/colleges?error=' + encodeURIComponent(msg));
+app.post('/coach/organizations/:id/coaches/add', requireOrgManager, (req, res) => {
+  const c = getOrganization(Number(req.params.id));
+  if (!c) return res.redirect('/coach/organizations');
+  const fail = (msg) => res.redirect('/coach/organizations?error=' + encodeURIComponent(msg));
   const firstName = String(req.body.first_name || '').trim().replace(/\s+/g, ' ').slice(0, 40);
   const lastName = String(req.body.last_name || '').trim().replace(/\s+/g, ' ').slice(0, 40);
   const email = String(req.body.email || '').trim().toLowerCase();
@@ -1806,18 +1893,134 @@ app.post('/coach/colleges/:id/coaches/add', requireCoach, (req, res) => {
   if (password.length < 8) return fail('Password must be at least 8 characters.');
   if (db.prepare('SELECT id FROM users WHERE email = ?').get(email)) return fail('An account with that email already exists.');
   db.prepare(
-    "INSERT INTO users (email, password_hash, role, athlete_name, first_name, last_name, created_at, status, can_edit, college_id) VALUES (?, ?, 'coach', ?, ?, ?, ?, 'approved', 0, ?)"
+    "INSERT INTO users (email, password_hash, role, athlete_name, first_name, last_name, created_at, status, can_edit, organization_id, team_id) VALUES (?, ?, 'coach', ?, ?, ?, ?, 'approved', 0, ?, NULL)"
   ).run(email, bcrypt.hashSync(password, 12), `${firstName} ${lastName}`, firstName, lastName, new Date().toISOString(), c.id);
-  res.redirect('/coach/colleges');
+  res.redirect('/coach/organizations');
 });
 
-app.post('/coach/colleges/:id/coaches/remove', requireCoach, (req, res) => {
-  const c = getCollege(Number(req.params.id));
+app.post('/coach/organizations/:id/coaches/remove', requireOrgManager, (req, res) => {
+  const c = getOrganization(Number(req.params.id));
   const coachId = Number(req.body.coach_id);
   if (c && coachId) {
-    db.prepare("DELETE FROM users WHERE id = ? AND role = 'coach' AND college_id = ?").run(coachId, c.id);
+    const del = db.transaction(() => {
+      db.prepare('DELETE FROM push_subscriptions WHERE user_id = ?').run(coachId);
+      db.prepare('DELETE FROM password_reset_tokens WHERE user_id = ?').run(coachId);
+      db.prepare("DELETE FROM users WHERE id = ? AND role = 'coach' AND organization_id = ? AND team_id IS NULL").run(coachId, c.id);
+    });
+    del();
   }
-  res.redirect('/coach/colleges');
+  res.redirect('/coach/organizations');
+});
+
+// ---- Teams inside an organization (Sep 2026) ----
+// The program is the master account; each team gets its own signup code and
+// its own coaches, who see only their team's players. Organization-level
+// coaches (or Bobby) manage teams here.
+app.post('/coach/organizations/:id/teams/add', requireOrgManager, (req, res) => {
+  const c = getOrganization(Number(req.params.id));
+  if (!c) return res.redirect('/coach/organizations');
+  const fail = (msg) => res.redirect('/coach/organizations?error=' + encodeURIComponent(msg));
+  const name = String(req.body.name || '').trim().replace(/\s+/g, ' ').slice(0, 60);
+  if (!name) return fail('Give the team a name.');
+  const code = makeTeamCode(name);
+  db.prepare('INSERT INTO teams (organization_id, name, code, created_at) VALUES (?, ?, ?, ?)').run(c.id, name, code, new Date().toISOString());
+  res.redirect('/coach/organizations');
+});
+
+app.post('/coach/organizations/:id/teams/:teamId/coaches/add', requireOrgManager, (req, res) => {
+  const c = getOrganization(Number(req.params.id));
+  const t = getTeam(req.params.teamId);
+  if (!c || !t || t.organization_id !== c.id) return res.redirect('/coach/organizations');
+  const fail = (msg) => res.redirect('/coach/organizations?error=' + encodeURIComponent(msg));
+  const firstName = String(req.body.first_name || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+  const lastName = String(req.body.last_name || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+  const email = String(req.body.email || '').trim().toLowerCase();
+  const password = String(req.body.password || '');
+  if (!firstName || !lastName) return fail('Coach needs a first and last name.');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail('That email doesn\u2019t look right.');
+  if (password.length < 8) return fail('Password must be at least 8 characters.');
+  if (db.prepare('SELECT id FROM users WHERE email = ?').get(email)) return fail('An account with that email already exists.');
+  db.prepare(
+    "INSERT INTO users (email, password_hash, role, athlete_name, first_name, last_name, created_at, status, can_edit, organization_id, team_id) VALUES (?, ?, 'coach', ?, ?, ?, ?, 'approved', 0, ?, ?)"
+  ).run(email, bcrypt.hashSync(password, 12), `${firstName} ${lastName}`, firstName, lastName, new Date().toISOString(), c.id, t.id);
+  res.redirect('/coach/organizations');
+});
+
+app.post('/coach/organizations/:id/teams/:teamId/coaches/remove', requireOrgManager, (req, res) => {
+  const c = getOrganization(Number(req.params.id));
+  const t = getTeam(req.params.teamId);
+  const coachId = Number(req.body.coach_id);
+  if (c && t && t.organization_id === c.id && coachId) {
+    const del = db.transaction(() => {
+      db.prepare('DELETE FROM push_subscriptions WHERE user_id = ?').run(coachId);
+      db.prepare('DELETE FROM password_reset_tokens WHERE user_id = ?').run(coachId);
+      db.prepare("DELETE FROM users WHERE id = ? AND role = 'coach' AND team_id = ?").run(coachId, t.id);
+    });
+    del();
+  }
+  res.redirect('/coach/organizations');
+});
+
+// Confirm page before deleting a team: its players stay in the program
+// (unassigned to any team), the team's coach accounts are removed.
+app.get('/coach/organizations/:id/teams/:teamId/delete', requireOrgManager, (req, res) => {
+  const c = getOrganization(Number(req.params.id));
+  const t = getTeam(req.params.teamId);
+  if (!c || !t || t.organization_id !== c.id) return res.redirect('/coach/organizations');
+  setApprovalCount(req);
+  const playerCount = db.prepare("SELECT COUNT(*) AS n FROM users WHERE team_id = ? AND role = 'athlete'").get(t.id).n;
+  const coachCount = db.prepare("SELECT COUNT(*) AS n FROM users WHERE team_id = ? AND role = 'coach'").get(t.id).n;
+  res.send(views.coachTeamDeletePage(realUser(req), c, t, playerCount, coachCount));
+});
+
+app.post('/coach/organizations/:id/teams/:teamId/delete', requireOrgManager, (req, res) => {
+  const c = getOrganization(Number(req.params.id));
+  const t = getTeam(req.params.teamId);
+  if (!c || !t || t.organization_id !== c.id) return res.redirect('/coach/organizations');
+  const del = db.transaction(() => {
+    const coachIds = db.prepare("SELECT id FROM users WHERE team_id = ? AND role = 'coach'").all(t.id).map((r) => r.id);
+    for (const id of coachIds) {
+      db.prepare('DELETE FROM push_subscriptions WHERE user_id = ?').run(id);
+      db.prepare('DELETE FROM password_reset_tokens WHERE user_id = ?').run(id);
+    }
+    db.prepare("DELETE FROM users WHERE team_id = ? AND role = 'coach'").run(t.id);
+    // Players keep their accounts and their place in the program — they just
+    // aren't on this team anymore.
+    db.prepare('UPDATE users SET team_id = NULL WHERE team_id = ?').run(t.id);
+    db.prepare('DELETE FROM teams WHERE id = ?').run(t.id);
+  });
+  del();
+  res.redirect('/coach/organizations');
+});
+
+// Confirm page before deleting a organization: players go standalone, the
+// organization's coach accounts are removed (with their push subscriptions).
+app.get('/coach/organizations/:id/delete', requireCoach, (req, res) => {
+  const c = getOrganization(Number(req.params.id));
+  if (!c) return res.redirect('/coach/organizations');
+  setApprovalCount(req);
+  const playerCount = db.prepare("SELECT COUNT(*) AS n FROM users WHERE organization_id = ? AND role = 'athlete'").get(c.id).n;
+  const coachCount = db.prepare("SELECT COUNT(*) AS n FROM users WHERE organization_id = ? AND role = 'coach'").get(c.id).n;
+  const teamCount = db.prepare('SELECT COUNT(*) AS n FROM teams WHERE organization_id = ?').get(c.id).n;
+  res.send(views.coachOrganizationDeletePage(realUser(req), c, playerCount, coachCount, teamCount));
+});
+
+app.post('/coach/organizations/:id/delete', requireCoach, (req, res) => {
+  const c = getOrganization(Number(req.params.id));
+  if (!c) return res.redirect('/coach/organizations');
+  const del = db.transaction(() => {
+    const coachIds = db.prepare("SELECT id FROM users WHERE organization_id = ? AND role = 'coach'").all(c.id).map((r) => r.id);
+    for (const id of coachIds) {
+      db.prepare('DELETE FROM push_subscriptions WHERE user_id = ?').run(id);
+      db.prepare('DELETE FROM password_reset_tokens WHERE user_id = ?').run(id);
+    }
+    db.prepare("DELETE FROM users WHERE organization_id = ? AND role = 'coach'").run(c.id);
+    db.prepare('UPDATE users SET organization_id = NULL, team_id = NULL WHERE organization_id = ?').run(c.id);
+    db.prepare('DELETE FROM teams WHERE organization_id = ?').run(c.id);
+    db.prepare('DELETE FROM organizations WHERE id = ?').run(c.id);
+  });
+  del();
+  res.redirect('/coach/organizations');
 });
 
 // Approve a waiting hitter — they can log in from here on.
@@ -1847,10 +2050,10 @@ app.post('/coach/decline/:id', requireCoach, (req, res) => {
 app.get('/coach/user/:email', requireCoachAny, (req, res) => {
   setApprovalCount(req);
   const em = (req.params.email || '').toLowerCase();
-  const scope = collegeScopeId(req);
+  const sp = scopeParams(orgScope(req));
   const user = db
-    .prepare("SELECT id, email, athlete_name, first_name, last_name FROM users WHERE email = ? AND role != 'coach' AND (? IS NULL OR college_id = ?)")
-    .get(em, scope, scope);
+    .prepare(`SELECT id, email, athlete_name, first_name, last_name FROM users WHERE email = ? AND role != 'coach' ${SCOPE_CLAUSE}`)
+    .get(em, ...sp);
   if (!user) return res.status(404).send('Unknown user.');
   const rows = db
     .prepare('SELECT * FROM checkins WHERE user_id = ? ORDER BY created_at DESC')
@@ -1911,7 +2114,7 @@ function deleteHitter(userId) {
 }
 
 // Coach-only backup: download every check-in as JSON.
-app.get('/coach/export', requireCoachAny, (req, res) => {  const scope = collegeScopeId(req);
+app.get('/coach/export', requireCoachAny, (req, res) => {  const sp = scopeParams(orgScope(req));
   const rows = db
     .prepare(
       `SELECT c.id, c.athlete_name, u.email, c.created_at, c.environment, c.drills_done,
@@ -1919,10 +2122,10 @@ app.get('/coach/export', requireCoachAny, (req, res) => {  const scope = college
               c.session_notes, c.what_worked, c.whats_next,
               c.skip_journal_score, c.skip_journal_note, c.skip_rated_at
        FROM checkins c JOIN users u ON u.id = c.user_id
-       WHERE (? IS NULL OR u.college_id = ?)
+       WHERE (? IS NULL OR u.organization_id = ?) AND (? IS NULL OR u.team_id = ?)
        ORDER BY c.created_at ASC`
     )
-    .all(scope, scope)
+    .all(...sp)
     .map((r) => ({ ...r, drills_done: safeParseDrills(r.drills_done) }));
   res.setHeader('Content-Disposition', 'attachment; filename="skip-checkins-export.json"');
   res.json({ exported_at: new Date().toISOString(), checkins: rows });
@@ -2487,7 +2690,7 @@ async function askSkip(user, userMessage, opts = {}) {
 
 app.get('/chat', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
-  // Colleges can turn Talk to Skip off for their players.
+  // Organizations can turn Talk to Skip off for their players.
   if (req.user.skipChatDisabled) return res.redirect('/');
   const messages = db
     .prepare('SELECT role, content, created_at FROM chat_messages WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 100')
@@ -2667,7 +2870,7 @@ async function sendResetEmail(to, link) {
 // ---- Account approvals: Bobby reviews every signup ----
 
 // New hitter signed up — tell Bobby so he can approve or decline them.
-async function notifyCoachOfSignup(req, email, name, collegeName) {
+async function notifyCoachOfSignup(req, email, name, organizationName) {
   const m = mailer();
   const coachEmail = (process.env.COACH_EMAIL || '').trim().toLowerCase();
   if (!m || !coachEmail) {
@@ -2675,7 +2878,7 @@ async function notifyCoachOfSignup(req, email, name, collegeName) {
     return;
   }
   const base = publicBaseUrl(req);
-  const via = collegeName ? ` (via ${collegeName})` : '';
+  const via = organizationName ? ` (via ${organizationName})` : '';
   await m.transport.sendMail({
     from: m.from,
     to: coachEmail,

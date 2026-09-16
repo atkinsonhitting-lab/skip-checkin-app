@@ -117,7 +117,7 @@ function userTabs(active, user) {
     tabs.splice(4, 0, { href: '/program/routine', label: 'Routine', active: active === 'routine' });
     tabs.splice(5, 0, { href: '/videos', label: 'Videos', active: active === 'videos' });
   }
-  // Colleges can turn Talk to Skip off for their players: no tab, no FAB,
+  // Organizations can turn Talk to Skip off for their players: no tab, no FAB,
   // no bottom-bar icon (all three key off this tab list).
   if (user && user.skipChatDisabled) {
     return tabs.filter((t) => t.href !== '/chat');
@@ -126,22 +126,26 @@ function userTabs(active, user) {
 }
 
 function coachTabs(active, approvalCount, user) {
-  // College coaches are scoped to their school: Home, Hitters, Approvals.
-  // No Train Skip, no Programs/Videos, no Colleges admin.
-  if (user && user.role === 'coach' && user.collegeId) {
-    return [
+  // Organization coaches are scoped to their program: Home, Hitters, Approvals,
+  // plus Organizations so they can run their own teams and coaches (Bobby's
+  // rule: the program is the master account). Team coaches get no Organizations tab.
+  // No Train Skip, no Programs/Videos.
+  if (user && user.role === 'coach' && user.organizationId) {
+    const tabs = [
       { href: '/coach', label: 'Home', active: active === 'home' },
       { href: '/coach/hitters', label: 'Hitters', active: active === 'hitters' },
       { href: '/coach/approvals', label: 'Approvals', active: active === 'approvals', badge: approvalCount > 0 ? String(approvalCount) : null },
-      { href: '/settings', label: 'Settings', active: active === 'settings' },
     ];
+    if (!user.teamId) tabs.push({ href: '/coach/organizations', label: 'Organizations', active: active === 'organizations' });
+    tabs.push({ href: '/settings', label: 'Settings', active: active === 'settings' });
+    return tabs;
   }
   return [
     { href: '/coach', label: 'Home', active: active === 'home' },
     { href: '/coach/hitters', label: 'Hitters', active: active === 'hitters' },
     { href: '/coach/programs', label: 'Programs', active: active === 'programs' },
     { href: '/coach/videos', label: 'Videos', active: active === 'videos' },
-    { href: '/coach/colleges', label: 'Colleges', active: active === 'colleges' },
+    { href: '/coach/organizations', label: 'Organizations', active: active === 'organizations' },
     { href: '/coach/skip', label: 'Train Skip', active: active === 'skip' },
     { href: '/coach/approvals', label: 'Approvals', active: active === 'approvals', badge: approvalCount > 0 ? String(approvalCount) : null },
     { href: '/settings', label: 'Settings', active: active === 'settings' },
@@ -199,8 +203,8 @@ function registerPage(error) {
         <label>Confirm password
           <input type="password" name="confirm_password" autocomplete="new-password" required minlength="8">
         </label>
-        <label>College code <span class="hint-inline">(optional — only if your coach gave you one)</span>
-          <input type="text" name="college_code" autocomplete="off" maxlength="20" style="text-transform:uppercase">
+        <label>Organization or team code <span class="hint-inline">(optional — only if your coach gave you one)</span>
+          <input type="text" name="organization_code" autocomplete="off" maxlength="20" style="text-transform:uppercase">
         </label>
         <button type="submit" class="btn-primary">Create account</button>
       </form>
@@ -754,7 +758,7 @@ function pendingApprovalCards(pending, canEdit) {
       (p) => `<div class="card athlete-card">
         <div class="athlete-card-name">${esc(p.name)}</div>
         <div class="athlete-card-email">${esc(p.email)}</div>
-        <div class="athlete-card-meta">signed up ${fmtDate(p.created_at)}${p.college_name ? ` · ${esc(p.college_name)}` : ''}</div>
+        <div class="athlete-card-meta">signed up ${fmtDate(p.created_at)}${p.organization_name ? ` · ${esc(p.organization_name)}` : ''}${p.team_name ? ` · ${esc(p.team_name)}` : ''}</div>
         ${canEdit
           ? `<div style="display:flex;gap:8px;margin-top:10px">
           <form method="post" action="/coach/approve/${p.id}" style="flex:1;margin:0">
@@ -783,24 +787,106 @@ function coachApprovalsPage(user, pending) {
   });
 }
 
-// Coach Colleges tab (Bobby only): add a college, hand out its signup code,
-// flip Talk to Skip per school, and manage that school's coach accounts.
-function coachCollegesPage(user, colleges, error, addedId) {
-  const cards = (colleges || [])
+// Coach Organizations tab (Bobby only): add a organization, hand out its signup code,
+// flip Talk to Skip per organization, and manage that organization's coach accounts.
+// Confirm page before Bobby deletes a organization: players go standalone,
+// the organization's coach accounts are removed.
+function coachOrganizationDeletePage(user, organization, playerCount, coachCount, teamCount) {
+  return layout({
+    title: 'Delete organization',
+    user,
+    tabs: coachTabs('organizations', user.approvalCount, user),
+    body: `<h1 class="page-title">Delete ${esc(organization.name)}?</h1>
+    <div class="card">
+      <p>This permanently removes <strong>${esc(organization.name)}</strong> (signup code ${esc(organization.code)}).</p>
+      <ul>
+        <li>${playerCount} player${playerCount === 1 ? '' : 's'} ${playerCount === 1 ? 'becomes' : 'become'} standalone \u2014 accounts and check-ins stay, just with no organization attached.</li>
+        <li>${teamCount} team${teamCount === 1 ? '' : 's'} will be removed.</li>
+        <li>${coachCount} coach account${coachCount === 1 ? '' : 's'} will be removed.</li>
+      </ul>
+      <form method="post" action="/coach/organizations/${organization.id}/delete" class="form">
+        <button class="btn-danger" type="submit">Yes, delete ${esc(organization.name)}</button>
+      </form>
+      <p style="margin-top:10px"><a href="/coach/organizations">Keep it \u2014 go back</a></p>
+    </div>`,
+  });
+}
+
+function coachTeamDeletePage(user, organization, team, playerCount, coachCount) {
+  return layout({
+    title: 'Delete team',
+    user,
+    tabs: coachTabs('organizations', user.approvalCount, user),
+    body: `<h1 class="page-title">Delete ${esc(team.name)}?</h1>
+    <div class="card">
+      <p>This removes the team <strong>${esc(team.name)}</strong> from ${esc(organization.name)} (signup code ${esc(team.code)}).</p>
+      <ul>
+        <li>${playerCount} player${playerCount === 1 ? '' : 's'} stay${playerCount === 1 ? 's' : ''} in the program \u2014 accounts and check-ins stay, just no longer on this team.</li>
+        <li>${coachCount} coach account${coachCount === 1 ? '' : 's'} on this team will be removed.</li>
+      </ul>
+      <form method="post" action="/coach/organizations/${organization.id}/teams/${team.id}/delete" class="form">
+        <button class="btn-danger" type="submit">Yes, delete ${esc(team.name)}</button>
+      </form>
+      <p style="margin-top:10px"><a href="/coach/organizations">Keep it \u2014 go back</a></p>
+    </div>`,
+  });
+}
+
+function coachOrganizationsPage(user, organizations, error, addedId) {
+  // Bobby (full global coach): everything. The program's own organization-level
+  // coaches: run their teams and coaches. Everyone else (Cam, team coaches):
+  // read-only.
+  const isBobby = user.role === 'coach' && user.canEdit !== false && !user.organizationId;
+  const managesTeams = isBobby || (user.role === 'coach' && user.organizationId && !user.teamId);
+  const teamCard = (c, t) => {
+    const coachRows = (t.coaches || [])
+      .map((ch) => {
+        const name = [ch.first_name, ch.last_name].filter(Boolean).join(' ') || ch.email;
+        return `<div class="remote-row"><div><strong>${esc(name)}</strong><div class="hint-inline">${esc(ch.email)}</div></div>
+          ${managesTeams ? `<form method="post" action="/coach/organizations/${c.id}/teams/${t.id}/coaches/remove" class="inline-form" style="margin:0">
+            <input type="hidden" name="coach_id" value="${ch.id}">
+            <button class="btn-small btn-quiet" type="submit">Remove</button>
+          </form>` : ''}</div>`;
+      })
+      .join('');
+    return `<div class="card" style="margin-top:10px">
+      <div style="display:flex;justify-content:space-between;align-items:start;gap:12px;flex-wrap:wrap">
+        <div>
+          <div class="athlete-card-name">${esc(t.name)}</div>
+          <div class="athlete-card-meta">team code: <strong style="font-size:16px;letter-spacing:1px">${esc(t.code)}</strong> \u00b7 ${t.playerCount} player${t.playerCount === 1 ? '' : 's'}</div>
+        </div>
+        ${managesTeams ? `<a class="btn-small btn-quiet" href="/coach/organizations/${c.id}/teams/${t.id}/delete" style="text-decoration:none">Delete team</a>` : ''}
+      </div>
+      <h4 class="section-head" style="margin-top:10px">Team coaches</h4>
+      ${coachRows || `<p class="hint">No coaches on this team yet \u2014 they\u2019ll see only ${esc(t.name)}\u2019s players.</p>`}
+      ${managesTeams ? `<details style="margin-top:10px">
+        <summary class="hint" style="cursor:pointer">Add a team coach</summary>
+        <form method="post" action="/coach/organizations/${c.id}/teams/${t.id}/coaches/add" class="form" style="margin-top:10px">
+          <label>First name<input name="first_name" required maxlength="40"></label>
+          <label>Last name<input name="last_name" required maxlength="40"></label>
+          <label>Email<input type="email" name="email" required></label>
+          <label>Password <span class="hint-inline">(8+ characters)</span><input type="password" name="password" required minlength="8"></label>
+          <button class="btn-primary" type="submit">Create team coach</button>
+        </form>
+      </details>` : ''}
+    </div>`;
+  };
+  const cards = (organizations || [])
     .map((c) => {
       const coachRows = (c.coaches || [])
         .map((ch) => {
           const name = [ch.first_name, ch.last_name].filter(Boolean).join(' ') || ch.email;
           return `<div class="remote-row"><div><strong>${esc(name)}</strong><div class="hint-inline">${esc(ch.email)}</div></div>
-            <form method="post" action="/coach/colleges/${c.id}/coaches/remove" class="inline-form" style="margin:0">
+            ${managesTeams ? `<form method="post" action="/coach/organizations/${c.id}/coaches/remove" class="inline-form" style="margin:0">
               <input type="hidden" name="coach_id" value="${ch.id}">
               <button class="btn-small btn-quiet" type="submit">Remove</button>
-            </form></div>`;
+            </form>` : ''}</div>`;
         })
         .join('');
       const added = String(addedId) === String(c.id)
-        ? `<div class="notice">College added. Hand this code to their coaches: <strong>${esc(c.code)}</strong></div>`
+        ? `<div class="notice">Organization added. Hand this code to their coaches: <strong>${esc(c.code)}</strong></div>`
         : '';
+      const teamCards = (c.teams || []).map((t) => teamCard(c, t)).join('');
       return `<div class="card">
         ${added}
         <div style="display:flex;justify-content:space-between;align-items:start;gap:12px;flex-wrap:wrap">
@@ -808,40 +894,52 @@ function coachCollegesPage(user, colleges, error, addedId) {
             <div class="athlete-card-name">${esc(c.name)}</div>
             <div class="athlete-card-meta">signup code: <strong style="font-size:18px;letter-spacing:1px">${esc(c.code)}</strong> \u00b7 ${c.playerCount} player${c.playerCount === 1 ? '' : 's'}</div>
           </div>
-          <form method="post" action="/coach/colleges/${c.id}/skip" style="margin:0">
+          ${isBobby ? `<div style="display:flex;gap:8px;align-items:center">
+          <form method="post" action="/coach/organizations/${c.id}/skip" style="margin:0">
             <button class="btn-small${c.skip_enabled ? '' : ' btn-quiet'}" type="submit">Talk to Skip: ${c.skip_enabled ? 'ON' : 'OFF'}</button>
           </form>
+          <a class="btn-small btn-quiet" href="/coach/organizations/${c.id}/delete" style="text-decoration:none;display:inline-block">Delete</a>
+          </div>` : ''}
         </div>
-        <h3 class="section-head" style="margin-top:14px">Coaches</h3>
-        ${coachRows || '<p class="hint">No coaches yet \u2014 add one below and they can log in to see this school\u2019s players.</p>'}
-        <details style="margin-top:10px">
-          <summary class="hint" style="cursor:pointer">Add a coach account</summary>
-          <form method="post" action="/coach/colleges/${c.id}/coaches/add" class="form" style="margin-top:10px">
+        <h3 class="section-head" style="margin-top:14px">Program coaches</h3>
+        ${coachRows || '<p class="hint">No program coaches yet \u2014 they see every team in the program.</p>'}
+        ${managesTeams ? `<details style="margin-top:10px">
+          <summary class="hint" style="cursor:pointer">Add a program coach</summary>
+          <form method="post" action="/coach/organizations/${c.id}/coaches/add" class="form" style="margin-top:10px">
             <label>First name<input name="first_name" required maxlength="40"></label>
             <label>Last name<input name="last_name" required maxlength="40"></label>
             <label>Email<input type="email" name="email" required></label>
             <label>Password <span class="hint-inline">(8+ characters)</span><input type="password" name="password" required minlength="8"></label>
             <button class="btn-primary" type="submit">Create coach account</button>
           </form>
-        </details>
+        </details>` : ''}
+        <h3 class="section-head" style="margin-top:16px">Teams</h3>
+        ${teamCards || '<p class="hint">No teams yet \u2014 add one and each team gets its own signup code and coaches.</p>'}
+        ${managesTeams ? `<details style="margin-top:10px">
+          <summary class="hint" style="cursor:pointer">Add a team</summary>
+          <form method="post" action="/coach/organizations/${c.id}/teams/add" class="form" style="margin-top:10px">
+            <label>Team name<input name="name" required maxlength="60" placeholder="e.g. 14U Black"></label>
+            <button class="btn-primary" type="submit">Add team</button>
+          </form>
+        </details>` : ''}
       </div>`;
     })
     .join('');
   return layout({
-    title: 'Colleges',
+    title: 'Organizations',
     user,
-    tabs: coachTabs('colleges', user.approvalCount, user),
-    body: `<h1 class="page-title">Colleges</h1>
-    <p class="hint">Add a program, give its coaches the signup code, and their players sign up under it. Coaches log in and see only their school\u2019s players \u2014 view-only, like Cam.</p>
+    tabs: coachTabs('organizations', user.approvalCount, user),
+    body: `<h1 class="page-title">Organizations</h1>
+    <p class="hint">Add a program, give its coaches the signup code, and their players sign up under it. Coaches log in and see only their organization\u2019s players \u2014 view-only, like Cam. Travel programs can split into teams: each team gets its own code and coaches who see only that team.</p>
     ${error ? `<div class="error">${esc(error)}</div>` : ''}
-    <div class="card">
-      <h2 class="section-head">Add a college</h2>
-      <form method="post" action="/coach/colleges/add" class="form">
-        <label>College name<input name="name" required maxlength="60" placeholder="e.g. Illinois State"></label>
-        <button class="btn-primary" type="submit">Add college</button>
+    ${isBobby ? `<div class="card">
+      <h2 class="section-head">Add a organization</h2>
+      <form method="post" action="/coach/organizations/add" class="form">
+        <label>Organization name<input name="name" required maxlength="60" placeholder="e.g. Illinois State"></label>
+        <button class="btn-primary" type="submit">Add organization</button>
       </form>
-    </div>
-    ${cards || '<div class="card empty">No colleges yet.</div>'}`,
+    </div>` : ''}
+    ${cards || '<div class="card empty">No organizations yet.</div>'}`,
   });
 }
 
@@ -849,9 +947,9 @@ function coachCollegesPage(user, colleges, error, addedId) {
 // quiet (no check-in in 3+ Chicago days), and the compact latest feed.
 function coachHomePage(user, quiet, latest, pending, pushOn) {
   const canEdit = user.role === 'coach' && user.canEdit !== false;
-  // College coaches see which school they're scoped to.
-  const schoolBanner = user.role === 'coach' && user.collegeName
-    ? `<div class="notice">${esc(user.collegeName)} — you\u2019re seeing this program\u2019s players only.</div>`
+  // Organization coaches see which program (and team) they're scoped to.
+  const orgBanner = user.role === 'coach' && user.organizationName
+    ? `<div class="notice">${esc(user.organizationName)}${user.teamName ? ` · ${esc(user.teamName)}` : ''} — you\u2019re seeing ${user.teamName ? 'this team' : 'this program'}\u2019s players only.</div>`
     : '';
   const approvalNudge = pending && pending.length
     ? `<a class="card approval-nudge" href="/coach/approvals">${pending.length} hitter${pending.length === 1 ? '' : 's'} waiting for approval →</a>`
@@ -872,7 +970,7 @@ function coachHomePage(user, quiet, latest, pending, pushOn) {
     user,
     tabs: coachTabs('home', user.approvalCount, user),
     body: `<h1 class="page-title">Skip Dashboard</h1>
-    ${schoolBanner}
+    ${orgBanner}
     ${canEdit && !pushOn ? '<p><button type="button" class="btn-small" id="push-enable-btn">Turn on notifications</button> <span class="hint-inline">get a push when a hitter needs approval</span></p>' : ''}
     ${approvalNudge}
     <h2 class="section-head">Gone quiet</h2>
@@ -890,7 +988,7 @@ function coachHittersPage(user, userStats) {
         <a href="/coach/user/${encodeURIComponent(a.email)}" style="display:block;color:inherit;text-decoration:none">
           <div class="athlete-card-name">${esc(a.name)}</div>
           <div class="athlete-card-email">${esc(a.email)}</div>
-          <div class="athlete-card-meta">${a.total} check-in${a.total === 1 ? '' : 's'}${a.last ? ` · last ${fmtDate(a.last)}` : ' · none yet'}${a.age != null ? ` · age ${a.age}` : ''}</div>
+          <div class="athlete-card-meta">${a.total} check-in${a.total === 1 ? '' : 's'}${a.last ? ` · last ${fmtDate(a.last)}` : ' · none yet'}${a.age != null ? ` · age ${a.age}` : ''}${a.team ? ` · ${esc(a.team)}` : ''}</div>
         </a>
         <form method="post" action="/coach/view-as" style="margin:8px 0 0">
           <input type="hidden" name="id" value="${a.id}">
@@ -1774,6 +1872,21 @@ function settingsPage(user, opts) {
         <button class="btn-primary" type="submit">Save changes</button>
       </form>
     </div>
+    ${isCoach ? '' : `<div class="card">
+      <h2 class="section-head">Organization / organization</h2>
+      ${user.organizationId && user.organizationName
+        ? `<p>You&apos;re with <strong>${esc(user.organizationName)}</strong>${user.teamName ? ` \u00b7 team <strong>${esc(user.teamName)}</strong>` : ''} \u2014 your organization&apos;s coach can see your check-ins.</p>
+           ${user.skipChatDisabled ? `<p class="hint">Your organization has Talk to Skip turned off, so it isn&apos;t available on your account.</p>` : ''}
+           <form method="post" action="/settings/organization" class="form">
+             <button class="btn-small btn-quiet" type="submit" name="organization_code" value="">Leave ${esc(user.organizationName)}</button>
+           </form>`
+        : `<p class="hint">Playing for a organization on The Daily Hitter? Enter the signup code your coach gave you \u2014 the program code or your team\u2019s code.</p>
+           <form method="post" action="/settings/organization" class="form">
+             <label>Organization or team code<input name="organization_code" autocomplete="off" placeholder="e.g. TESTUN-X7K2" style="text-transform:uppercase"></label>
+             <button class="btn-primary" type="submit">Join organization</button>
+           </form>
+           <p class="hint">Heads up: if your organization turned off Talk to Skip, joining removes your access to it.</p>`}
+    </div>`}
     <div class="card">
       <h2 class="section-head">Password</h2>
       <form method="post" action="/settings/password" class="form">
@@ -1822,7 +1935,9 @@ module.exports = {
   coachHittersPage,
   coachProgramsPage,
   coachApprovalsPage,
-  coachCollegesPage,
+  coachOrganizationsPage,
+  coachOrganizationDeletePage,
+  coachTeamDeletePage,
   coachUser,
   coachDeleteHitterPage,
   coachSkipPage,

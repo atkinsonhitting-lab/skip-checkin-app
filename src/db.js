@@ -8,6 +8,23 @@ const dbPath = process.env.DB_PATH || path.join(__dirname, '..', 'skip.db');
 const db = new DatabaseSync(dbPath);
 db.exec('PRAGMA journal_mode = WAL;');
 
+// node:sqlite has no .transaction() helper (unlike better-sqlite3), so add
+// one with the same shape: db.transaction(fn) returns a function that runs
+// fn inside BEGIN/COMMIT, rolling back on throw.
+db.transaction = function (fn) {
+  return (...args) => {
+    db.exec('BEGIN');
+    try {
+      const out = fn(...args);
+      db.exec('COMMIT');
+      return out;
+    } catch (e) {
+      try { db.exec('ROLLBACK'); } catch {}
+      throw e;
+    }
+  };
+};
+
 const USERS_SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,11 +64,20 @@ for (const col of ['first_name', 'last_name']) {
   }
 }
 
-// Colleges (Sep 2026): Bobby sells The Daily Hitter to college programs.
-// Each college has a signup code its coaches hand to players, plus a
-// per-college Talk to Skip switch — many programs want the check-ins and
-// the coach dashboard without players chatting with Skip.
-db.exec(`CREATE TABLE IF NOT EXISTS colleges (
+// Organizations (Sep 2026): Bobby sells The Daily Hitter to colleges, travel
+// programs, and hitting coaches. Each organization has a signup code its
+// coaches hand to players, plus a per-organization Talk to Skip switch — many
+// programs want the check-ins and the coach dashboard without players
+// chatting with Skip.
+// (First shipped as "colleges" on Sep 16 2026; renamed the same day to cover
+// travel programs and hitting coaches too.)
+{
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((t) => t.name);
+  if (tables.includes('colleges') && !tables.includes('organizations')) {
+    db.exec('ALTER TABLE colleges RENAME TO organizations');
+  }
+}
+db.exec(`CREATE TABLE IF NOT EXISTS organizations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
   code TEXT UNIQUE NOT NULL,
@@ -59,13 +85,37 @@ db.exec(`CREATE TABLE IF NOT EXISTS colleges (
   created_at TEXT NOT NULL
 );`);
 
-// College link + birthdate on users. A coach row with college_id set is a
-// college coach: view-only, scoped to their school's players. date_of_birth
-// is YYYY-MM-DD, collected at signup for every player.
-for (const col of ['college_id', 'date_of_birth']) {
+// Organization link + birthdate on users. A coach row with organization_id set
+// is an organization coach: view-only, scoped to their organization's
+// players. date_of_birth is YYYY-MM-DD, collected at signup for every player.
+{
+  const cols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+  if (cols.includes('college_id') && !cols.includes('organization_id')) {
+    db.exec('ALTER TABLE users RENAME COLUMN college_id TO organization_id');
+  }
+}
+for (const col of ['organization_id', 'date_of_birth']) {
   const cols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
   if (!cols.includes(col)) {
-    db.exec(`ALTER TABLE users ADD COLUMN ${col} ${col === 'college_id' ? 'INTEGER' : 'TEXT'};`);
+    db.exec(`ALTER TABLE users ADD COLUMN ${col} ${col === 'organization_id' ? 'INTEGER' : 'TEXT'};`);
+  }
+}
+
+// Teams (Sep 2026): travel programs group players into teams (14U Black,
+// 16U, …). The organization is the master account; each team has its own
+// signup code and its own coaches, who see only their team's players.
+// Organization-level coaches (team_id NULL) see every team in the program.
+db.exec(`CREATE TABLE IF NOT EXISTS teams (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  organization_id INTEGER NOT NULL REFERENCES organizations(id),
+  name TEXT NOT NULL,
+  code TEXT UNIQUE NOT NULL,
+  created_at TEXT NOT NULL
+);`);
+{
+  const cols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+  if (!cols.includes('team_id')) {
+    db.exec('ALTER TABLE users ADD COLUMN team_id INTEGER REFERENCES teams(id);');
   }
 }
 
