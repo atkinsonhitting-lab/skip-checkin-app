@@ -494,6 +494,13 @@ function notebookPage(user, checkins, notes, players, justSubmitted) {
 }
 
 
+const TIER_NOTES = {
+  'Locked In': "That's the standard. Remember exactly what this felt like.",
+  'Solid': 'Good day. Stack another one on top of it.',
+  'Off': 'Shake it off — keep what worked, flush the rest.',
+  'Rough': 'Everyone has them. Write down one thing to fix and move on.',
+};
+
 function tierBadgeClass(tier) {
   if (tier === 'Locked In') return 'ok';
   if (tier === 'Solid') return 'ok';
