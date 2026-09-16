@@ -108,6 +108,55 @@ if (process.env.BOOT_CREATE_USER) {
   }
 }
 
+// Remote org one-shot (Sep 2026): set BOOT_REMOTE_ORG=1 to create Bobby's own
+// organization "Atkinson Hitting Remote Development" and place his 4 remote
+// hitters in it. Idempotent: skips creation if the org exists, re-ensures the
+// hitter assignments and Talk to Skip access on every run.
+if (process.env.BOOT_REMOTE_ORG === '1') {
+  const REMOTE_ORG_NAME = 'Atkinson Hitting Remote Development';
+  const REMOTE_NAMES = ['Liam Stoffel', 'Dylan Kakuda', 'Ryan Seddon', 'Sam Chapman'];
+  let org = db.prepare('SELECT id, code, skip_enabled FROM organizations WHERE name = ?').get(REMOTE_ORG_NAME);
+  if (!org) {
+    const code = makeOrganizationCode(REMOTE_ORG_NAME);
+    const info = db
+      .prepare(
+        'INSERT INTO organizations (name, code, skip_enabled, created_at, deal_notes) VALUES (?, ?, 1, ?, ?)'
+      )
+      .run(REMOTE_ORG_NAME, code, new Date().toISOString(), 'Founder org — free forever, exempt from billing');
+    org = { id: info.lastInsertRowid, code, skip_enabled: 1 };
+    console.log(`BOOT_REMOTE_ORG: created org "${REMOTE_ORG_NAME}" code=${code}`);
+  } else if (!org.skip_enabled) {
+    db.prepare('UPDATE organizations SET skip_enabled = 1 WHERE id = ?').run(org.id);
+    console.log(`BOOT_REMOTE_ORG: enabled Talk to Skip for "${REMOTE_ORG_NAME}"`);
+  }
+  // Assign the 4 remote hitters: prefer the remote-program link, fall back to name match.
+  const lowered = REMOTE_NAMES.map((n) => n.toLowerCase());
+  const ph = lowered.map(() => '?').join(',');
+  const hitters = db
+    .prepare(
+      `SELECT u.id FROM users u
+       LEFT JOIN remote_programs p ON p.id = u.remote_program_id
+       WHERE u.role = 'athlete' AND (
+         lower(p.athlete_name) IN (${ph})
+         OR lower(u.athlete_name) IN (${ph})
+         OR lower(trim(coalesce(u.first_name,'') || ' ' || coalesce(u.last_name,''))) IN (${ph})
+       )`
+    )
+    .all(...lowered, ...lowered, ...lowered);
+  const assign = db.prepare('UPDATE users SET organization_id = ?, team_id = NULL WHERE id = ?');
+  let moved = 0;
+  for (const h of hitters) {
+    const cur = db.prepare('SELECT organization_id FROM users WHERE id = ?').get(h.id);
+    if (cur.organization_id !== org.id) {
+      assign.run(org.id, h.id);
+      moved++;
+    }
+  }
+  console.log(
+    `BOOT_REMOTE_ORG: org "${REMOTE_ORG_NAME}" code=${org.code}, ${hitters.length} remote hitters matched, ${moved} newly assigned`
+  );
+}
+
 // ---- Auth helpers ----
 
 function toReqUser(row) {
