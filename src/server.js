@@ -22,7 +22,15 @@ const { seedUsers, writeCredentialsFile, userCount } = require('./seed');
 const app = express();
 app.set('trust proxy', 1); // needed for secure cookies behind Render's proxy
 
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+      // Video library embeds Google Drive previews in an iframe.
+      'frame-src': ["'self'", 'https://drive.google.com'],
+    },
+  },
+}));
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
 // Never let browsers cache app pages or scripts — Bobby tests on his phone
