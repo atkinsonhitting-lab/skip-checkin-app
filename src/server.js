@@ -453,6 +453,16 @@ app.post('/login', (req, res) => {
     attemptFailed(ip);
     return res.send(views.loginPage('Wrong email or password.'));
   }
+  // Under-13 signups wait on a parent/guardian's emailed approval first.
+  if (row.role !== 'coach' && row.status === 'pending_parent') {
+    return res.send(
+      views.loginPage(
+        'Your account is waiting for a parent or guardian to approve it \u2014 ask them to check their email.',
+        null,
+        true
+      )
+    );
+  }
   // New signups wait for Bobby's approval before they can get in.
   if (row.role !== 'coach' && row.status !== 'approved') {
     return res.send(views.loginPage('Your account is waiting for coach approval. You\u2019ll be able to log in once it\u2019s approved.'));
@@ -537,12 +547,27 @@ app.post('/register', (req, res) => {
   }
   const hash = bcrypt.hashSync(password, 12);
   const athleteName = `${firstName} ${lastName}`;
+  // Under 13: verifiable parental consent (COPPA). The account stays in
+  // 'pending_parent' until the parent clicks the emailed approval link — only
+  // then does it enter the normal coach-approval queue.
+  const needsParentConsent = age !== null && age < 13;
+  const status = needsParentConsent ? 'pending_parent' : 'pending';
+  const consentToken = needsParentConsent ? crypto.randomBytes(32).toString('hex') : null;
+  const nowIso = new Date().toISOString();
   const info = db
     .prepare(
-      'INSERT INTO users (email, password_hash, role, athlete_name, first_name, last_name, created_at, status, organization_id, team_id, date_of_birth, player_type, accepted_terms_at, terms_version, parent_name, parent_email) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO users (email, password_hash, role, athlete_name, first_name, last_name, created_at, status, organization_id, team_id, date_of_birth, player_type, accepted_terms_at, terms_version, parent_name, parent_email, parent_consent_token_hash, parent_consent_sent_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     )
-    .run(email, hash, 'athlete', athleteName, firstName, lastName, new Date().toISOString(), 'pending', organizationId, teamId, dob, playerType, new Date().toISOString(), '1', parentName || null, parentEmail || null);
+    .run(email, hash, 'athlete', athleteName, firstName, lastName, nowIso, status, organizationId, teamId, dob, playerType, nowIso, '1', parentName || null, parentEmail || null, consentToken ? resetTokenHash(consentToken) : null, consentToken ? nowIso : null);
   linkRemoteProgram(info.lastInsertRowid, athleteName);
+  if (needsParentConsent) {
+    const base = publicBaseUrl(req);
+    const link = `${base}/parent-consent?token=${consentToken}`;
+    sendParentConsentEmail(parentEmail, athleteName, link, base).catch((e) =>
+      console.warn('parent consent email failed:', e.message)
+    );
+    return res.redirect('/parent-wait');
+  }
   // Tell Bobby so he can approve (or decline) the new hitter.
   notifyCoachOfSignup(req, email, athleteName, organizationId ? getOrganization(organizationId).name : null).catch((e) =>
     console.warn('signup notify failed:', e.message)
@@ -556,6 +581,108 @@ app.get('/pending', (req, res) => {
     return res.redirect('/');
   }
   res.send(views.pendingPage());
+});
+
+// Waiting room for under-13 signups: we emailed the parent, and the account
+// activates only after they click the approval link.
+app.get('/parent-wait', (req, res) => {
+  if (req.user) return res.redirect('/');
+  res.send(views.parentWaitPage());
+});
+
+// ---- Verifiable parental consent for under-13 signups (COPPA) ----
+const PARENT_CONSENT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+async function sendParentConsentEmail(to, childName, link, base) {
+  const m = mailer();
+  if (!m) {
+    console.warn('PARENT CONSENT (no SMTP configured):', link);
+    return false;
+  }
+  const first = String(childName || '').split(' ')[0] || 'your child';
+  await m.transport.sendMail({
+    from: m.from,
+    to,
+    subject: `Action needed: approve ${first}\u2019s Diamond Daily account`,
+    text:
+      `Hi,\n\n${childName} signed up for Diamond Daily, a baseball training journal app for players.\n\n` +
+      `Because ${first} is under 13, we need a parent or guardian\u2019s approval before the account can be used.\n\n` +
+      `What Diamond Daily collects: your child\u2019s name, email, date of birth, and whatever they log in the app \u2014 practice check-ins (scores and written notes), conversations with Skip (our AI training assistant), and notebook entries. We never sell personal information. Full details: ${base}/privacy\n\n` +
+      `To approve ${first}\u2019s account, click this link (expires in 7 days):\n${link}\n\n` +
+      `After you approve, the account still needs a coach\u2019s approval before it can be used. If you don\u2019t approve, the account stays inactive.\n\n\u2014 Diamond Daily`,
+  });
+  return true;
+}
+
+function validParentConsentToken(token) {
+  if (!token || typeof token !== 'string') return null;
+  const row = db
+    .prepare(
+      `SELECT u.id, u.email, u.athlete_name, u.first_name, u.last_name, u.parent_consent_sent_at,
+              u.organization_id, o.name AS organization_name
+       FROM users u LEFT JOIN organizations o ON o.id = u.organization_id
+       WHERE u.parent_consent_token_hash = ? AND u.parent_consent_verified_at IS NULL AND u.status = 'pending_parent'`
+    )
+    .get(resetTokenHash(token));
+  if (!row) return null;
+  if (new Date(row.parent_consent_sent_at).getTime() + PARENT_CONSENT_TTL_MS < Date.now()) return null;
+  return row;
+}
+
+// The parent's click IS the verifiable consent record: verify, clear the
+// token (single-use), and move the account into the coach-approval queue.
+app.get('/parent-consent', (req, res) => {
+  if (req.user) return res.redirect('/');
+  if (req.query.resend) return res.send(views.parentConsentResendPage());
+  const row = validParentConsentToken(req.query.token);
+  if (!row)
+    return res.send(
+      views.parentConsentPage(null, 'That link is invalid or expired. Ask for a new one below and we\u2019ll email it right over.')
+    );
+  const name = [row.first_name, row.last_name].filter(Boolean).join(' ') || row.athlete_name || 'your child';
+  db.prepare(
+    `UPDATE users SET parent_consent_verified_at = ?, parent_consent_token_hash = NULL, status = 'pending' WHERE id = ?`
+  ).run(new Date().toISOString(), row.id);
+  // Now they're in the normal coach-approval queue — tell the coach.
+  notifyCoachOfSignup(req, row.email, row.athlete_name || name, row.organization_name || null).catch((e) =>
+    console.warn('signup notify failed:', e.message)
+  );
+  res.send(views.parentConsentPage(name, null));
+});
+
+// Resend the parent-approval email (rate-limited; generic reply so account
+// emails can't be enumerated).
+app.post('/parent-consent/resend', (req, res) => {
+  const ip = req.ip;
+  if (!attemptAllowed(ip)) {
+    return res.send(views.parentConsentResendPage('Too many attempts. Wait a few minutes and try again.'));
+  }
+  const email = String(req.body.child_email || '').trim().toLowerCase();
+  const user = validEmail(email)
+    ? db
+        .prepare(
+          `SELECT id, email, athlete_name, parent_email FROM users WHERE email = ? AND status = 'pending_parent' AND parent_consent_verified_at IS NULL`
+        )
+        .get(email)
+    : null;
+  if (user && user.parent_email) {
+    const token = crypto.randomBytes(32).toString('hex');
+    const sentAt = new Date().toISOString();
+    db.prepare(`UPDATE users SET parent_consent_token_hash = ?, parent_consent_sent_at = ? WHERE id = ?`).run(
+      resetTokenHash(token),
+      sentAt,
+      user.id
+    );
+    const base = publicBaseUrl(req);
+    sendParentConsentEmail(user.parent_email, user.athlete_name, `${base}/parent-consent?token=${token}`, base).catch((e) =>
+      console.warn('consent resend failed:', e.message)
+    );
+  } else {
+    attemptFailed(ip);
+  }
+  res.send(
+    views.parentConsentResendPage('If that account is waiting on parent approval, a new email is on its way. Check the inbox (and spam).')
+  );
 });
 
 app.get('/logout', (req, res) => {
@@ -2369,7 +2496,11 @@ app.post('/coach/coaches/toggle', requireCoach, (req, res) => {
 // Approvals tab: approve or decline waiting hitters right here.
 app.get('/coach/approvals', requireCoachAny, (req, res) => {
   setApprovalCount(req);
-  res.send(views.coachApprovalsPage(realUser(req), pendingList(orgScope(req))));
+  const sp = scopeParams(orgScope(req));
+  const waitingOnParent = db
+    .prepare(`SELECT COUNT(*) AS n FROM users WHERE role = 'athlete' AND status = 'pending_parent' ${SCOPE_CLAUSE}`)
+    .get(...sp).n;
+  res.send(views.coachApprovalsPage(realUser(req), pendingList(orgScope(req)), waitingOnParent));
 });
 
 // Manage an organization's teams and coaches: Bobby (full global coach), or

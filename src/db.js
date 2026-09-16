@@ -164,6 +164,14 @@ for (const col of ['accepted_terms_at', 'terms_version', 'parent_name', 'parent_
   if (!ucols.includes(col)) db.exec(`ALTER TABLE users ADD COLUMN ${col} TEXT;`);
 }
 
+// Verifiable parental consent for under-13 signups (Sep 2026, COPPA): the
+// consent token's SHA-256 hash is stored on the user row; the raw token only
+// ever appears in the email sent to the parent. All columns nullable.
+for (const col of ['parent_consent_token_hash', 'parent_consent_sent_at', 'parent_consent_verified_at']) {
+  const ucols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+  if (!ucols.includes(col)) db.exec(`ALTER TABLE users ADD COLUMN ${col} TEXT;`);
+}
+
 // Brain proposals (Sep 2026): Cam helps build Skip by proposing Brain entries,
 // but nothing goes live until EVERY coach has approved it. The proposer
 // auto-approves on submit; the other coach(es) approve from the Train Skip

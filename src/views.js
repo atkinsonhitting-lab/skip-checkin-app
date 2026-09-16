@@ -154,7 +154,7 @@ function coachTabs(active, approvalCount, user) {
 
 // ---------- Pages ----------
 
-function loginPage(error, notice) {
+function loginPage(error, notice, parentResend) {
   return layout({
     title: 'Log in',
     user: null,
@@ -164,6 +164,7 @@ function loginPage(error, notice) {
       <p class="hint">Step into Diamond Daily. Log your sessions — the app learns what your best days look like.</p>
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
       ${notice ? `<div class="notice">${esc(notice)}</div>` : ''}
+      ${parentResend ? `<p class="hint" style="text-align:center"><a href="/parent-consent?resend=1">Resend the parent email</a></p>` : ''}
       <form method="post" action="/login" class="form">
         <label>Email<input type="email" name="email" autocomplete="email" required></label>
         <label>Password<input type="password" name="password" autocomplete="current-password" required></label>
@@ -216,6 +217,7 @@ function registerPage(error) {
         </label>
         <div id="parent-fields" hidden>
           <p class="hint"><strong>Under 18?</strong> A parent or guardian has to accept the terms for you — have them fill this in.</p>
+          <p class="hint" id="under13-note" hidden><strong>Under 13?</strong> We'll email your parent a link to approve — your account activates after they click it, then your coach approves it.</p>
           <label>Parent/guardian full name
             <input type="text" name="parent_name" autocomplete="off" maxlength="80">
           </label>
@@ -233,19 +235,22 @@ function registerPage(error) {
       (function () {
         var dob = document.querySelector('input[name="date_of_birth"]');
         var box = document.getElementById('parent-fields');
-        function isUnder18() {
-          if (!dob.value) return false;
+        var note13 = document.getElementById('under13-note');
+        function age() {
+          if (!dob.value) return null;
           var d = new Date(dob.value + 'T12:00:00');
-          if (isNaN(d.getTime())) return false;
-          var now = new Date(), age = now.getFullYear() - d.getFullYear();
+          if (isNaN(d.getTime())) return null;
+          var now = new Date(), a = now.getFullYear() - d.getFullYear();
           var m = now.getMonth() - d.getMonth();
-          if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age--;
-          return age < 18;
+          if (m < 0 || (m === 0 && now.getDate() < d.getDate())) a--;
+          return a;
         }
         function sync() {
-          var u = isUnder18();
-          box.hidden = !u;
-          box.querySelectorAll('input').forEach(function (i) { i.required = u; });
+          var a = age();
+          var u18 = a !== null && a < 18;
+          box.hidden = !u18;
+          box.querySelectorAll('input').forEach(function (i) { i.required = u18; });
+          note13.hidden = !(a !== null && a < 13);
         }
         dob.addEventListener('change', sync);
         dob.addEventListener('input', sync);
@@ -267,6 +272,64 @@ function pendingPage() {
       <img src="/diamond-daily-logo.jpg" class="brand-logo-full" alt="Diamond Daily — A Baseball Journal">
       <h1 class="page-title">You're on the list.</h1>
       <p class="hint">Every account is personally approved. You'll be able to log in as soon as you get the green light.</p>
+      <p class="hint" style="text-align:center"><a href="/login">Back to log in</a></p>
+    </div>`,
+  });
+}
+
+// Waiting room for under-13 signups: parent email sent, account activates
+// after the parent clicks the approval link.
+function parentWaitPage() {
+  return layout({
+    title: 'Check your parent\u2019s email',
+    user: null,
+    tabs: [],
+    body: `<div class="login-card card">
+      <img src="/diamond-daily-logo.jpg" class="brand-logo-full" alt="Diamond Daily — A Baseball Journal">
+      <h1 class="page-title">One more step.</h1>
+      <p class="hint">Because you're under 13, we emailed your parent/guardian an approval link. Your account activates once they click it — then your coach gives the final approval and you're in.</p>
+      <p class="hint" style="text-align:center"><a href="/parent-consent?resend=1">Didn\u2019t get the email? Send it again</a></p>
+      <p class="hint" style="text-align:center"><a href="/login">Back to log in</a></p>
+    </div>`,
+  });
+}
+
+// Parent consent result: success (name set) or invalid/expired link (error).
+function parentConsentPage(name, error) {
+  return layout({
+    title: 'Parent approval',
+    user: null,
+    tabs: [],
+    body: `<div class="login-card card">
+      <img src="/diamond-daily-logo.jpg" class="brand-logo-full" alt="Diamond Daily — A Baseball Journal">
+      ${name
+        ? `<h1 class="page-title">Thanks!</h1>
+           <p class="hint">${esc(name)}\u2019s account is approved and now waiting for coach approval. They\u2019ll be able to log in once it\u2019s approved.</p>`
+        : `<h1 class="page-title">That link didn\u2019t work.</h1>
+           ${error ? `<div class="error">${esc(error)}</div>` : ''}
+           <p class="hint">Links expire after 7 days and can only be used once.</p>
+           <form method="post" action="/parent-consent/resend" class="form">
+             <label>Player\u2019s account email<input type="email" name="child_email" autocomplete="email" required></label>
+             <button type="submit" class="btn-primary">Send a new link</button>
+           </form>`}
+      <p class="hint" style="text-align:center"><a href="/login">Back to log in</a></p>
+    </div>`,
+  });
+}
+
+function parentConsentResendPage(message) {
+  return layout({
+    title: 'Resend parent email',
+    user: null,
+    tabs: [],
+    body: `<div class="login-card card">
+      <img src="/diamond-daily-logo.jpg" class="brand-logo-full" alt="Diamond Daily — A Baseball Journal">
+      <h1 class="page-title">Resend the approval email.</h1>
+      ${message ? `<div class="notice">${esc(message)}</div>` : ''}
+      <form method="post" action="/parent-consent/resend" class="form">
+        <label>Player\u2019s account email<input type="email" name="child_email" autocomplete="email" required></label>
+        <button type="submit" class="btn-primary">Send it again</button>
+      </form>
       <p class="hint" style="text-align:center"><a href="/login">Back to log in</a></p>
     </div>`,
   });
@@ -1135,7 +1198,7 @@ function pendingApprovalCards(pending, canEdit) {
     .join('');
 }
 
-function coachApprovalsPage(user, pending) {
+function coachApprovalsPage(user, pending, waitingOnParent) {
   const n = (pending || []).length;
   const canEdit = user.role === 'coach' && user.canEdit !== false;
   return layout({
@@ -1144,6 +1207,7 @@ function coachApprovalsPage(user, pending) {
     tabs: coachTabs('approvals', user.approvalCount, user),
     body: `<h1 class="page-title">Approvals</h1>
     <p class="hint">${canEdit ? 'Every new account waits here until you approve it. Approved players can log in right away.' : 'Every new account waits here until it gets approved.'}</p>
+    ${waitingOnParent > 0 ? `<p class="hint">${waitingOnParent} under-13 signup${waitingOnParent === 1 ? '' : 's'} waiting on a parent or guardian to approve \u2014 ${waitingOnParent === 1 ? 'it shows' : 'they show'} up here after that.</p>` : ''}
     ${n ? `<div class="athlete-grid">${pendingApprovalCards(pending, canEdit)}</div>` : `<div class="card empty">Nobody waiting — you're all caught up.</div>`}`,
   });
 }
@@ -2522,6 +2586,9 @@ module.exports = {
   loginPage,
   registerPage,
   pendingPage,
+  parentWaitPage,
+  parentConsentPage,
+  parentConsentResendPage,
   termsPage,
   privacyPage,
   userHome,
