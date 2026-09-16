@@ -2158,7 +2158,7 @@ function coachFinances() {
   // Individual subscriptions (ready for when billing launches).
   const subs = db.prepare(`SELECT s.*, u.athlete_name, u.email FROM user_subscriptions s
     JOIN users u ON u.id = s.user_id WHERE s.status = 'active'`).all();
-  const planMrr = { monthly: 1299, annual: Math.round(9999 / 12), founding: Math.round(4900 / 12) };
+  const planMrr = { monthly: 1999, annual: Math.round(14999 / 12), founding: Math.round(4900 / 12) };
   const mrr = subs.reduce((sum, s) => sum + (planMrr[s.plan] || 0), 0);
   return { orgs, collected, outstanding, pipeline, activeDeals, renewalsDue, payments, monthly, subs, mrr };
 }
