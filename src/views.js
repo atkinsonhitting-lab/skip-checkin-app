@@ -15,7 +15,31 @@ function fmtDate(iso) {
 
 // ---------- Layout ----------
 
+// Bottom tab bar (Sep 2026): the daily loop — Home, Check In, Notebook,
+// Talk to Skip — one thumb-tap away for hitters. The hamburger drawer keeps
+// every tab (Mental Game, Program, Routine, Videos, Settings); the bar is
+// additive, hitter-only, hidden on desktop where the drawer is the nav.
+const TABBAR_HREFS = ['/', '/checkin', '/notebook', '/chat'];
+const TABBAR_ICONS = {
+  '/': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>',
+  '/checkin': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
+  '/notebook': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>',
+  '/chat': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>',
+};
+function bottomTabbar(user, tabs) {
+  if (!user || user.role !== 'athlete') return '';
+  const items = (tabs || []).filter((t) => TABBAR_HREFS.includes(t.href));
+  if (!items.length) return '';
+  return `<nav id="tabbar" aria-label="Primary">${items
+    .map(
+      (t) =>
+        `<a href="${t.href}" class="tabbar-link${t.active ? ' active' : ''}">${TABBAR_ICONS[t.href] || ''}<span>${esc(t.label)}</span></a>`
+    )
+    .join('')}</nav>`;
+}
+
 function layout({ title, user, tabs, body }) {
+  const tabbarHtml = bottomTabbar(user, tabs);
   const tabHtml = (tabs || [])
     .map((t) => `<a href="${t.href}" class="drawer-link${t.active ? ' active' : ''}"><span class="drawer-link-text">${esc(t.label)}${t.sub ? `<span class="drawer-sub">${esc(t.sub)}</span>` : ''}</span>${t.badge ? `<span class="tab-badge">${esc(t.badge)}</span>` : ''}</a>`)
     .join('');
@@ -44,12 +68,13 @@ function layout({ title, user, tabs, body }) {
 <meta name="apple-mobile-web-app-title" content="The Daily Hitter">
 <meta name="theme-color" content="#0a0a0a">
 </head>
-<body>
+<body${tabbarHtml ? ' class="has-tabbar"' : ''}>
 <header class="topbar">
   <div class="topbar-left">${tabHtml ? `<button type="button" id="drawer-btn" aria-label="Open menu">\u2630</button>` : ''}<div class="brand"><img src="/daily-hitter-logo.jpg" class="brand-logo-icon" alt=""> THE DAILY HITTER</div></div>
   ${user ? `<div class="userbox">${esc(user.displayName)} · <a href="/logout">Log out</a></div>` : ''}
 </header>
 ${drawer}
+${tabbarHtml}
 ${user && user.viewAs ? `<div class="viewas-banner">Previewing as <strong>${esc(user.viewAsName)}</strong> — actions are disabled. <form method="post" action="/coach/view-as/exit" style="display:inline;margin:0"><button type="submit" class="viewas-exit">Exit preview</button></form></div>` : ''}
 <main class="wrap">${body}</main>
 ${(() => {
