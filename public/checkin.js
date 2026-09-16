@@ -131,3 +131,14 @@
   throwBox.addEventListener('change', sync);
   sync();
 })();
+
+// Submit guard: onsubmit disables the submit button ("Saving…") to block
+// double-taps/retries. If the user navigates back to the form afterwards,
+// the browser may restore it with the button still disabled — re-enable it.
+window.addEventListener('pageshow', function () {
+  var btns = document.querySelectorAll('form button[type=submit][disabled]');
+  for (var i = 0; i < btns.length; i++) {
+    btns[i].disabled = false;
+    if (btns[i].textContent === 'Saving…') btns[i].textContent = 'Submit check-in';
+  }
+});
