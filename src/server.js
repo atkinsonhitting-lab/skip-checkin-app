@@ -692,6 +692,7 @@ app.get('/', requireLogin, (req, res) => {
     streak: streakData(req.user.id),
     pushOn: userPushSubscriptions(req.user.id).length > 0,
     pushEnabled,
+    precheckin: todayPreCheckin(req.user.id),
   }));
 });
 
@@ -1326,6 +1327,38 @@ app.post('/checkin', requireLogin, (req, res) => {
       (b.whats_next || '').trim()
     );
   res.redirect(`/checkin/score/${info.lastInsertRowid}`);
+});
+
+// ---- Optional pre-hit check-in: set the intent BEFORE the session ----
+// Never required. Skip reads today's intent and connects the post-session
+// check-in back to it.
+function todayPreCheckin(userId) {
+  const rows = db
+    .prepare('SELECT * FROM pre_checkins WHERE user_id = ? ORDER BY created_at DESC LIMIT 5')
+    .all(userId);
+  const today = chiDay(new Date());
+  return rows.find((r) => { try { return chiDay(r.created_at) === today; } catch (e) { return false; } }) || null;
+}
+
+app.get('/precheckin', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.redirect('/coach');
+  const kind = req.query.kind === 'game' ? 'game' : 'cage';
+  res.send(views.preCheckinPage(req.user, kind, null, {}));
+});
+
+app.post('/precheckin', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.status(403).send('Forbidden');
+  const kind = req.body.kind === 'game' ? 'game' : 'cage';
+  const focus = String(req.body.focus || '').trim().slice(0, 2000);
+  const plan = String(req.body.plan || '').trim().slice(0, 2000);
+  const flush = String(req.body.flush || '').trim().slice(0, 2000);
+  if (!focus) {
+    return res.send(views.preCheckinPage(req.user, kind, 'Give me at least one thing — what\u2019s the focus?', { focus, plan, flush }));
+  }
+  db.prepare(
+    'INSERT INTO pre_checkins (user_id, kind, focus, plan, flush, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(req.user.id, kind, focus, plan, flush, new Date().toISOString());
+  res.redirect('/');
 });
 
 // ---- Notebook: check-ins + hitting notes in one place ----
@@ -1968,7 +2001,19 @@ function skipDataBlock(userId) {
     : '';
   const progBlock = programCueBlock(userId);
   const mb = getMentalBaseline(userId);
-  let mentalBlock = '';
+  // Today's pre-hit intent (Sep 2026): what he set BEFORE hitting. When he
+  // checks in after, connect the session back to this.
+  let intentBlock = '';
+  try {
+    const pre = todayPreCheckin(userId);
+    if (pre) {
+      const bits = [pre.kind === 'game' ? 'Pregame / Live ABs' : 'Cage session'];
+      if (pre.focus) bits.push(`Focus: "${String(pre.focus).slice(0, 200)}"`);
+      if (pre.plan) bits.push(`Plan: "${String(pre.plan).slice(0, 200)}"`);
+      if (pre.flush) bits.push(`Flushing: "${String(pre.flush).slice(0, 200)}"`);
+      intentBlock = `\nTODAY'S INTENT (he set this BEFORE today's session — when he checks in after, connect the session back to what he said here):\n${bits.join('\n')}`;
+    }
+  } catch (e) {}  let mentalBlock = '';
   if (mb && (mb.pregame_routine || mb.morning_routine || mb.breath_work || mb.when_sped_up)) {
     const bits = [];
     if (mb.pregame_routine) bits.push(`Pre-game routine: "${mb.pregame_routine.slice(0, 200)}"`);
@@ -1992,8 +2037,8 @@ function skipDataBlock(userId) {
         snap.bestDay
           ? `\nHIS BEST DAY — when he's struggling, take him back to exactly this (this is your #1 job):\n${snap.bestDay}`
           : ''
-      }${memBlock}${learnBlock}${playersBlock}${progBlock}${mentalBlock}`
-    : `HITTER DATA: no check-ins logged yet — this is a brand-new hitter. Ask what they are working on.${progBlock}${mentalBlock}`;
+      }${memBlock}${learnBlock}${playersBlock}${progBlock}${mentalBlock}${intentBlock}`
+    : `HITTER DATA: no check-ins logged yet — this is a brand-new hitter. Ask what they are working on.${progBlock}${mentalBlock}${intentBlock}`;
 }
 
 const COACH_SYSTEM = `You are Coach Skip, the AI hitting coach inside The Daily Hitter. You are talking to BOBBY ATKINSON — your head coach, the man whose brain you coach with. He is training you right now: giving feedback on your coaching, correcting your answers, teaching you how he wants his hitters coached. Listen carefully, take every correction seriously, and confirm specifically how you will apply what he tells you going forward. Talk to him like a trusted assistant coach — direct, no fluff, no motivational-poster talk. Keep replies short (2-4 sentences) unless he asks for more. Never mention you are an AI model. You are Coach Skip.

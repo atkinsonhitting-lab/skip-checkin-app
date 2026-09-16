@@ -491,6 +491,22 @@ CREATE TABLE IF NOT EXISTS user_subscriptions (
 );
 `);
 
+// Pre-hit check-ins (Sep 2026): optional intent-setting BEFORE a session.
+// kind: 'cage' (what he's working on + how) or 'game' (approach, one goal, flush).
+// Skip reads today's intent and connects the post-session check-in back to it.
+db.exec(`
+CREATE TABLE IF NOT EXISTS pre_checkins (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  kind TEXT NOT NULL DEFAULT 'cage',
+  focus TEXT NOT NULL DEFAULT '',
+  plan TEXT NOT NULL DEFAULT '',
+  flush TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_precheckins_user_time ON pre_checkins(user_id, created_at);
+`);
+
 // Coach feed REMOVED Sep 15 2026 (Bobby: Learn tab is a personal notebook, no social layer).
 // Drop the tables if a previous deploy created them.
 db.exec(`DROP TABLE IF EXISTS post_reactions; DROP TABLE IF EXISTS coach_posts;`);

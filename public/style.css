@@ -334,8 +334,9 @@ body.drawer-open #drawer { transform: none; }
 .score-kicker { text-transform: uppercase; letter-spacing: 2px; font-size: 13px; color: var(--muted); font-weight: 700; }
 .score-num { font-size: 84px; font-weight: 900; color: var(--red); line-height: 1.1; margin: 8px 0; }
 .skip-note { font-size: 15px; margin: 14px 0 4px; }
-.score-breakdown { display: flex; justify-content: center; gap: 24px; margin: 18px 0; }
-.score-breakdown .label { display: block; margin-bottom: 4px; }
+.score-breakdown { display: flex; justify-content: center; gap: 8px; margin: 18px 0; }
+.score-breakdown > div { flex: 1 1 0; min-width: 0; }
+.score-breakdown .label { display: block; margin-bottom: 4px; min-width: 0; margin-right: 0; font-size: 11px; letter-spacing: 0; }
 .score-breakdown strong { font-size: 20px; }
 .score-actions { max-width: 340px; margin: 0 auto; }
 

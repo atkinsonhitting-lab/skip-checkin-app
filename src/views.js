@@ -160,7 +160,7 @@ function pendingPage() {
 }
 
 function userHome(user, extras) {
-  const { whatWorks = {}, avgScore = null, checkinCount = 0, recent = [], streak = null, pushOn = false, pushEnabled = false } = extras || {};
+  const { whatWorks = {}, avgScore = null, checkinCount = 0, recent = [], streak = null, pushOn = false, pushEnabled = false, precheckin = null } = extras || {};
   let streakCard = '';
   if (streak) {
     const n = streak.streak || 0;
@@ -184,6 +184,13 @@ function userHome(user, extras) {
   const head = avgScore !== null
     ? `<div class="level-head"><p class="hint">Skip's read on you across ${checkinCount} session${checkinCount === 1 ? '' : 's'}:</p>${levelLine(avgScore)}</div>`
     : `<p class="hint">No check-ins yet. Log your first session and Skip starts learning your game.</p>`;
+  const preCard = precheckin
+    ? `<div class="card"><p style="margin:0 0 6px"><strong>Today's intent</strong> <span class="hint-inline">${precheckin.kind === 'game' ? 'Pregame / Live ABs' : 'Cage'}</span></p>
+        ${precheckin.focus ? `<p style="margin:0 0 4px">&ldquo;${esc(precheckin.focus)}&rdquo;</p>` : ''}
+        ${precheckin.plan ? `<p class="hint" style="margin:0 0 4px">Plan: ${esc(precheckin.plan)}</p>` : ''}
+        ${precheckin.flush ? `<p class="hint" style="margin:0">Flushing: ${esc(precheckin.flush)}</p>` : ''}
+        <p class="hint" style="margin:8px 0 0"><a href="/precheckin?kind=${precheckin.kind === 'game' ? 'game' : 'cage'}">Update it →</a></p></div>`
+    : `<div class="card"><p style="margin:0"><strong>Before you hit?</strong> <span class="hint">Set your intent in two minutes — what you're working on and how. Optional.</span> <a href="/precheckin">Pre-hit check-in →</a></p></div>`;
   return layout({
     title: 'Home',
     user,
@@ -193,6 +200,7 @@ function userHome(user, extras) {
       <p class="skip-intro">Check in with Skip. He'll rate every session and learn what your best days look like.</p>
       <a href="/checkin" class="btn-primary">Check in today's session</a>
     </div>
+    ${preCard}
     ${head}
     ${pushOn ? '' : streakCard}
     ${pushCard}
@@ -360,6 +368,41 @@ function checkinForm(user, error, values, drillNames, routine) {
       </div>
       <datalist id="drill-list">${datalist}</datalist>
       <button type="submit" class="btn-primary">Submit check-in</button>
+    </form></div>`,
+  });
+}
+
+// Optional pre-hit check-in: set the intent BEFORE the session. Cage mode asks
+// what he's working on and how; game mode asks approach, one goal, and what
+// he's flushing. Never required — Skip reads today's intent when he checks in
+// after and connects the session back to it.
+function preCheckinPage(user, kind, error, v) {
+  const k = kind === 'game' ? 'game' : 'cage';
+  const isGame = k === 'game';
+  const mic = (id) => `<button type="button" class="mic-btn" data-target="${id}" aria-label="Dictate instead of typing">🎙</button>`;
+  const fields = isGame ? `
+      <label>What's your approach today? <span class="hint-inline">(what are you hunting? what's the plan vs this guy?)</span><span class="talk-wrap"><textarea id="pre_focus" name="focus" rows="2" placeholder="e.g. Hunting the fastball early, spitting on the slider away">${esc(v.focus || '')}</textarea>${mic('pre_focus')}</span></label>
+      <label>What's your ONE job today? <span class="hint-inline">(one goal — nothing else)</span><span class="talk-wrap"><textarea id="pre_plan" name="plan" rows="2" placeholder="e.g. See it up, be on time">${esc(v.plan || '')}</textarea>${mic('pre_plan')}</span></label>
+      <label>What are you flushing before first pitch? <span class="hint-inline">(leave it in the parking lot)</span><span class="talk-wrap"><textarea id="pre_flush" name="flush" rows="2" placeholder="e.g. Yesterday's 0-for, the last cage session">${esc(v.flush || '')}</textarea>${mic('pre_flush')}</span></label>`
+    : `
+      <label>What are you working on today? <span class="talk-wrap"><textarea id="pre_focus" name="focus" rows="2" placeholder="e.g. Staying inside the ball to right-center">${esc(v.focus || '')}</textarea>${mic('pre_focus')}</span></label>
+      <label>How are you going to do it? <span class="hint-inline">(drills, pitch types, constraints — your plan)</span><span class="talk-wrap"><textarea id="pre_plan" name="plan" rows="3" placeholder="e.g. Fence drill off the tee, then front toss hunting inner half">${esc(v.plan || '')}</textarea>${mic('pre_plan')}</span></label>`;
+  return layout({
+    title: 'Pre-Hit Check-In',
+    user,
+    tabs: userTabs('home', user),
+    body: `<h1 class="page-title">Pre-hit check-in</h1>
+    <div class="card"><p class="hint skip-intro">Two minutes before you hit. Set the intent — then go do it. <span class="hint-inline">Totally optional.</span></p>
+    <div class="pill-row">
+      <a class="pill-link${isGame ? '' : ' active'}" href="/precheckin?kind=cage">Cage</a>
+      <a class="pill-link${isGame ? ' active' : ''}" href="/precheckin?kind=game">Pregame / Live ABs</a>
+    </div>
+    <form method="post" action="/precheckin" class="form">
+      <input type="hidden" name="kind" value="${k}">
+      ${error ? `<div class="error">${esc(error)}</div>` : ''}
+      <script src="/checkin.js"></script>
+      ${fields}
+      <button type="submit" class="btn-primary">Lock it in</button>
     </form></div>`,
   });
 }
@@ -1515,6 +1558,7 @@ module.exports = {
   pendingPage,
   userHome,
   checkinForm,
+  preCheckinPage,
   routinePage,
   notebookPage,
   scorePage,
