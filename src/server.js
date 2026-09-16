@@ -2026,7 +2026,7 @@ HOW YOU COACH:
 7. THE HITTING MATERIAL BELOW IS BACKGROUND KNOWLEDGE — stuff you've learned, not a script. Draw on it when it's genuinely needed — answering a question, explaining something, working through a problem — not just for diagnoses and fixes. Common sense first, and the hitter's own history and words always come before anything here. Never throw knowledge at him without knowing his problem first — ask, listen, understand what's actually going on before bringing anything in. No random tips, no lectures, no quoting entries at him. Let it shape how you talk, not what you say. And nothing below overrides rule 8.
 8. NEVER INVENT A CAUSE — no matter what problem he describes, never state or imply a specific mechanical cause as THE reason. This covers EVERY symptom — rolling over, weak grounders, popping up, feeling late, pulling off, anything he names — and EVERY mechanical translation — wrapping the bat, casting, flying open, dropping the hands, out in front, losing the plane, anything like them. The only exceptions: HE described that detail himself, or you've seen video of his swing. Translating his symptom into mechanics IS the diagnosis: when he says "weak grounders," you do NOT say "that means you're out in front" — that's the diagnosis wearing different words. Stay in HIS words. When he brings a problem, bring him back to the state he felt when he was good and help him see what's different now. If his old feels aren't getting it done, you can talk through what it could be — ask what HE thinks, lay out possibilities (never a diagnosis) using common sense and the playbook — and suggest new things to try, one at a time. A guessed cause teaches the wrong fix. This rule overrides every playbook entry below — no diagnosis or example changes it.
 
-SAVING TO HIS MENTAL GAME TAB: if he shares a cue, mindset shift, or routine piece he wants to keep, tell him: say 'add this to my mental game' followed by the thing, and you'll put it on his Mental Game tab for him.`;
+SAVING TO HIS MENTAL GAME TAB: if he shares a cue, mindset shift, or routine piece he wants to keep, tell him: say 'remember this' (or 'add this to my mental game') followed by the thing, and you'll put it on his Mental Game tab for him.`;
 
 // ---- Check-in streak (Chicago days) ----
 const chiDayFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' });
@@ -2203,6 +2203,10 @@ function skipDataBlock(userId) {
     ? `HITTER DATA (newest first):\n${snap.lines.join('\n')}\nSessions logged: ${snap.total}${
         snap.avg != null ? ` · Average level: ${scoreTier(snap.avg)}` : ''
       }\n${snap.trend}${
+        snap.total < 3
+          ? `\nNOT ENOUGH HISTORY YET — only ${snap.total} check-in(s) logged. You barely know this hitter: be straight with him that it's hard to really help until he keeps logging and you can learn him. Say it in your voice when he's asking for coaching. Don't fake personalized reads from almost nothing — coach what's in front of you, ask questions, nudge him to log today.`
+          : ''
+      }${
         snap.top.length
           ? `\nDrills tied to their best days: ${snap.top.map((d) => `${d.name} (${scoreTier(d.avg)} over ${d.count} sessions)`).join(', ')}`
           : ''
@@ -2211,7 +2215,7 @@ function skipDataBlock(userId) {
           ? `\nHIS BEST DAY — when he's struggling, take him back to exactly this (this is your #1 job):\n${snap.bestDay}`
           : ''
       }${memBlock}${learnBlock}${playersBlock}${progBlock}${mentalBlock}${intentBlock}`
-    : `HITTER DATA: no check-ins logged yet — this is a brand-new hitter. Ask what they are working on.${memBlock}${learnBlock}${playersBlock}${progBlock}${mentalBlock}${intentBlock}`;
+    : `HITTER DATA: no check-ins logged yet — this is a brand-new hitter. You don't know him at all yet: tell him straight it's hard to really help until he keeps logging and you can learn him. Ask what he's working on and coach what's in front of you.${memBlock}${learnBlock}${playersBlock}${progBlock}${mentalBlock}${intentBlock}`;
 }
 
 const COACH_SYSTEM = `You are Coach Skip, the AI hitting coach inside The Daily Hitter. You are talking to BOBBY ATKINSON — your head coach, the man whose brain you coach with. He is training you right now: giving feedback on your coaching, correcting your answers, teaching you how he wants his hitters coached. Listen carefully, take every correction seriously, and confirm specifically how you will apply what he tells you going forward. Talk to him like a trusted assistant coach — direct, no fluff, no motivational-poster talk. Keep replies short (2-4 sentences) unless he asks for more. Never mention you are an AI model. You are Coach Skip.
@@ -2331,7 +2335,27 @@ app.post('/api/chat', requireLogin, async (req, res) => {
     if (keyContent.length > 3) {
       db.prepare('INSERT INTO mental_keys (user_id, content, created_at) VALUES (?, ?, ?)')
         .run(req.user.id, keyContent, now);
-      saveNote = `The hitter just asked you to save this to their Mental Game tab, and it's already saved there: "${keyContent}". Confirm briefly in your reply (one line) that it's on their Mental Game tab now.`;
+      // Same-day grounding (Sep 2026): when he says "remember this," tie the
+      // save to what he logged today so the memory isn't floating without context.
+      let dayCtx = '';
+      try {
+        const today = chiDay(new Date());
+        const t = db
+          .prepare(
+            `SELECT created_at, environment, session_score, score_tier, feel, what_worked
+             FROM checkins WHERE user_id = ? ORDER BY created_at DESC LIMIT 8`
+          )
+          .all(req.user.id)
+          .find((r) => chiDay(r.created_at) === today);
+        if (t) {
+          const bits = [t.environment || 'session'];
+          if (t.session_score != null && t.score_tier) bits.push(`level ${t.score_tier}`);
+          if (t.feel != null) bits.push(`feel ${t.feel}/10`);
+          if (t.what_worked) bits.push(`what worked: "${String(t.what_worked).slice(0, 160)}"`);
+          dayCtx = ` For context, today he logged: ${bits.join(' · ')}.`;
+        }
+      } catch (e) {}
+      saveNote = `The hitter just asked you to save this to their Mental Game tab, and it's already saved there: "${keyContent}".${dayCtx} Confirm briefly in your reply (one line) that it's on their Mental Game tab now — and tie it to what he logged today when there's a same-day session above.`;
     } else {
       saveNote = `The hitter said something like "add this to my mental game" but didn't include what to save. Ask them what they want on their Mental Game tab.`;
     }
