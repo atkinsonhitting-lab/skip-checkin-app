@@ -121,23 +121,94 @@ function toReqUser(row) {
     displayName: row.first_name || row.athlete_name || 'Coach',
     status: row.status || 'approved',
     remoteProgramId: row.remote_program_id || null,
+    collegeId: row.college_id || null,
+    dateOfBirth: row.date_of_birth || null,
     // View-only coaches (can_edit=0) see everything but change nothing.
     canEdit: row.can_edit == null ? true : row.can_edit !== 0,
   };
 }
+
+// ---- Colleges (Sep 2026) ----
+function getCollege(id) {
+  if (!id) return null;
+  return db.prepare('SELECT * FROM colleges WHERE id = ?').get(id) || null;
+}
+function collegeByCode(code) {
+  const c = String(code || '').trim().toUpperCase();
+  if (!c) return null;
+  return db.prepare('SELECT * FROM colleges WHERE UPPER(code) = ?').get(c) || null;
+}
+// A coach row with college_id set is a college coach: view-only, scoped to
+// their school's players. Global coaches (Bobby, Cam) have college_id NULL.
+function isCollegeCoach(user) {
+  return !!user && user.role === 'coach' && !!user.collegeId;
+}
+function collegeScopeId(req) {
+  const u = realUser(req);
+  return u && u.role === 'coach' && u.collegeId ? u.collegeId : null;
+}
+// Talk to Skip available for this athlete? Everyone except players whose
+// college turned the switch off.
+function skipChatDisabledFor(user) {
+  if (!user || user.role !== 'athlete' || !user.collegeId) return false;
+  const c = getCollege(user.collegeId);
+  return c ? c.skip_enabled === 0 : false;
+}
+// Attach college name + Skip availability after toReqUser builds the object.
+function decorateUser(u) {
+  if (u && u.collegeId) {
+    const c = getCollege(u.collegeId);
+    u.collegeName = c ? c.name : null;
+    if (u.role === 'athlete') u.skipChatDisabled = c ? c.skip_enabled === 0 : false;
+  }
+  return u;
+}
+// Signup-code generator: NAME-XXXX with unambiguous characters.
+function makeCollegeCode(name) {
+  const prefix = String(name || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) || 'TEAM';
+  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  for (let i = 0; i < 20; i++) {
+    let suffix = '';
+    for (let j = 0; j < 4; j++) suffix += chars[Math.floor(Math.random() * chars.length)];
+    const code = `${prefix}-${suffix}`;
+    if (!db.prepare('SELECT id FROM colleges WHERE code = ?').get(code)) return code;
+  }
+  return `${prefix}-${Date.now().toString(36).toUpperCase().slice(-4)}`;
+}
+// Birthdate validation: YYYY-MM-DD, real date, not in the future, age 8-100.
+function validDob(v) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v || '')) return false;
+  const d = new Date(v + 'T12:00:00');
+  if (isNaN(d.getTime())) return false;
+  const now = new Date();
+  let age = now.getFullYear() - d.getFullYear();
+  const m = now.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age--;
+  return age >= 8 && age <= 100;
+}
+function ageOn(dob) {
+  if (!dob) return null;
+  const d = new Date(dob + 'T12:00:00');
+  if (isNaN(d.getTime())) return null;
+  const now = new Date();
+  let age = now.getFullYear() - d.getFullYear();
+  const m = now.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age--;
+  return age >= 0 ? age : null;
+}
 function attachUser(req, res, next) {
   if (req.session && req.session.userId) {
-    const row = db.prepare('SELECT id, email, role, athlete_name, first_name, last_name, status, remote_program_id, can_edit FROM users WHERE id = ?').get(req.session.userId);
+    const row = db.prepare('SELECT id, email, role, athlete_name, first_name, last_name, status, remote_program_id, can_edit, college_id, date_of_birth FROM users WHERE id = ?').get(req.session.userId);
     if (row) {
-      req.user = toReqUser(row);
+      req.user = decorateUser(toReqUser(row));
       // "View as hitter": the coach browses the app exactly as this hitter
       // sees it. req.user becomes the hitter; the real coach stays on
       // req.coachUser so coach-only routes keep working.
       if (row.role === 'coach' && req.session.viewAsUserId) {
-        const t = db.prepare('SELECT id, email, role, athlete_name, first_name, last_name, status, remote_program_id FROM users WHERE id = ? AND role != \'coach\'').get(req.session.viewAsUserId);
+        const t = db.prepare("SELECT id, email, role, athlete_name, first_name, last_name, status, remote_program_id, college_id, date_of_birth FROM users WHERE id = ? AND role != 'coach'").get(req.session.viewAsUserId);
         if (t) {
           req.coachUser = req.user;
-          req.user = toReqUser(t);
+          req.user = decorateUser(toReqUser(t));
           req.user.viewAs = true;
           req.user.viewAsName = req.user.displayName;
         } else {
@@ -186,6 +257,16 @@ function requireCoachAny(req, res, next) {
   const u = realUser(req);
   if (!u) return res.redirect('/login');
   if (u.role !== 'coach') return res.status(403).send('Forbidden');
+  next();
+}
+
+// Global coaches only (Bobby + Cam): college coaches are scoped to their
+// school, so they never see remote programs, the video library, Train Skip,
+// or the Colleges admin page.
+function requireGlobalCoachAny(req, res, next) {
+  const u = realUser(req);
+  if (!u) return res.redirect('/login');
+  if (u.role !== 'coach' || u.collegeId) return res.status(403).send('Forbidden');
   next();
 }
 
@@ -295,6 +376,20 @@ app.post('/register', (req, res) => {
   if (!firstName || !lastName) {
     return fail('Enter your first and last name.');
   }
+  const dob = String(req.body.date_of_birth || '').trim();
+  if (!validDob(dob)) {
+    return fail('Enter your date of birth.');
+  }
+  // College code is optional: only players joining through a school use one.
+  const collegeCode = String(req.body.college_code || '').trim();
+  let collegeId = null;
+  if (collegeCode) {
+    const college = collegeByCode(collegeCode);
+    if (!college) {
+      return fail('That college code wasn\u2019t recognized. Check it with your coach, or leave it blank.');
+    }
+    collegeId = college.id;
+  }
   if (!validEmail(email)) {
     return fail('Enter a valid email address.');
   }
@@ -312,12 +407,12 @@ app.post('/register', (req, res) => {
   const athleteName = `${firstName} ${lastName}`;
   const info = db
     .prepare(
-      'INSERT INTO users (email, password_hash, role, athlete_name, first_name, last_name, created_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO users (email, password_hash, role, athlete_name, first_name, last_name, created_at, status, college_id, date_of_birth) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     )
-    .run(email, hash, 'athlete', athleteName, firstName, lastName, new Date().toISOString(), 'pending');
+    .run(email, hash, 'athlete', athleteName, firstName, lastName, new Date().toISOString(), 'pending', collegeId, dob);
   linkRemoteProgram(info.lastInsertRowid, athleteName);
   // Tell Bobby so he can approve (or decline) the new hitter.
-  notifyCoachOfSignup(req, email, athleteName).catch((e) =>
+  notifyCoachOfSignup(req, email, athleteName, collegeId ? getCollege(collegeId).name : null).catch((e) =>
     console.warn('signup notify failed:', e.message)
   );
   res.redirect('/pending');
@@ -892,13 +987,15 @@ async function pushToUser(userId, title, body, url) {
 }
 async function pushToCoaches(title, body, url) {
   if (!pushEnabled) return;
-  const coaches = db.prepare("SELECT id FROM users WHERE role = 'coach'").all();
+  // Global coaches only: college coaches are scoped to their school and
+  // don't approve signups or Brain proposals.
+  const coaches = db.prepare("SELECT id FROM users WHERE role = 'coach' AND college_id IS NULL").all();
   for (const c of coaches) await pushToUser(c.id, title, body, url);
 }
 // Push to every coach except one (e.g. notify the other coach of a proposal).
 async function pushToCoachesExcept(exceptId, title, body, url) {
   if (!pushEnabled) return;
-  const coaches = db.prepare("SELECT id FROM users WHERE role = 'coach' AND id != ?").all(exceptId);
+  const coaches = db.prepare("SELECT id FROM users WHERE role = 'coach' AND college_id IS NULL AND id != ?").all(exceptId);
   for (const c of coaches) await pushToUser(c.id, title, body, url);
 }
 app.get('/api/push/vapid-key', (req, res) => res.json({ publicKey: VAPID_PUBLIC_KEY || null }));
@@ -1234,7 +1331,8 @@ app.get('/videos/watch/:id', requireLogin, requireRemote, (req, res) => {
 // ---- View as hitter ----
 app.post('/coach/view-as', requireCoachAny, (req, res) => {
   const id = Number(req.body.id);
-  const t = id ? db.prepare("SELECT id FROM users WHERE id = ? AND role != 'coach'").get(id) : null;
+  const scope = collegeScopeId(req);
+  const t = id ? db.prepare("SELECT id FROM users WHERE id = ? AND role != 'coach' AND (? IS NULL OR college_id = ?)").get(id, scope, scope) : null;
   if (t) req.session.viewAsUserId = t.id;
   res.redirect('/');
 });
@@ -1247,7 +1345,7 @@ app.post('/coach/view-as/exit', (req, res) => {
 
 // ---- Coach video library manager ----
 // Coach Videos tab: the video library.
-app.get('/coach/videos', requireCoachAny, (req, res) => {
+app.get('/coach/videos', requireGlobalCoachAny, (req, res) => {
   const cats = db
     .prepare('SELECT category, COUNT(*) AS n FROM video_library GROUP BY category ORDER BY category')
     .all();
@@ -1262,7 +1360,7 @@ app.get('/coach/videos', requireCoachAny, (req, res) => {
 });
 
 // Old library URL — everything lives on the Videos tab now.
-app.get('/coach/library', requireCoachAny, (req, res) => {
+app.get('/coach/library', requireGlobalCoachAny, (req, res) => {
   const q = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
   res.redirect('/coach/videos' + q);
 });
@@ -1434,7 +1532,7 @@ function coachAdminOpts(req) {
   const me = realUser(req);
   if (req.user.role === 'coach' && me.canEdit) {
     return {
-      coaches: db.prepare("SELECT id, email, first_name, last_name, can_edit, created_at FROM users WHERE role = 'coach' ORDER BY created_at ASC").all(),
+      coaches: db.prepare("SELECT id, email, first_name, last_name, can_edit, created_at FROM users WHERE role = 'coach' AND college_id IS NULL ORDER BY created_at ASC").all(),
       selfId: me.id,
     };
   }
@@ -1460,8 +1558,13 @@ app.post('/settings/profile', requireLogin, (req, res) => {
   const taken = db.prepare('SELECT id FROM users WHERE email = ? AND id != ?').get(email, req.user.id);
   if (taken) return fail('That email is already on another account.');
   const athleteName = req.user.role === 'coach' ? req.user.athleteName : `${firstName} ${lastName}`;
+  const dob = String(req.body.date_of_birth || '').trim();
+  if (req.user.role !== 'coach' && dob && !validDob(dob)) return fail('Enter a valid date of birth.');
   db.prepare('UPDATE users SET first_name = ?, last_name = ?, email = ?, athlete_name = ? WHERE id = ?')
     .run(firstName, lastName, email, athleteName, req.user.id);
+  if (req.user.role !== 'coach' && dob) {
+    db.prepare('UPDATE users SET date_of_birth = ? WHERE id = ?').run(dob, req.user.id);
+  }
   res.redirect('/settings?saved=1');
 });
 
@@ -1532,10 +1635,17 @@ app.get('/learn', requireLogin, (req, res) => {
 // ---- Coach routes ----
 
 // Hitters waiting for Bobby's approval, oldest first.
-function pendingList() {
+function pendingList(collegeId) {
   return db
-    .prepare("SELECT id, email, athlete_name, first_name, last_name, created_at FROM users WHERE role = 'athlete' AND status = 'pending' ORDER BY created_at ASC")
-    .all()
+    .prepare(
+      `SELECT u.id, u.email, u.athlete_name, u.first_name, u.last_name, u.created_at,
+              c.name AS college_name
+       FROM users u LEFT JOIN colleges c ON c.id = u.college_id
+       WHERE u.role = 'athlete' AND u.status = 'pending'
+         AND (? IS NULL OR u.college_id = ?)
+       ORDER BY u.created_at ASC`
+    )
+    .all(collegeId || null, collegeId || null)
     .map((u) => ({
       ...u,
       name: [u.first_name, u.last_name].filter(Boolean).join(' ') || u.athlete_name || u.email,
@@ -1545,25 +1655,32 @@ function pendingList() {
 // Number on the Approvals tab badge.
 function setApprovalCount(req) {
   try {
+    const scope = collegeScopeId(req);
     req.user.approvalCount = db
-      .prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'athlete' AND status = 'pending'")
-      .get().n;
+      .prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'athlete' AND status = 'pending' AND (? IS NULL OR college_id = ?)")
+      .get(scope, scope).n;
   } catch {
     req.user.approvalCount = 0;
   }
 }
 
 // Per-hitter check-in stats for the coach views: total + last check-in.
-function coachUserStats() {
+// College coaches only ever see their own school's players.
+function coachUserStats(collegeId) {
   const users = db
-    .prepare("SELECT id, email, athlete_name, first_name, last_name, created_at FROM users WHERE role != 'coach' AND status = 'approved' ORDER BY created_at ASC")
-    .all();
+    .prepare(
+      `SELECT id, email, athlete_name, first_name, last_name, created_at, date_of_birth
+       FROM users WHERE role != 'coach' AND status = 'approved'
+         AND (? IS NULL OR college_id = ?)
+       ORDER BY created_at ASC`
+    )
+    .all(collegeId || null, collegeId || null);
   return users.map((u) => {
     const row = db
       .prepare('SELECT COUNT(*) AS total, MAX(created_at) AS last FROM checkins WHERE user_id = ?')
       .get(u.id);
     const name = [u.first_name, u.last_name].filter(Boolean).join(' ') || u.athlete_name || u.email;
-    return { id: u.id, email: u.email, name, total: row.total, last: row.last };
+    return { id: u.id, email: u.email, name, total: row.total, last: row.last, age: ageOn(u.date_of_birth) };
   });
 }
 
@@ -1598,12 +1715,17 @@ function remoteProgramList() {
 // Coach Home: needs-your-attention — approvals, gone-quiet hitters, latest feed.
 app.get('/coach', requireCoachAny, (req, res) => {
   setApprovalCount(req);
-  const stats = coachUserStats();
+  const scope = collegeScopeId(req);
+  const stats = coachUserStats(scope);
   const quiet = coachQuietHitters(stats);
   const latest = db
-    .prepare('SELECT * FROM checkins ORDER BY created_at DESC LIMIT 8')
-    .all();
-  const pending = pendingList();
+    .prepare(
+      `SELECT c.* FROM checkins c JOIN users u ON u.id = c.user_id
+       WHERE (? IS NULL OR u.college_id = ?)
+       ORDER BY c.created_at DESC LIMIT 8`
+    )
+    .all(scope, scope);
+  const pending = pendingList(scope);
   const me = realUser(req);
   res.send(
     views.coachHomePage(me, quiet, latest, pending, userPushSubscriptions(req.user.id).length > 0)
@@ -1613,11 +1735,11 @@ app.get('/coach', requireCoachAny, (req, res) => {
 // Coach Hitters tab: search + athlete cards.
 app.get('/coach/hitters', requireCoachAny, (req, res) => {
   setApprovalCount(req);
-  res.send(views.coachHittersPage(realUser(req), coachUserStats()));
+  res.send(views.coachHittersPage(realUser(req), coachUserStats(collegeScopeId(req))));
 });
 
 // Coach Programs tab: remote programs.
-app.get('/coach/programs', requireCoachAny, (req, res) => {
+app.get('/coach/programs', requireGlobalCoachAny, (req, res) => {
   setApprovalCount(req);
   res.send(views.coachProgramsPage(realUser(req), remoteProgramList()));
 });
@@ -1627,10 +1749,10 @@ app.get('/coach/programs', requireCoachAny, (req, res) => {
 app.post('/coach/coaches/toggle', requireCoach, (req, res) => {
   const id = Number(req.body.id);
   const me = realUser(req);
-  const target = db.prepare("SELECT id, can_edit FROM users WHERE id = ? AND role = 'coach'").get(id);
+  const target = db.prepare("SELECT id, can_edit FROM users WHERE id = ? AND role = 'coach' AND college_id IS NULL").get(id);
   if (!target || target.id === me.id) return res.redirect('/settings');
   if (target.can_edit !== 0) {
-    const fullCount = db.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'coach' AND can_edit != 0").get().n;
+    const fullCount = db.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'coach' AND college_id IS NULL AND can_edit != 0").get().n;
     if (fullCount <= 1) return res.redirect('/settings');
   }
   db.prepare('UPDATE users SET can_edit = ? WHERE id = ?').run(target.can_edit !== 0 ? 0 : 1, target.id);
@@ -1640,7 +1762,62 @@ app.post('/coach/coaches/toggle', requireCoach, (req, res) => {
 // Approvals tab: approve or decline waiting hitters right here.
 app.get('/coach/approvals', requireCoachAny, (req, res) => {
   setApprovalCount(req);
-  res.send(views.coachApprovalsPage(realUser(req), pendingList()));
+  res.send(views.coachApprovalsPage(realUser(req), pendingList(collegeScopeId(req))));
+});
+
+// ---- Colleges (Sep 2026): Bobby's B2B surface ----
+// Add a college, hand its signup code to the program's coaches, flip Talk to
+// Skip per school, and create view-only coach accounts scoped to that school.
+app.get('/coach/colleges', requireGlobalCoachAny, (req, res) => {
+  setApprovalCount(req);
+  const colleges = db.prepare('SELECT * FROM colleges ORDER BY name ASC').all().map((c) => ({
+    ...c,
+    playerCount: db.prepare("SELECT COUNT(*) AS n FROM users WHERE college_id = ? AND role = 'athlete'").get(c.id).n,
+    coaches: db.prepare("SELECT id, email, first_name, last_name FROM users WHERE college_id = ? AND role = 'coach' ORDER BY created_at ASC").all(c.id),
+  }));
+  res.send(views.coachCollegesPage(realUser(req), colleges, req.query.error || null, req.query.added || null));
+});
+
+app.post('/coach/colleges/add', requireCoach, (req, res) => {
+  const name = String(req.body.name || '').trim().replace(/\s+/g, ' ').slice(0, 60);
+  if (!name) return res.redirect('/coach/colleges?error=' + encodeURIComponent('Give the college a name.'));
+  const code = makeCollegeCode(name);
+  const info = db.prepare('INSERT INTO colleges (name, code, skip_enabled, created_at) VALUES (?, ?, 0, ?)').run(name, code, new Date().toISOString());
+  res.redirect('/coach/colleges?added=' + info.lastInsertRowid);
+});
+
+app.post('/coach/colleges/:id/skip', requireCoach, (req, res) => {
+  const c = getCollege(Number(req.params.id));
+  if (!c) return res.redirect('/coach/colleges');
+  db.prepare('UPDATE colleges SET skip_enabled = ? WHERE id = ?').run(c.skip_enabled ? 0 : 1, c.id);
+  res.redirect('/coach/colleges');
+});
+
+app.post('/coach/colleges/:id/coaches/add', requireCoach, (req, res) => {
+  const c = getCollege(Number(req.params.id));
+  if (!c) return res.redirect('/coach/colleges');
+  const fail = (msg) => res.redirect('/coach/colleges?error=' + encodeURIComponent(msg));
+  const firstName = String(req.body.first_name || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+  const lastName = String(req.body.last_name || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+  const email = String(req.body.email || '').trim().toLowerCase();
+  const password = String(req.body.password || '');
+  if (!firstName || !lastName) return fail('Coach needs a first and last name.');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail('That email doesn\u2019t look right.');
+  if (password.length < 8) return fail('Password must be at least 8 characters.');
+  if (db.prepare('SELECT id FROM users WHERE email = ?').get(email)) return fail('An account with that email already exists.');
+  db.prepare(
+    "INSERT INTO users (email, password_hash, role, athlete_name, first_name, last_name, created_at, status, can_edit, college_id) VALUES (?, ?, 'coach', ?, ?, ?, ?, 'approved', 0, ?)"
+  ).run(email, bcrypt.hashSync(password, 12), `${firstName} ${lastName}`, firstName, lastName, new Date().toISOString(), c.id);
+  res.redirect('/coach/colleges');
+});
+
+app.post('/coach/colleges/:id/coaches/remove', requireCoach, (req, res) => {
+  const c = getCollege(Number(req.params.id));
+  const coachId = Number(req.body.coach_id);
+  if (c && coachId) {
+    db.prepare("DELETE FROM users WHERE id = ? AND role = 'coach' AND college_id = ?").run(coachId, c.id);
+  }
+  res.redirect('/coach/colleges');
 });
 
 // Approve a waiting hitter — they can log in from here on.
@@ -1670,9 +1847,10 @@ app.post('/coach/decline/:id', requireCoach, (req, res) => {
 app.get('/coach/user/:email', requireCoachAny, (req, res) => {
   setApprovalCount(req);
   const em = (req.params.email || '').toLowerCase();
+  const scope = collegeScopeId(req);
   const user = db
-    .prepare("SELECT id, email, athlete_name, first_name, last_name FROM users WHERE email = ? AND role != 'coach'")
-    .get(em);
+    .prepare("SELECT id, email, athlete_name, first_name, last_name FROM users WHERE email = ? AND role != 'coach' AND (? IS NULL OR college_id = ?)")
+    .get(em, scope, scope);
   if (!user) return res.status(404).send('Unknown user.');
   const rows = db
     .prepare('SELECT * FROM checkins WHERE user_id = ? ORDER BY created_at DESC')
@@ -1733,15 +1911,18 @@ function deleteHitter(userId) {
 }
 
 // Coach-only backup: download every check-in as JSON.
-app.get('/coach/export', requireCoachAny, (req, res) => {  const rows = db
+app.get('/coach/export', requireCoachAny, (req, res) => {  const scope = collegeScopeId(req);
+  const rows = db
     .prepare(
       `SELECT c.id, c.athlete_name, u.email, c.created_at, c.environment, c.drills_done,
               c.feel, c.confidence, c.focus, c.session_score, c.score_tier,
               c.session_notes, c.what_worked, c.whats_next,
               c.skip_journal_score, c.skip_journal_note, c.skip_rated_at
-       FROM checkins c JOIN users u ON u.id = c.user_id ORDER BY c.created_at ASC`
+       FROM checkins c JOIN users u ON u.id = c.user_id
+       WHERE (? IS NULL OR u.college_id = ?)
+       ORDER BY c.created_at ASC`
     )
-    .all()
+    .all(scope, scope)
     .map((r) => ({ ...r, drills_done: safeParseDrills(r.drills_done) }));
   res.setHeader('Content-Disposition', 'attachment; filename="skip-checkins-export.json"');
   res.json({ exported_at: new Date().toISOString(), checkins: rows });
@@ -1752,7 +1933,7 @@ app.get('/coach/export', requireCoachAny, (req, res) => {  const rows = db
 // injected into every hitter's Skip prompt, and reviews Skip's conversations
 // with each hitter.
 
-app.get('/coach/skip', requireCoachAny, (req, res) => {
+app.get('/coach/skip', requireGlobalCoachAny, (req, res) => {
   setApprovalCount(req);
   const entries = brain.listEntries(db);
   const hitters = db
@@ -1829,7 +2010,7 @@ app.post('/coach/skip/correction', requireCoach, (req, res) => {
 // Propose a Brain entry. Any coach (including view-only) can propose; the
 // entry goes live only after EVERY coach has approved it. The proposer
 // auto-approves on submit. The other coach gets a push so nothing stalls.
-app.post('/coach/skip/propose', requireCoachAny, (req, res) => {
+app.post('/coach/skip/propose', requireGlobalCoachAny, (req, res) => {
   const me = realUser(req);
   try {
     const id = brain.createProposal(db, {
@@ -1847,7 +2028,7 @@ app.post('/coach/skip/propose', requireCoachAny, (req, res) => {
 
 // Propose a correction as a Brain example (view-only coaches use this;
 // full coaches keep the direct correction form above).
-app.post('/coach/skip/propose-correction', requireCoachAny, (req, res) => {
+app.post('/coach/skip/propose-correction', requireGlobalCoachAny, (req, res) => {
   const me = realUser(req);
   const hitter = (req.body.hitter_said || '').trim().slice(0, 500);
   const wrong = (req.body.skip_said || '').trim().slice(0, 500);
@@ -1863,7 +2044,7 @@ app.post('/coach/skip/propose-correction', requireCoachAny, (req, res) => {
 
 // Approve a proposal. When every coach has approved, the entry publishes
 // to Skip's Brain and the proposer gets a push.
-app.post('/coach/skip/proposals/:id/approve', requireCoachAny, (req, res) => {
+app.post('/coach/skip/proposals/:id/approve', requireGlobalCoachAny, (req, res) => {
   const me = realUser(req);
   const result = brain.approveProposal(db, Number(req.params.id), me.id);
   if (result === 'live') {
@@ -2306,6 +2487,8 @@ async function askSkip(user, userMessage, opts = {}) {
 
 app.get('/chat', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
+  // Colleges can turn Talk to Skip off for their players.
+  if (req.user.skipChatDisabled) return res.redirect('/');
   const messages = db
     .prepare('SELECT role, content, created_at FROM chat_messages WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 100')
     .all(req.user.id)
@@ -2337,6 +2520,7 @@ function extractMentalKey(message) {
 
 app.post('/api/chat', requireLogin, async (req, res) => {
   if (req.user.role !== 'athlete') return res.status(403).json({ error: 'Forbidden' });
+  if (req.user.skipChatDisabled) return res.status(403).json({ error: 'Talk to Skip is turned off for your program.' });
   const message = typeof req.body.message === 'string' ? req.body.message.trim() : '';
   if (!message) return res.status(400).json({ error: 'Message is empty.' });
   if (message.length > 2000) return res.status(400).json({ error: 'Keep it under 2000 characters.' });
@@ -2483,7 +2667,7 @@ async function sendResetEmail(to, link) {
 // ---- Account approvals: Bobby reviews every signup ----
 
 // New hitter signed up — tell Bobby so he can approve or decline them.
-async function notifyCoachOfSignup(req, email, name) {
+async function notifyCoachOfSignup(req, email, name, collegeName) {
   const m = mailer();
   const coachEmail = (process.env.COACH_EMAIL || '').trim().toLowerCase();
   if (!m || !coachEmail) {
@@ -2491,17 +2675,18 @@ async function notifyCoachOfSignup(req, email, name) {
     return;
   }
   const base = publicBaseUrl(req);
+  const via = collegeName ? ` (via ${collegeName})` : '';
   await m.transport.sendMail({
     from: m.from,
     to: coachEmail,
     subject: `New Daily Hitter signup: ${name}`,
     text:
-      `${name} (${email}) just signed up for The Daily Hitter and is waiting for your approval.\n\n` +
+      `${name} (${email}) just signed up for The Daily Hitter${via} and is waiting for your approval.\n\n` +
       `Approve or decline them here:\n${base}/coach\n`,
   });
   pushToCoaches(
     'New hitter waiting',
-    `${name} just signed up and needs your approval.`,
+    `${name}${via} just signed up and needs your approval.`,
     '/coach/approvals'
   ).catch((e) => console.warn('signup push failed:', e.message));
 }

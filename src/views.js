@@ -117,15 +117,31 @@ function userTabs(active, user) {
     tabs.splice(4, 0, { href: '/program/routine', label: 'Routine', active: active === 'routine' });
     tabs.splice(5, 0, { href: '/videos', label: 'Videos', active: active === 'videos' });
   }
+  // Colleges can turn Talk to Skip off for their players: no tab, no FAB,
+  // no bottom-bar icon (all three key off this tab list).
+  if (user && user.skipChatDisabled) {
+    return tabs.filter((t) => t.href !== '/chat');
+  }
   return tabs;
 }
 
-function coachTabs(active, approvalCount) {
+function coachTabs(active, approvalCount, user) {
+  // College coaches are scoped to their school: Home, Hitters, Approvals.
+  // No Train Skip, no Programs/Videos, no Colleges admin.
+  if (user && user.role === 'coach' && user.collegeId) {
+    return [
+      { href: '/coach', label: 'Home', active: active === 'home' },
+      { href: '/coach/hitters', label: 'Hitters', active: active === 'hitters' },
+      { href: '/coach/approvals', label: 'Approvals', active: active === 'approvals', badge: approvalCount > 0 ? String(approvalCount) : null },
+      { href: '/settings', label: 'Settings', active: active === 'settings' },
+    ];
+  }
   return [
     { href: '/coach', label: 'Home', active: active === 'home' },
     { href: '/coach/hitters', label: 'Hitters', active: active === 'hitters' },
     { href: '/coach/programs', label: 'Programs', active: active === 'programs' },
     { href: '/coach/videos', label: 'Videos', active: active === 'videos' },
+    { href: '/coach/colleges', label: 'Colleges', active: active === 'colleges' },
     { href: '/coach/skip', label: 'Train Skip', active: active === 'skip' },
     { href: '/coach/approvals', label: 'Approvals', active: active === 'approvals', badge: approvalCount > 0 ? String(approvalCount) : null },
     { href: '/settings', label: 'Settings', active: active === 'settings' },
@@ -171,6 +187,9 @@ function registerPage(error) {
         <label>Last name
           <input type="text" name="last_name" autocomplete="family-name" required maxlength="40">
         </label>
+        <label>Date of birth
+          <input type="date" name="date_of_birth" required>
+        </label>
         <label>Email
           <input type="email" name="email" autocomplete="email" required>
         </label>
@@ -179,6 +198,9 @@ function registerPage(error) {
         </label>
         <label>Confirm password
           <input type="password" name="confirm_password" autocomplete="new-password" required minlength="8">
+        </label>
+        <label>College code <span class="hint-inline">(optional — only if your coach gave you one)</span>
+          <input type="text" name="college_code" autocomplete="off" maxlength="20" style="text-transform:uppercase">
         </label>
         <button type="submit" class="btn-primary">Create account</button>
       </form>
@@ -732,7 +754,7 @@ function pendingApprovalCards(pending, canEdit) {
       (p) => `<div class="card athlete-card">
         <div class="athlete-card-name">${esc(p.name)}</div>
         <div class="athlete-card-email">${esc(p.email)}</div>
-        <div class="athlete-card-meta">signed up ${fmtDate(p.created_at)}</div>
+        <div class="athlete-card-meta">signed up ${fmtDate(p.created_at)}${p.college_name ? ` · ${esc(p.college_name)}` : ''}</div>
         ${canEdit
           ? `<div style="display:flex;gap:8px;margin-top:10px">
           <form method="post" action="/coach/approve/${p.id}" style="flex:1;margin:0">
@@ -754,10 +776,72 @@ function coachApprovalsPage(user, pending) {
   return layout({
     title: 'Approvals',
     user,
-    tabs: coachTabs('approvals', user.approvalCount),
+    tabs: coachTabs('approvals', user.approvalCount, user),
     body: `<h1 class="page-title">Approvals</h1>
     <p class="hint">${canEdit ? 'Every new account waits here until you approve it. Approved hitters can log in right away.' : 'Every new account waits here until it gets approved.'}</p>
     ${n ? `<div class="athlete-grid">${pendingApprovalCards(pending, canEdit)}</div>` : `<div class="card empty">Nobody waiting — you're all caught up.</div>`}`,
+  });
+}
+
+// Coach Colleges tab (Bobby only): add a college, hand out its signup code,
+// flip Talk to Skip per school, and manage that school's coach accounts.
+function coachCollegesPage(user, colleges, error, addedId) {
+  const cards = (colleges || [])
+    .map((c) => {
+      const coachRows = (c.coaches || [])
+        .map((ch) => {
+          const name = [ch.first_name, ch.last_name].filter(Boolean).join(' ') || ch.email;
+          return `<div class="remote-row"><div><strong>${esc(name)}</strong><div class="hint-inline">${esc(ch.email)}</div></div>
+            <form method="post" action="/coach/colleges/${c.id}/coaches/remove" class="inline-form" style="margin:0">
+              <input type="hidden" name="coach_id" value="${ch.id}">
+              <button class="btn-small btn-quiet" type="submit">Remove</button>
+            </form></div>`;
+        })
+        .join('');
+      const added = String(addedId) === String(c.id)
+        ? `<div class="notice">College added. Hand this code to their coaches: <strong>${esc(c.code)}</strong></div>`
+        : '';
+      return `<div class="card">
+        ${added}
+        <div style="display:flex;justify-content:space-between;align-items:start;gap:12px;flex-wrap:wrap">
+          <div>
+            <div class="athlete-card-name">${esc(c.name)}</div>
+            <div class="athlete-card-meta">signup code: <strong style="font-size:18px;letter-spacing:1px">${esc(c.code)}</strong> \u00b7 ${c.playerCount} player${c.playerCount === 1 ? '' : 's'}</div>
+          </div>
+          <form method="post" action="/coach/colleges/${c.id}/skip" style="margin:0">
+            <button class="btn-small${c.skip_enabled ? '' : ' btn-quiet'}" type="submit">Talk to Skip: ${c.skip_enabled ? 'ON' : 'OFF'}</button>
+          </form>
+        </div>
+        <h3 class="section-head" style="margin-top:14px">Coaches</h3>
+        ${coachRows || '<p class="hint">No coaches yet \u2014 add one below and they can log in to see this school\u2019s players.</p>'}
+        <details style="margin-top:10px">
+          <summary class="hint" style="cursor:pointer">Add a coach account</summary>
+          <form method="post" action="/coach/colleges/${c.id}/coaches/add" class="form" style="margin-top:10px">
+            <label>First name<input name="first_name" required maxlength="40"></label>
+            <label>Last name<input name="last_name" required maxlength="40"></label>
+            <label>Email<input type="email" name="email" required></label>
+            <label>Password <span class="hint-inline">(8+ characters)</span><input type="password" name="password" required minlength="8"></label>
+            <button class="btn-primary" type="submit">Create coach account</button>
+          </form>
+        </details>
+      </div>`;
+    })
+    .join('');
+  return layout({
+    title: 'Colleges',
+    user,
+    tabs: coachTabs('colleges', user.approvalCount, user),
+    body: `<h1 class="page-title">Colleges</h1>
+    <p class="hint">Add a program, give its coaches the signup code, and their players sign up under it. Coaches log in and see only their school\u2019s players \u2014 view-only, like Cam.</p>
+    ${error ? `<div class="error">${esc(error)}</div>` : ''}
+    <div class="card">
+      <h2 class="section-head">Add a college</h2>
+      <form method="post" action="/coach/colleges/add" class="form">
+        <label>College name<input name="name" required maxlength="60" placeholder="e.g. Illinois State"></label>
+        <button class="btn-primary" type="submit">Add college</button>
+      </form>
+    </div>
+    ${cards || '<div class="card empty">No colleges yet.</div>'}`,
   });
 }
 
@@ -765,6 +849,10 @@ function coachApprovalsPage(user, pending) {
 // quiet (no check-in in 3+ Chicago days), and the compact latest feed.
 function coachHomePage(user, quiet, latest, pending, pushOn) {
   const canEdit = user.role === 'coach' && user.canEdit !== false;
+  // College coaches see which school they're scoped to.
+  const schoolBanner = user.role === 'coach' && user.collegeName
+    ? `<div class="notice">${esc(user.collegeName)} — you\u2019re seeing this program\u2019s players only.</div>`
+    : '';
   const approvalNudge = pending && pending.length
     ? `<a class="card approval-nudge" href="/coach/approvals">${pending.length} hitter${pending.length === 1 ? '' : 's'} waiting for approval →</a>`
     : '';
@@ -782,8 +870,9 @@ function coachHomePage(user, quiet, latest, pending, pushOn) {
   return layout({
     title: 'Skip Dashboard',
     user,
-    tabs: coachTabs('home', user.approvalCount),
+    tabs: coachTabs('home', user.approvalCount, user),
     body: `<h1 class="page-title">Skip Dashboard</h1>
+    ${schoolBanner}
     ${canEdit && !pushOn ? '<p><button type="button" class="btn-small" id="push-enable-btn">Turn on notifications</button> <span class="hint-inline">get a push when a hitter needs approval</span></p>' : ''}
     ${approvalNudge}
     <h2 class="section-head">Gone quiet</h2>
@@ -801,7 +890,7 @@ function coachHittersPage(user, userStats) {
         <a href="/coach/user/${encodeURIComponent(a.email)}" style="display:block;color:inherit;text-decoration:none">
           <div class="athlete-card-name">${esc(a.name)}</div>
           <div class="athlete-card-email">${esc(a.email)}</div>
-          <div class="athlete-card-meta">${a.total} check-in${a.total === 1 ? '' : 's'}${a.last ? ` · last ${fmtDate(a.last)}` : ' · none yet'}</div>
+          <div class="athlete-card-meta">${a.total} check-in${a.total === 1 ? '' : 's'}${a.last ? ` · last ${fmtDate(a.last)}` : ' · none yet'}${a.age != null ? ` · age ${a.age}` : ''}</div>
         </a>
         <form method="post" action="/coach/view-as" style="margin:8px 0 0">
           <input type="hidden" name="id" value="${a.id}">
@@ -813,7 +902,7 @@ function coachHittersPage(user, userStats) {
   return layout({
     title: 'Hitters',
     user,
-    tabs: coachTabs('hitters', user.approvalCount),
+    tabs: coachTabs('hitters', user.approvalCount, user),
     body: `<h1 class="page-title">Hitters</h1>
     ${userStats.length ? `<input type="search" id="hitter-search" class="searchbar" placeholder="Search hitters…" autocomplete="off">` : ''}
     <div class="athlete-grid">${cards || '<div class="card empty">Nobody has signed up yet.</div>'}</div>
@@ -827,7 +916,7 @@ function coachProgramsPage(user, remotePrograms) {
   return layout({
     title: 'Programs',
     user,
-    tabs: coachTabs('programs', user.approvalCount),
+    tabs: coachTabs('programs', user.approvalCount, user),
     body: `<h1 class="page-title">Programs</h1>
     ${remoteProgramsSection(remotePrograms || [], canEdit)}`,
   });
@@ -1142,7 +1231,7 @@ function programEditPage(user, p) {
   return layout({
     title: `Edit program — ${p.athlete_name}`,
     user,
-    tabs: coachTabs('programs', user.approvalCount),
+    tabs: coachTabs('programs', user.approvalCount, user),
     body: `<h1 class="page-title">Program — ${esc(p.athlete_name)}</h1>
     <p><a href="/coach/programs">← Back to programs</a></p>
     <form method="post" action="/coach/program/${p.id}/save" class="form">
@@ -1342,7 +1431,7 @@ function coachLibraryPage(user, cats, activeCat, videos, playing) {
   return layout({
     title: 'Video library',
     user,
-    tabs: coachTabs('videos', user.approvalCount),
+    tabs: coachTabs('videos', user.approvalCount, user),
     body: `<p><a href="/coach">\u2190 Dashboard</a></p>
     <h1 class="page-title">Video library</h1>
     <div class="hint-inline">Renames and hidden videos are yours only — the Drive sync never overwrites them. New Drive files appear here automatically.</div>
@@ -1370,7 +1459,7 @@ function coachUser(user, name, checkins, whatWorks, thread, email, memories, rou
   return layout({
     title: name,
     user,
-    tabs: coachTabs('hitters', user.approvalCount),
+    tabs: coachTabs('hitters', user.approvalCount, user),
     body: `<h1 class="page-title">${esc(name)}</h1>
     <p><a href="/coach/hitters">← Back to hitters</a></p>
     ${routineReadonly(routine)}
@@ -1432,7 +1521,7 @@ function coachDeleteHitterPage(user, hitter, name, checkinCount) {
   return layout({
     title: 'Delete hitter',
     user,
-    tabs: coachTabs('hitters', user.approvalCount),
+    tabs: coachTabs('hitters', user.approvalCount, user),
     body: `<h1 class="page-title">Delete hitter?</h1>
     <div class="card">
       <p>This will permanently remove <strong>${esc(name)}</strong> (${esc(hitter.email)}) from The Daily Hitter — their account, ${checkinCount} check-in${checkinCount === 1 ? '' : 's'}, chat history, and routine.</p>
@@ -1554,7 +1643,7 @@ function coachSkipPage(user, entries, hitters, thread, chatEnabled, saved, propo
   return layout({
     title: 'Train Skip',
     user,
-    tabs: coachTabs('skip', user.approvalCount),
+    tabs: coachTabs('skip', user.approvalCount, user),
     body: `<h1 class="page-title">Train Skip</h1>
     <p class="hint">Talk to Skip directly. To make training <strong>stick</strong>, put it in his Brain below — small discrete entries he pulls from when they're relevant. That's what fixed the "more training = worse Skip" problem: no more one giant note.</p>
     ${saved ? '<div class="notice">Brain updated — Skip is using it with every hitter now.</div>' : ''}
@@ -1667,7 +1756,7 @@ function settingsPage(user, opts) {
   const sub = o.subscription || null;
   const isCoach = user.role === 'coach';
   const canEdit = isCoach && user.canEdit !== false;
-  const tabs = isCoach ? coachTabs('settings', user.approvalCount) : userTabs('settings', user);
+  const tabs = isCoach ? coachTabs('settings', user.approvalCount, user) : userTabs('settings', user);
   return layout({
     title: 'Settings',
     user,
@@ -1681,6 +1770,7 @@ function settingsPage(user, opts) {
         <label>First name<input name="first_name" value="${esc(user.firstName || '')}" required maxlength="40"></label>
         <label>Last name<input name="last_name" value="${esc(user.lastName || '')}" required maxlength="40"></label>
         <label>Email<input type="email" name="email" value="${esc(user.email)}" required></label>
+        ${isCoach ? '' : `<label>Date of birth<input type="date" name="date_of_birth" value="${esc(user.dateOfBirth || '')}" max="${new Date().toISOString().slice(0, 10)}"></label>`}
         <button class="btn-primary" type="submit">Save changes</button>
       </form>
     </div>
@@ -1732,6 +1822,7 @@ module.exports = {
   coachHittersPage,
   coachProgramsPage,
   coachApprovalsPage,
+  coachCollegesPage,
   coachUser,
   coachDeleteHitterPage,
   coachSkipPage,

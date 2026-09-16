@@ -47,6 +47,28 @@ for (const col of ['first_name', 'last_name']) {
   }
 }
 
+// Colleges (Sep 2026): Bobby sells The Daily Hitter to college programs.
+// Each college has a signup code its coaches hand to players, plus a
+// per-college Talk to Skip switch — many programs want the check-ins and
+// the coach dashboard without players chatting with Skip.
+db.exec(`CREATE TABLE IF NOT EXISTS colleges (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  code TEXT UNIQUE NOT NULL,
+  skip_enabled INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);`);
+
+// College link + birthdate on users. A coach row with college_id set is a
+// college coach: view-only, scoped to their school's players. date_of_birth
+// is YYYY-MM-DD, collected at signup for every player.
+for (const col of ['college_id', 'date_of_birth']) {
+  const cols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+  if (!cols.includes(col)) {
+    db.exec(`ALTER TABLE users ADD COLUMN ${col} ${col === 'college_id' ? 'INTEGER' : 'TEXT'};`);
+  }
+}
+
 // Brain proposals (Sep 2026): Cam helps build Skip by proposing Brain entries,
 // but nothing goes live until EVERY coach has approved it. The proposer
 // auto-approves on submit; the other coach(es) approve from the Train Skip
