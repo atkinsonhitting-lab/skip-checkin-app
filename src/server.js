@@ -19,6 +19,11 @@ const views = require('./views');
 const brain = require('./brain');
 const { seedUsers, writeCredentialsFile, userCount } = require('./seed');
 
+// Bobby's own organization — his 4 remote hitters, Talk to Skip on, free
+// forever. Pinned at the top of the Organizations list; the only org whose
+// players get "Edit program" links (it's the only org with programs).
+const FOUNDER_ORG_NAME = 'Atkinson Hitting Remote Development';
+
 const app = express();
 app.set('trust proxy', 1); // needed for secure cookies behind Render's proxy
 
@@ -1349,7 +1354,8 @@ app.post('/coach/program/:id/save', requireCoach, (req, res) => {
     new Date().toISOString(),
     p.id
   );
-  res.redirect('/coach/programs');
+  // The Programs tab is gone — program editing now lives on the Organizations page.
+  res.redirect('/coach/organizations');
 });
 
 // Coach: manage the remote roster.
@@ -2399,12 +2405,31 @@ app.get('/coach/organizations', requireCoachAny, (req, res) => {
   const rows = onlyOrgId
     ? db.prepare('SELECT * FROM organizations WHERE id = ?').all(onlyOrgId)
     : db.prepare('SELECT * FROM organizations ORDER BY name ASC').all();
-  const organizations = rows.map((c) => ({
-    ...c,
-    playerCount: db.prepare("SELECT COUNT(*) AS n FROM users WHERE organization_id = ? AND role = 'athlete'").get(c.id).n,
-    coaches: db.prepare("SELECT id, email, first_name, last_name FROM users WHERE organization_id = ? AND team_id IS NULL AND role = 'coach' ORDER BY created_at ASC").all(c.id),
-    teams: organizationTeams(c.id),
-  }));
+  const organizations = rows
+    .map((c) => {
+      const isFounder = c.name === FOUNDER_ORG_NAME;
+      const org = {
+        ...c,
+        isFounder,
+        playerCount: db.prepare("SELECT COUNT(*) AS n FROM users WHERE organization_id = ? AND role = 'athlete'").get(c.id).n,
+        coaches: db.prepare("SELECT id, email, first_name, last_name FROM users WHERE organization_id = ? AND team_id IS NULL AND role = 'coach' ORDER BY created_at ASC").all(c.id),
+        teams: organizationTeams(c.id),
+      };
+      // Founder org only: its players, so Bobby can jump straight to each
+      // player's remote program editor from the org card.
+      if (isFounder) {
+        org.players = db
+          .prepare(
+            `SELECT id, first_name, last_name, athlete_name, email, remote_program_id FROM users
+             WHERE organization_id = ? AND role = 'athlete'
+             ORDER BY first_name ASC, last_name ASC`
+          )
+          .all(c.id);
+      }
+      return org;
+    })
+    // Bobby's org pinned at the top, above every other org.
+    .sort((a, b) => Number(b.isFounder) - Number(a.isFounder) || a.name.localeCompare(b.name));
   res.send(views.coachOrganizationsPage(me, organizations, req.query.error || null, req.query.added || null));
 });
 

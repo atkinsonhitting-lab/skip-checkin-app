@@ -138,7 +138,6 @@ function coachTabs(active, approvalCount, user) {
   const tabs = [
     { href: '/coach', label: 'Home', active: active === 'home' },
     { href: '/coach/hitters', label: 'Players', active: active === 'hitters' },
-    { href: '/coach/programs', label: 'Programs', active: active === 'programs' },
     { href: '/coach/videos', label: 'Videos', active: active === 'videos' },
     { href: '/coach/organizations', label: 'Organizations', active: active === 'organizations' },
     { href: '/coach/skip', label: 'Train Skip', active: active === 'skip' },
@@ -1354,6 +1353,22 @@ function coachOrganizationsPage(user, organizations, error, addedId) {
         ? `<div class="notice">Organization added. Hand this code to their coaches: <strong>${esc(c.code)}</strong></div>`
         : '';
       const teamCards = (c.teams || []).map((t) => teamCard(c, t)).join('');
+      // Founder org only (Bobby's): player rows with an "Edit program" link
+      // that opens the existing remote program editor for that player. Only
+      // Bobby (full coach) gets the links — the editor is full-coach only.
+      const playerRows = (c.players || [])
+        .map((pl) => {
+          const name = [pl.first_name, pl.last_name].filter(Boolean).join(' ') || pl.athlete_name || pl.email;
+          const editLink =
+            isBobby && pl.remote_program_id
+              ? `<a class="btn btn-sm" href="/coach/program/${pl.remote_program_id}/edit" style="text-decoration:none">Edit program</a>`
+              : '';
+          return `<div class="remote-row"><div><strong>${esc(name)}</strong><div class="hint-inline">${esc(pl.email)}${pl.remote_program_id ? '' : ' · no program'}</div></div><div class="remote-actions">${editLink}</div></div>`;
+        })
+        .join('');
+      const playersSection = c.isFounder
+        ? `<h3 class="section-head" style="margin-top:14px">Players</h3>\n        ${playerRows || '<p class="hint">No players yet.</p>'}`
+        : '';
       return `<div class="card">
         ${added}
         <div style="display:flex;justify-content:space-between;align-items:start;gap:12px;flex-wrap:wrap">
@@ -1377,6 +1392,7 @@ function coachOrganizationsPage(user, organizations, error, addedId) {
           <a class="btn-small btn-quiet" href="/coach/organizations/${c.id}/delete" style="text-decoration:none;display:inline-block">Delete</a>
           </div>` : ''}
         </div>
+        ${playersSection}
         <h3 class="section-head" style="margin-top:14px">Program coaches</h3>
         ${coachRows || '<p class="hint">No program coaches yet \u2014 they see every team in the program.</p>'}
         ${managesTeams ? `<details style="margin-top:10px">
@@ -1878,9 +1894,9 @@ function programEditPage(user, p) {
   return layout({
     title: `Edit program — ${p.athlete_name}`,
     user,
-    tabs: coachTabs('programs', user.approvalCount, user),
+    tabs: coachTabs('organizations', user.approvalCount, user),
     body: `<h1 class="page-title">Program — ${esc(p.athlete_name)}</h1>
-    <p><a href="/coach/programs">← Back to programs</a></p>
+    <p><a href="/coach/organizations">← Back to organizations</a></p>
     <form method="post" action="/coach/program/${p.id}/save" class="form">
       <div class="card routine-group">
         <label class="fld">Date range<input type="text" name="date_range" value="${esc(prog.date_range || '')}" maxlength="60" placeholder="8/18–9/16"></label>
