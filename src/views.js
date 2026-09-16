@@ -108,9 +108,12 @@ function userTabs(active, user) {
 
 function coachTabs(active, approvalCount) {
   return [
-    { href: '/coach', label: 'Dashboard', active: active === 'dashboard' },
-    { href: '/coach/approvals', label: 'Approvals', active: active === 'approvals', badge: approvalCount > 0 ? String(approvalCount) : null },
+    { href: '/coach', label: 'Home', active: active === 'home' },
+    { href: '/coach/hitters', label: 'Hitters', active: active === 'hitters' },
+    { href: '/coach/programs', label: 'Programs', active: active === 'programs' },
+    { href: '/coach/videos', label: 'Videos', active: active === 'videos' },
     { href: '/coach/skip', label: 'Train Skip', active: active === 'skip' },
+    { href: '/coach/approvals', label: 'Approvals', active: active === 'approvals', badge: approvalCount > 0 ? String(approvalCount) : null },
     { href: '/settings', label: 'Settings', active: active === 'settings' },
   ];
 }
@@ -744,10 +747,40 @@ function coachApprovalsPage(user, pending) {
   });
 }
 
-function coachDashboard(user, userStats, latest, pending, remotePrograms, library, opts) {
-  const totalCheckins = userStats.reduce((s, u) => s + u.total, 0);
-  // View-only coaches (can_edit=0) see everything but change nothing.
+// Coach Home: "needs your attention" — approvals waiting, hitters gone
+// quiet (no check-in in 3+ Chicago days), and the compact latest feed.
+function coachHomePage(user, quiet, latest, pending, pushOn) {
   const canEdit = user.role === 'coach' && user.canEdit !== false;
+  const approvalNudge = pending && pending.length
+    ? `<a class="card approval-nudge" href="/coach/approvals">${pending.length} hitter${pending.length === 1 ? '' : 's'} waiting for approval →</a>`
+    : '';
+  const quietCards = (quiet || [])
+    .map(
+      (a) => `<a href="/coach/user/${encodeURIComponent(a.email)}" class="card athlete-card" style="display:block;color:inherit;text-decoration:none">
+        <div class="athlete-card-name">${esc(a.name)}</div>
+        <div class="athlete-card-meta">last check-in ${a.daysAgo} day${a.daysAgo === 1 ? '' : 's'} ago</div>
+      </a>`
+    )
+    .join('');
+  const feed = latest.length
+    ? latest.map((c) => checkinCard({ ...c, showAthlete: true })).join('')
+    : '<div class="card empty">No check-ins yet.</div>';
+  return layout({
+    title: 'Skip Dashboard',
+    user,
+    tabs: coachTabs('home', user.approvalCount),
+    body: `<h1 class="page-title">Skip Dashboard</h1>
+    ${canEdit && !pushOn ? '<p><button type="button" class="btn-small" id="push-enable-btn">Turn on notifications</button> <span class="hint-inline">get a push when a hitter needs approval</span></p>' : ''}
+    ${approvalNudge}
+    <h2 class="section-head">Gone quiet</h2>
+    ${quietCards || '<div class="card empty">Everyone\u2019s checking in.</div>'}
+    <h2 class="section-head">Latest check-ins</h2>
+    ${feed}`,
+  });
+}
+
+// Coach Hitters tab: the search bar + athlete cards.
+function coachHittersPage(user, userStats) {
   const cards = userStats
     .map(
       (a) => `<div class="card athlete-card" data-search="${esc(`${a.name} ${a.email}`.toLowerCase())}">
@@ -763,32 +796,26 @@ function coachDashboard(user, userStats, latest, pending, remotePrograms, librar
       </div>`
     )
     .join('');
-  const feed = latest.length
-    ? latest.map((c) => checkinCard({ ...c, showAthlete: true })).join('')
-    : '<div class="card empty">No check-ins yet.</div>';
-  const approvalNudge = pending && pending.length
-    ? `<a class="card approval-nudge" href="/coach/approvals">${pending.length} hitter${pending.length === 1 ? '' : 's'} waiting for approval →</a>`
-    : '';
   return layout({
-    title: 'Coach Dashboard',
+    title: 'Hitters',
     user,
-    tabs: coachTabs('dashboard', user.approvalCount),
-    body: `<h1 class="page-title">Skip Dashboard</h1>
-    ${canEdit && !(library && library.pushOn) ? '<p><button type="button" class="btn-small" id="push-enable-btn">Turn on notifications</button> <span class="hint-inline">get a push when a hitter needs approval</span></p>' : ''}
-    <div class="stat-row">
-      <div class="card stat"><div class="stat-num">${userStats.length}</div><div class="stat-label">hitters</div></div>
-      <div class="card stat"><div class="stat-num">${totalCheckins}</div><div class="stat-label">check-ins</div></div>
-    </div>
-    ${approvalNudge}
-    <h2 class="section-head">Hitters</h2>
+    tabs: coachTabs('hitters', user.approvalCount),
+    body: `<h1 class="page-title">Hitters</h1>
     ${userStats.length ? `<input type="search" id="hitter-search" class="searchbar" placeholder="Search hitters…" autocomplete="off">` : ''}
     <div class="athlete-grid">${cards || '<div class="card empty">Nobody has signed up yet.</div>'}</div>
-    <div class="card empty" id="hitter-no-match" hidden>No hitters match that search.</div>
-    ${remoteProgramsSection(remotePrograms || [], canEdit)}
-    ${librarySection(library || { cats: [], lastSync: '' })}
-    ${canEdit && library && library.coaches ? coachesSection(library.coaches, user.id) : ''}
-    <h2 class="section-head">Latest check-ins</h2>
-    ${feed}`,
+    <div class="card empty" id="hitter-no-match" hidden>No hitters match that search.</div>`,
+  });
+}
+
+// Coach Programs tab: the remote program list.
+function coachProgramsPage(user, remotePrograms) {
+  const canEdit = user.role === 'coach' && user.canEdit !== false;
+  return layout({
+    title: 'Programs',
+    user,
+    tabs: coachTabs('programs', user.approvalCount),
+    body: `<h1 class="page-title">Programs</h1>
+    ${remoteProgramsSection(remotePrograms || [], canEdit)}`,
   });
 }
 
@@ -1101,9 +1128,9 @@ function programEditPage(user, p) {
   return layout({
     title: `Edit program — ${p.athlete_name}`,
     user,
-    tabs: coachTabs('dashboard', user.approvalCount),
+    tabs: coachTabs('programs', user.approvalCount),
     body: `<h1 class="page-title">Program — ${esc(p.athlete_name)}</h1>
-    <p><a href="/coach">← Back to dashboard</a></p>
+    <p><a href="/coach/programs">← Back to programs</a></p>
     <form method="post" action="/coach/program/${p.id}/save" class="form">
       <div class="card routine-group">
         <label class="fld">Date range<input type="text" name="date_range" value="${esc(prog.date_range || '')}" maxlength="60" placeholder="8/18–9/16"></label>
@@ -1301,7 +1328,7 @@ function coachLibraryPage(user, cats, activeCat, videos, playing) {
   return layout({
     title: 'Video library',
     user,
-    active: 'coach',
+    tabs: coachTabs('videos', user.approvalCount),
     body: `<p><a href="/coach">\u2190 Dashboard</a></p>
     <h1 class="page-title">Video library</h1>
     <div class="hint-inline">Renames and hidden videos are yours only — the Drive sync never overwrites them. New Drive files appear here automatically.</div>
@@ -1329,9 +1356,9 @@ function coachUser(user, name, checkins, whatWorks, thread, email, memories, rou
   return layout({
     title: name,
     user,
-    tabs: coachTabs('dashboard', user.approvalCount),
+    tabs: coachTabs('hitters', user.approvalCount),
     body: `<h1 class="page-title">${esc(name)}</h1>
-    <p><a href="/coach">← Back to dashboard</a></p>
+    <p><a href="/coach/hitters">← Back to hitters</a></p>
     ${routineReadonly(routine)}
     ${memorySection(email, memories, canEdit)}
     ${whatWorksSection(whatWorks || {}, { readOnly: true })}
@@ -1391,7 +1418,7 @@ function coachDeleteHitterPage(user, hitter, name, checkinCount) {
   return layout({
     title: 'Delete hitter',
     user,
-    tabs: coachTabs('dashboard', user.approvalCount),
+    tabs: coachTabs('hitters', user.approvalCount),
     body: `<h1 class="page-title">Delete hitter?</h1>
     <div class="card">
       <p>This will permanently remove <strong>${esc(name)}</strong> (${esc(hitter.email)}) from The Daily Hitter — their account, ${checkinCount} check-in${checkinCount === 1 ? '' : 's'}, chat history, and routine.</p>
@@ -1625,6 +1652,7 @@ function settingsPage(user, opts) {
   const o = opts || {};
   const sub = o.subscription || null;
   const isCoach = user.role === 'coach';
+  const canEdit = isCoach && user.canEdit !== false;
   const tabs = isCoach ? coachTabs('settings', user.approvalCount) : userTabs('settings', user);
   return layout({
     title: 'Settings',
@@ -1660,6 +1688,7 @@ function settingsPage(user, opts) {
            <p class="hint">You keep full access until the end of the current billing period.</p>`
         : `<p class="hint">You&apos;re on the free plan. When paid subscriptions launch, you&apos;ll manage your plan and billing right here.</p>`}
     </div>
+    ${canEdit && o.coaches ? coachesSection(o.coaches, o.selfId || user.id) : ''}
     ${isCoach ? '' : `<div class="card danger-zone">
       <h2 class="section-head">Danger zone</h2>
       <p class="hint">Deleting your account permanently removes your check-ins, notes, chat history, streak, and everything else tied to it. This can&apos;t be undone.</p>
@@ -1685,7 +1714,9 @@ module.exports = {
   notebookPage,
   scorePage,
   chatPage,
-  coachDashboard,
+  coachHomePage,
+  coachHittersPage,
+  coachProgramsPage,
   coachApprovalsPage,
   coachUser,
   coachDeleteHitterPage,

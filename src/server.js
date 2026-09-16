@@ -990,13 +990,13 @@ app.get('/program/routine', requireLogin, (req, res) => {
 app.get('/coach/program/:id/edit', requireCoach, (req, res) => {
   setApprovalCount(req);
   const p = getProgram(req.params.id);
-  if (!p) return res.redirect('/coach');
+  if (!p) return res.redirect('/coach/programs');
   res.send(views.programEditPage(realUser(req), p));
 });
 
 app.post('/coach/program/:id/save', requireCoach, (req, res) => {
   const p = getProgram(req.params.id);
-  if (!p) return res.redirect('/coach');
+  if (!p) return res.redirect('/coach/programs');
   const b = req.body;
   const prog = p.prog && p.prog.athlete ? p.prog : blankProgram(p.athlete_name);
   prog.athlete = p.athlete_name;
@@ -1060,7 +1060,7 @@ app.post('/coach/program/:id/save', requireCoach, (req, res) => {
     new Date().toISOString(),
     p.id
   );
-  res.redirect('/coach');
+  res.redirect('/coach/programs');
 });
 
 // Coach: manage the remote roster.
@@ -1077,7 +1077,7 @@ app.post('/coach/remote/add', requireCoach, (req, res) => {
       backfillRemoteLinks();
     }
   }
-  res.redirect('/coach');
+  res.redirect('/coach/programs');
 });
 
 app.post('/coach/remote/remove', requireCoach, (req, res) => {
@@ -1086,7 +1086,7 @@ app.post('/coach/remote/remove', requireCoach, (req, res) => {
     db.prepare('UPDATE users SET remote_program_id = NULL WHERE remote_program_id = ?').run(id);
     db.prepare('DELETE FROM remote_programs WHERE id = ?').run(id);
   }
-  res.redirect('/coach');
+  res.redirect('/coach/programs');
 });
 
 app.post('/coach/remote/alias', requireCoach, (req, res) => {
@@ -1104,7 +1104,7 @@ app.post('/coach/remote/alias', requireCoach, (req, res) => {
       backfillRemoteLinks(); // link anyone waiting under this name right away
     }
   }
-  res.redirect('/coach');
+  res.redirect('/coach/programs');
 });
 
 app.post('/coach/remote/link', requireCoach, (req, res) => {
@@ -1114,13 +1114,13 @@ app.post('/coach/remote/link', requireCoach, (req, res) => {
     ? db.prepare("SELECT id FROM users WHERE email = ? AND role = 'athlete'").get(email)
     : null;
   if (id && u) db.prepare('UPDATE users SET remote_program_id = ? WHERE id = ?').run(id, u.id);
-  res.redirect('/coach');
+  res.redirect('/coach/programs');
 });
 
 app.post('/coach/remote/unlink', requireCoach, (req, res) => {
   const id = Number(req.body.id);
   if (id) db.prepare('UPDATE users SET remote_program_id = NULL WHERE remote_program_id = ?').run(id);
-  res.redirect('/coach');
+  res.redirect('/coach/programs');
 });
 
 // ---- Video library: Bobby's Development System, synced from Drive by the
@@ -1238,7 +1238,8 @@ app.post('/coach/view-as/exit', (req, res) => {
 });
 
 // ---- Coach video library manager ----
-app.get('/coach/library', requireCoachAny, (req, res) => {
+// Coach Videos tab: the video library.
+app.get('/coach/videos', requireCoachAny, (req, res) => {
   const cats = db
     .prepare('SELECT category, COUNT(*) AS n FROM video_library GROUP BY category ORDER BY category')
     .all();
@@ -1252,17 +1253,23 @@ app.get('/coach/library', requireCoachAny, (req, res) => {
   res.send(views.coachLibraryPage(realUser(req), cats, active, videos, playing));
 });
 
+// Old library URL — everything lives on the Videos tab now.
+app.get('/coach/library', requireCoachAny, (req, res) => {
+  const q = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+  res.redirect('/coach/videos' + q);
+});
+
 app.post('/coach/library/rename', requireCoach, (req, res) => {
   const id = Number(req.body.id);
   const name = String(req.body.custom_name || '').trim().slice(0, 200);
   if (id) db.prepare('UPDATE video_library SET custom_name = ? WHERE id = ?').run(name, id);
-  res.redirect('/coach/library?cat=' + encodeURIComponent(req.body.cat || ''));
+  res.redirect('/coach/videos?cat=' + encodeURIComponent(req.body.cat || ''));
 });
 
 app.post('/coach/library/toggle', requireCoach, (req, res) => {
   const id = Number(req.body.id);
   if (id) db.prepare('UPDATE video_library SET hidden = 1 - hidden WHERE id = ?').run(id);
-  res.redirect('/coach/library?cat=' + encodeURIComponent(req.body.cat || ''));
+  res.redirect('/coach/videos?cat=' + encodeURIComponent(req.body.cat || ''));
 });
 
 app.post('/learn/note', requireLogin, (req, res) => {
@@ -1414,11 +1421,24 @@ function getSubscription(userId) {
   } catch (e) { return null; }
 }
 
+// Coaches admin (full-access coaches only) lives on Settings now.
+function coachAdminOpts(req) {
+  const me = realUser(req);
+  if (req.user.role === 'coach' && me.canEdit) {
+    return {
+      coaches: db.prepare("SELECT id, email, first_name, last_name, can_edit, created_at FROM users WHERE role = 'coach' ORDER BY created_at ASC").all(),
+      selfId: me.id,
+    };
+  }
+  return {};
+}
+
 app.get('/settings', requireLogin, (req, res) => {
   if (req.user.viewAs) return res.redirect('/coach');
   res.send(views.settingsPage(req.user, {
     subscription: getSubscription(req.user.id),
     notice: req.query.saved ? 'Account updated.' : (req.query.pw ? 'Password changed.' : null),
+    ...coachAdminOpts(req),
   }));
 });
 
@@ -1426,7 +1446,7 @@ app.post('/settings/profile', requireLogin, (req, res) => {
   const firstName = String(req.body.first_name || '').trim().replace(/\s+/g, ' ').slice(0, 40);
   const lastName = String(req.body.last_name || '').trim().replace(/\s+/g, ' ').slice(0, 40);
   const email = String(req.body.email || '').trim().toLowerCase();
-  const fail = (msg) => res.send(views.settingsPage(req.user, { subscription: getSubscription(req.user.id), error: msg }));
+  const fail = (msg) => res.send(views.settingsPage(req.user, { subscription: getSubscription(req.user.id), error: msg, ...coachAdminOpts(req) }));
   if (!firstName || !lastName) return fail('First and last name are required.');
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail('That email doesn\u2019t look right.');
   const taken = db.prepare('SELECT id FROM users WHERE email = ? AND id != ?').get(email, req.user.id);
@@ -1438,7 +1458,7 @@ app.post('/settings/profile', requireLogin, (req, res) => {
 });
 
 app.post('/settings/password', requireLogin, (req, res) => {
-  const fail = (msg) => res.send(views.settingsPage(req.user, { subscription: getSubscription(req.user.id), error: msg }));
+  const fail = (msg) => res.send(views.settingsPage(req.user, { subscription: getSubscription(req.user.id), error: msg, ...coachAdminOpts(req) }));
   const row = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(req.user.id);
   if (!row || !bcrypt.compareSync(String(req.body.current_password || ''), row.password_hash)) {
     return fail('Current password didn\u2019t match.');
@@ -1452,18 +1472,19 @@ app.post('/settings/password', requireLogin, (req, res) => {
 app.post('/settings/subscription/cancel', requireLogin, (req, res) => {
   const sub = getSubscription(req.user.id);
   if (!sub || sub.status !== 'active') {
-    return res.send(views.settingsPage(req.user, { subscription: sub, notice: 'No active subscription \u2014 nothing to cancel.' }));
+    return res.send(views.settingsPage(req.user, { subscription: sub, notice: 'No active subscription \u2014 nothing to cancel.', ...coachAdminOpts(req) }));
   }
   db.prepare("UPDATE user_subscriptions SET status = 'canceled', updated_at = datetime('now') WHERE user_id = ?").run(req.user.id);
   res.send(views.settingsPage(req.user, {
     subscription: getSubscription(req.user.id),
     notice: 'Subscription ended. You keep full access until the end of the billing period.',
+    ...coachAdminOpts(req),
   }));
 });
 
 app.post('/settings/delete', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.status(403).send('Forbidden');
-  const fail = (msg) => res.send(views.settingsPage(req.user, { subscription: getSubscription(req.user.id), error: msg }));
+  const fail = (msg) => res.send(views.settingsPage(req.user, { subscription: getSubscription(req.user.id), error: msg, ...coachAdminOpts(req) }));
   if (String(req.body.confirm || '').trim() !== 'DELETE') return fail('Type DELETE exactly to confirm.');
   const id = req.user.id;
   const del = db.transaction(() => {
@@ -1524,45 +1545,73 @@ function setApprovalCount(req) {
   }
 }
 
-app.get('/coach', requireCoachAny, (req, res) => {
-  setApprovalCount(req);
+// Per-hitter check-in stats for the coach views: total + last check-in.
+function coachUserStats() {
   const users = db
     .prepare("SELECT id, email, athlete_name, first_name, last_name, created_at FROM users WHERE role != 'coach' AND status = 'approved' ORDER BY created_at ASC")
     .all();
-  const stats = users.map((u) => {
+  return users.map((u) => {
     const row = db
       .prepare('SELECT COUNT(*) AS total, MAX(created_at) AS last FROM checkins WHERE user_id = ?')
       .get(u.id);
     const name = [u.first_name, u.last_name].filter(Boolean).join(' ') || u.athlete_name || u.email;
     return { id: u.id, email: u.email, name, total: row.total, last: row.last };
   });
-  const latest = db
-    .prepare('SELECT * FROM checkins ORDER BY created_at DESC LIMIT 20')
-    .all();
-  const pending = pendingList();
-  const remotePrograms = db
+}
+
+// Hitters gone quiet: at least one check-in, but none in 3+ Chicago days.
+function coachQuietHitters(stats) {
+  const today = chiDay(new Date());
+  return stats
+    .filter((s) => {
+      if (!s.last) return false;
+      try {
+        const daysAgo = Math.round((ymdToUTC(today) - ymdToUTC(chiDay(s.last))) / 864e5);
+        return daysAgo >= 3;
+      } catch {
+        return false;
+      }
+    })
+    .map((s) => ({ ...s, daysAgo: Math.round((ymdToUTC(today) - ymdToUTC(chiDay(s.last))) / 864e5) }))
+    .sort((a, b) => b.daysAgo - a.daysAgo);
+}
+
+// Remote program list for the Programs tab.
+function remoteProgramList() {
+  return db
     .prepare(
       `SELECT p.id, p.athlete_name, p.aliases, p.updated_at,
               (SELECT email FROM users WHERE remote_program_id = p.id LIMIT 1) AS user_email
        FROM remote_programs p ORDER BY p.athlete_name`
     )
     .all();
-  const libraryCats = db
-    .prepare('SELECT category, COUNT(*) AS n FROM video_library GROUP BY category ORDER BY category')
+}
+
+// Coach Home: needs-your-attention — approvals, gone-quiet hitters, latest feed.
+app.get('/coach', requireCoachAny, (req, res) => {
+  setApprovalCount(req);
+  const stats = coachUserStats();
+  const quiet = coachQuietHitters(stats);
+  const latest = db
+    .prepare('SELECT * FROM checkins ORDER BY created_at DESC LIMIT 8')
     .all();
-  const librarySync = db.prepare("SELECT value FROM library_sync_state WHERE key = 'last_sync_at'").get();
+  const pending = pendingList();
   const me = realUser(req);
-  const coaches = me.canEdit
-    ? db.prepare("SELECT id, email, first_name, last_name, can_edit, created_at FROM users WHERE role = 'coach' ORDER BY created_at ASC").all()
-    : null;
   res.send(
-    views.coachDashboard(me, stats, latest, pending, remotePrograms, {
-      cats: libraryCats,
-      lastSync: librarySync ? librarySync.value : '',
-      pushOn: userPushSubscriptions(req.user.id).length > 0,
-      coaches,
-    })
+    views.coachHomePage(me, quiet, latest, pending, userPushSubscriptions(req.user.id).length > 0)
   );
+});
+
+// Coach Hitters tab: search + athlete cards.
+app.get('/coach/hitters', requireCoachAny, (req, res) => {
+  setApprovalCount(req);
+  res.send(views.coachHittersPage(realUser(req), coachUserStats()));
+});
+
+// Coach Programs tab: remote programs.
+app.get('/coach/programs', requireCoachAny, (req, res) => {
+  setApprovalCount(req);
+  res.send(views.coachProgramsPage(realUser(req), remoteProgramList()));
 });
 
 // Flip a coach between full access and view-only. Full coaches only, never
@@ -1571,13 +1620,13 @@ app.post('/coach/coaches/toggle', requireCoach, (req, res) => {
   const id = Number(req.body.id);
   const me = realUser(req);
   const target = db.prepare("SELECT id, can_edit FROM users WHERE id = ? AND role = 'coach'").get(id);
-  if (!target || target.id === me.id) return res.redirect('/coach');
+  if (!target || target.id === me.id) return res.redirect('/settings');
   if (target.can_edit !== 0) {
     const fullCount = db.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'coach' AND can_edit != 0").get().n;
-    if (fullCount <= 1) return res.redirect('/coach');
+    if (fullCount <= 1) return res.redirect('/settings');
   }
   db.prepare('UPDATE users SET can_edit = ? WHERE id = ?').run(target.can_edit !== 0 ? 0 : 1, target.id);
-  res.redirect('/coach');
+  res.redirect('/settings');
 });
 
 // Approvals tab: approve or decline waiting hitters right here.
