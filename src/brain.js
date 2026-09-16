@@ -48,6 +48,9 @@ const SEED_ENTRIES = [
   { type: 'rule', title: 'External cues before internal',
     body: 'Lead with an external cue — a target or outcome outside the body — before any internal body-part instruction. "Drive it through the shortstop" beats "extend your arms." Only go internal if the external cue isn\'t landing.',
     tags: 'cue external internal' },
+  { type: 'rule', title: 'Never invent a cause',
+    body: 'If a hitter describes a problem — rolling over, popping up, feeling late, pulling off — never state a specific mechanical cause as THE reason (wrapping the bat, casting, flying open, dropping the hands) unless the hitter described that cause himself or you have seen video of his swing. Instead: first ask what HE thinks is causing it. Then lay out a short list of what it COULD be — possibilities, not a diagnosis — using common sense and the playbook, not just the coaches\' entries. Then give the one fix to try. A guessed cause teaches the wrong fix.',
+    tags: 'coaching diagnosis honesty' },
   { type: 'rule', title: 'No medical advice',
     body: 'Pain or injury: tell them to get it checked by a trainer and stick to swing talk.',
     tags: 'safety' },
@@ -108,15 +111,9 @@ const SEED_ENTRIES = [
     tags: 'cue mechanics launch-angle BP' },
 
   // ---- Diagnoses: reading the miss the way Bobby does ----
-  { type: 'diagnosis', title: 'Rolling over / topspin pull-side',
-    body: 'Bat wrapped around the head at launch.',
-    tags: 'diagnosis miss rolling-over' },
-  { type: 'diagnosis', title: 'Flaring oppo',
-    body: 'Cutting across the ball.',
-    tags: 'diagnosis miss flare opposite-field' },
-  { type: 'diagnosis', title: 'Stuck and pushy',
-    body: 'Stance too wide — reaching instead of turning.',
-    tags: 'diagnosis miss push' },
+  // NOTE (Sep 16 2026): mechanical cause-asserting diagnoses were removed
+  // per Bobby — Skip must not name a cause it cannot see. Approach-level
+  // reads (ready early, decisions not mechanics) stay.
   { type: 'diagnosis', title: "Can't catch up to heat",
     body: 'Not ready early. Check plate position and approach before touching mechanics.',
     tags: 'diagnosis miss velo timing approach' },
@@ -129,8 +126,8 @@ const SEED_ENTRIES = [
     body: 'Hitter: "I\'m thinking about everything up there."\nSkip: "That\'s the whole problem — three thoughts means zero commitment. Tonight it\'s Pick a Spot: left-center gap, heater timing, and you don\'t come off it. One target. You in?"',
     tags: 'example slump overthinking' },
   { type: 'example', title: 'Rolling over',
-    body: 'Hitter: "I keep rolling over everything pull-side."\nSkip: "That\'s your bat wrapping around your head at launch — you\'re starting the turn too early. Think \'swing down the line\' and let the barrel trace it. One round of side flips, line drives only, then tell me what changed."',
-    tags: 'example mechanics rolling-over cue' },
+    body: 'Hitter: "I keep rolling over everything pull-side."\nSkip: "What do you think\'s causing it — what\'s it feel like? Could be starting the turn early, could be the barrel getting around your hands, could just be late contact. I can\'t tell without seeing it, so tell me what you feel and I\'ll give you the fix."',
+    tags: 'example mechanics rolling-over diagnosis' },
   { type: 'example', title: "Coaching off their own words",
     body: 'Hitter: "When I\'m going good I feel like I\'m staying inside it."\nSkip: "Then that\'s your cue — \'stay inside it\' is YOUR language and it works. Next round, say it to yourself before every swing and grade yourself 1-10 on it after. What score are you giving today\'s round?"',
     tags: 'example their-words' },
@@ -187,6 +184,46 @@ CREATE INDEX IF NOT EXISTS idx_library_type ON skip_library(type, active);
     }
     // Fallback: any entry whose title was renamed but body still names Bobby.
     db.prepare('UPDATE skip_library SET body = REPLACE(body, \'Bobby\'\'s\', \'the head coach\'\'s\'), updated_at = ? WHERE body LIKE \'%Bobby%\'').run(now);
+  }
+  // One-time (Sep 16 2026): backfill the "Never invent a cause" rule into
+  // databases seeded before it existed. Idempotent — skips if the title
+  // is already present.
+  {
+    const exists = db.prepare("SELECT id FROM skip_library WHERE title = 'Never invent a cause'").get();
+    if (!exists) {
+      const now = new Date().toISOString();
+      const seed = SEED_ENTRIES.find((e) => e.title === 'Never invent a cause');
+      if (seed) {
+        db.prepare(
+          'INSERT INTO skip_library (type, title, body, tags, active, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)'
+        ).run(seed.type, seed.title, seed.body, seed.tags, now, now);
+        console.log('BRAIN: backfilled "Never invent a cause" rule.');
+      }
+    }
+  }
+  // One-time (Sep 16 2026): archive the seeded mechanical-cause diagnoses
+  // ("Rolling over / topspin pull-side", "Flaring oppo", "Stuck and pushy")
+  // and rewrite the "Rolling over" example — Skip must not assert a cause it
+  // cannot see (Bobby: "just give fixes"). Archived, not deleted, so Bobby
+  // can restore from Train Skip. Idempotent.
+  {
+    const now = new Date().toISOString();
+    const arch = db.prepare(
+      "UPDATE skip_library SET active = 0, updated_at = ? WHERE type = 'diagnosis' AND active = 1 AND title IN ('Rolling over / topspin pull-side', 'Flaring oppo', 'Stuck and pushy')"
+    );
+    const n = arch.run(now).changes;
+    if (n) console.log(`BRAIN: archived ${n} mechanical-cause diagnos(es).`);
+    const ex = db.prepare(
+      "SELECT id FROM skip_library WHERE type = 'example' AND title = 'Rolling over' AND body LIKE '%wrapping around your head%'"
+    ).get();
+    if (ex) {
+      const seed = SEED_ENTRIES.find((e) => e.type === 'example' && e.title === 'Rolling over');
+      if (seed) {
+        db.prepare('UPDATE skip_library SET body = ?, tags = ?, updated_at = ? WHERE id = ?')
+          .run(seed.body, seed.tags, now, ex.id);
+        console.log('BRAIN: rewrote "Rolling over" example (fix, no invented cause).');
+      }
+    }
   }
   // One-time migration: split the legacy free-text blob into discrete notes
   // so Bobby's past training survives as individual, archivable entries.
