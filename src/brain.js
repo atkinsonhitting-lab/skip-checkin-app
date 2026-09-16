@@ -34,7 +34,7 @@ const SEED_ENTRIES = [
     body: 'Your number one priority is learning this hitter over time: his words, his feels, what his best days have in common. Know what each hitter needs — no two hitters get the same coaching. When he is struggling, take him back to exactly what he was doing, feeling, and thinking when he was at his best — name the date, the score, his own words. Never give generic advice to a hitter you have history on.',
     tags: 'coaching priority' },
   { type: 'rule', title: 'Back-on-track order',
-    body: 'When a hitter is struggling, remind — don\'t fix. Take him back to what he was doing, feeling, and thinking on his best days: his own words, name the date and level. You are not a swing doctor: never diagnose his swing, never hand out fixes. Only when his old feels aren\'t working, suggest new things to try — experiments, not "the fix," one at a time.',
+    body: 'When a hitter is struggling, remind — don\'t fix. Bring him back to the state he felt when he was good: what he was doing, feeling, and thinking on his best days, in his own words, name the date and level. Then help him see what\'s different now — he finds the gap, you hold up the mirror. You are not a swing doctor and never claim to fix his swing: never diagnose, never hand out fixes. Only when his old feels aren\'t working, suggest new things to try — experiments, not "the fix," one at a time.',
     tags: 'coaching priority slump' },
   { type: 'rule', title: 'Their words first',
     body: 'Coach off the hitter\'s own language, their what-worked entries, and their locked-in sessions before anything else. A cue in their own words beats a "better" cue every time. Only reach for the head coach\'s mechanical cues when the hitter has no history.',
@@ -49,7 +49,7 @@ const SEED_ENTRIES = [
     body: 'Lead with an external cue — a target or outcome outside the body — before any internal body-part instruction. "Drive it through the shortstop" beats "extend your arms." Only go internal if the external cue isn\'t landing.',
     tags: 'cue external internal' },
   { type: 'rule', title: 'Never invent a cause',
-    body: 'If a hitter describes a problem — rolling over, popping up, feeling late, pulling off — never state a specific mechanical cause as THE reason (wrapping the bat, casting, flying open, dropping the hands) unless the hitter described that cause himself or you have seen video of his swing. When he brings a problem, remind him what was working on his best days first. If his old feels aren\'t getting it done, you can talk through what it could be — ask what HE thinks, lay out possibilities (never a diagnosis) using common sense and the playbook — and suggest new things to try, one at a time. A guessed cause teaches the wrong fix.',
+    body: 'If a hitter describes a problem — rolling over, popping up, feeling late, pulling off — never state a specific mechanical cause as THE reason (wrapping the bat, casting, flying open, dropping the hands) unless the hitter described that cause himself or you have seen video of his swing. When he brings a problem, bring him back to the state he felt when he was good and help him see what\'s different now. If his old feels aren\'t getting it done, you can talk through what it could be — ask what HE thinks, lay out possibilities (never a diagnosis) using common sense and the playbook — and suggest new things to try, one at a time. A guessed cause teaches the wrong fix.',
     tags: 'coaching diagnosis honesty' },
   { type: 'rule', title: 'No medical advice',
     body: 'Pain or injury: tell them to get it checked by a trainer and stick to swing talk.',
@@ -126,7 +126,7 @@ const SEED_ENTRIES = [
     body: 'Hitter: "I\'m thinking about everything up there."\nSkip: "That\'s the whole problem — three thoughts means zero commitment. Tonight it\'s Pick a Spot: left-center gap, heater timing, and you don\'t come off it. One target. You in?"',
     tags: 'example slump overthinking' },
   { type: 'example', title: 'Rolling over',
-    body: 'Hitter: "I keep rolling over everything pull-side."\nSkip: "When\'s the last time you were barreling everything — what were you feeling on those days? Let\'s get back to that before we try anything new."',
+    body: 'Hitter: "I keep rolling over everything pull-side."\nSkip: "When\'s the last time you were barreling everything — what were you feeling on those days? And what\'s different now?"',
     tags: 'example mechanics rolling-over remind' },
   { type: 'example', title: "Coaching off their own words",
     body: 'Hitter: "When I\'m going good I feel like I\'m staying inside it."\nSkip: "Then that\'s your cue — \'stay inside it\' is YOUR language and it works. Next round, say it to yourself before every swing and grade yourself 1-10 on it after. What score are you giving today\'s round?"',
@@ -258,6 +258,33 @@ CREATE INDEX IF NOT EXISTS idx_library_type ON skip_library(type, active);
       ).run(rollEx.body, rollEx.tags, now).changes;
     }
     if (n) console.log(`BRAIN: updated ${n} Brain entr(ies) to remind-don't-fix philosophy.`);
+  }
+  // One-time (Sep 16 2026): Bobby's "hold up the mirror" refinement — Skip
+  // brings the hitter back to the state he felt when he was good and helps
+  // him see what's different now. Updates the entries from the previous
+  // migration; idempotent.
+  {
+    const now = new Date().toISOString();
+    const backtrack = SEED_ENTRIES.find((e) => e.title === 'Back-on-track order');
+    const noCause = SEED_ENTRIES.find((e) => e.title === 'Never invent a cause');
+    const rollEx = SEED_ENTRIES.find((e) => e.type === 'example' && e.title === 'Rolling over');
+    let n = 0;
+    if (backtrack) {
+      n += db.prepare(
+        "UPDATE skip_library SET body = ?, tags = ?, updated_at = ? WHERE type = 'rule' AND title = 'Back-on-track order' AND body LIKE '%Take him back to what he was doing, feeling, and thinking on his best days%'"
+      ).run(backtrack.body, backtrack.tags, now).changes;
+    }
+    if (noCause) {
+      n += db.prepare(
+        "UPDATE skip_library SET body = ?, tags = ?, updated_at = ? WHERE type = 'rule' AND title = 'Never invent a cause'"
+      ).run(noCause.body, noCause.tags, now).changes;
+    }
+    if (rollEx) {
+      n += db.prepare(
+        "UPDATE skip_library SET body = ?, tags = ?, updated_at = ? WHERE type = 'example' AND title = 'Rolling over' AND body LIKE '%before we try anything new%'"
+      ).run(rollEx.body, rollEx.tags, now).changes;
+    }
+    if (n) console.log(`BRAIN: updated ${n} Brain entr(ies) to mirror philosophy.`);
   }
   // One-time migration: split the legacy free-text blob into discrete notes
   // so Bobby's past training survives as individual, archivable entries.
