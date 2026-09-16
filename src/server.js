@@ -1412,7 +1412,8 @@ app.get('/coach/program/:id/edit', requireCoach, (req, res) => {
   setApprovalCount(req);
   const p = getProgram(req.params.id);
   if (!p) return res.redirect('/coach/programs');
-  res.send(views.programEditPage(realUser(req), p));
+  const linked = db.prepare('SELECT email FROM users WHERE remote_program_id = ? LIMIT 1').get(p.id);
+  res.send(views.programEditPage(realUser(req), p, linked ? linked.email : null));
 });
 
 app.post('/coach/program/:id/save', requireCoach, (req, res) => {
@@ -2453,7 +2454,7 @@ app.get('/coach', requireCoachAny, (req, res) => {
   const quiet = coachQuietHitters(stats);
   const latest = db
     .prepare(
-      `SELECT c.* FROM checkins c JOIN users u ON u.id = c.user_id
+      `SELECT c.*, u.email AS athlete_email FROM checkins c JOIN users u ON u.id = c.user_id
        WHERE (? IS NULL OR u.organization_id = ?) AND (? IS NULL OR u.team_id = ?)
        ORDER BY c.created_at DESC LIMIT 8`
     )

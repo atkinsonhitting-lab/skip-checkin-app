@@ -8,6 +8,12 @@ function esc(s) {
     .replace(/"/g, '&quot;');
 }
 
+// Coach views: link an athlete's name to their coach profile page, styled
+// like the existing homepage athlete-card links (invisible, inherits color).
+function athleteLink(email, inner) {
+  return `<a href="/coach/user/${encodeURIComponent(email || '')}" style="color:inherit;text-decoration:none">${inner}</a>`;
+}
+
 function fmtDate(iso) {
   // Rendered server-side as UTC; app.js localizes it in the browser.
   return `<span data-localtime="${esc(iso)}">${esc(iso)}</span>`;
@@ -1111,7 +1117,7 @@ function checkinCard(c) {
       ${c.environment ? `<span class="badge env">${esc(c.environment)}</span>` : ''}
       ${kindBadge}
     </div>
-    ${c.athlete_name && c.showAthlete ? `<div class="checkin-athlete">${esc(c.athlete_name)}</div>` : ''}`;
+    ${c.athlete_name && c.showAthlete ? `<div class="checkin-athlete">${c.athlete_email ? athleteLink(c.athlete_email, esc(c.athlete_name)) : esc(c.athlete_name)}</div>` : ''}`;
   const throwBits = [];
   if (kind !== 'hitting') {
     if (c.pitch_session_type) throwBits.push(pitchSessionTypeLabel(c.pitch_session_type));
@@ -1180,7 +1186,7 @@ function pendingApprovalCards(pending, canEdit) {
   return (pending || [])
     .map(
       (p) => `<div class="card athlete-card">
-        <div class="athlete-card-name">${esc(p.name)}</div>
+        <div class="athlete-card-name">${athleteLink(p.email, esc(p.name))}</div>
         <div class="athlete-card-email">${esc(p.email)}</div>
         <div class="athlete-card-meta">signed up ${fmtDate(p.created_at)}${p.organization_name ? ` · ${esc(p.organization_name)}` : ''}${p.team_name ? ` · ${esc(p.team_name)}` : ''}</div>
         ${canEdit
@@ -1289,7 +1295,7 @@ function coachFinancesPage(user, fin) {
     : '<div class="card empty">No payments recorded yet — record the first one on an organization above.</div>';
   const subs = fin.subs.length
     ? `<div class="card"><div class="fin-table">${fin.subs.map((s) => `<div class="fin-trow">
-        <div><strong>${esc(s.athlete_name || s.email)}</strong></div><div>${esc(s.plan)}</div>
+        <div><strong>${athleteLink(s.email, esc(s.athlete_name || s.email))}</strong></div><div>${esc(s.plan)}</div>
         <div class="hint-inline">renews ${esc(s.current_period_end || '—')}</div></div>`).join('')}</div></div>`
     : '<div class="card empty">No individual subscriptions yet — billing hasn\u2019t launched.</div>';
   return layout({
@@ -1427,7 +1433,7 @@ function coachOrganizationsPage(user, organizations, error, addedId) {
             isBobby && pl.remote_program_id
               ? `<a class="btn btn-sm" href="/coach/program/${pl.remote_program_id}/edit" style="text-decoration:none">Edit program</a>`
               : '';
-          return `<div class="remote-row"><div><strong>${esc(name)}</strong><div class="hint-inline">${esc(pl.email)}${pl.remote_program_id ? '' : ' · no program'}</div></div><div class="remote-actions">${editLink}</div></div>`;
+          return `<div class="remote-row"><div><strong>${athleteLink(pl.email, esc(name))}</strong><div class="hint-inline">${esc(pl.email)}${pl.remote_program_id ? '' : ' · no program'}</div></div><div class="remote-actions">${editLink}</div></div>`;
         })
         .join('');
       const playersSection = c.isFounder
@@ -1922,7 +1928,7 @@ function mentalGamePage(user, baseline, saved, planFailed, keys) {
 }
 
 // Coach-facing: edit a remote hitter's program.// Coach-facing: edit a remote hitter's program.
-function programEditPage(user, p) {
+function programEditPage(user, p, profileEmail) {
   const prog = p.prog || {};
   const grades = prog.grades && typeof prog.grades === 'object' ? prog.grades : {};
   const gradeFields = ['Load', 'Path', 'Connection', 'Timing', 'Power Production']
@@ -1960,7 +1966,7 @@ function programEditPage(user, p) {
     user,
     tabs: coachTabs('organizations', user.approvalCount, user),
     body: `<h1 class="page-title">Program — ${esc(p.athlete_name)}</h1>
-    <p><a href="/coach/organizations">← Back to organizations</a></p>
+    <p><a href="/coach/organizations">← Back to organizations</a>${profileEmail ? ` · <a href="/coach/user/${encodeURIComponent(profileEmail)}">View profile →</a>` : ''}</p>
     <form method="post" action="/coach/program/${p.id}/save" class="form">
       <div class="card routine-group">
         <label class="fld">Date range<input type="text" name="date_range" value="${esc(prog.date_range || '')}" maxlength="60" placeholder="8/18–9/16"></label>
@@ -2030,7 +2036,7 @@ function remoteProgramsSection(list, canEdit) {
         </div>`
         : '';
       return `<div class="remote-row">
-        <div><strong>${esc(r.athlete_name)}</strong><div class="hint-inline">${linked}${updated}</div>${aliasLine}
+        <div>${r.user_email ? `<strong>${athleteLink(r.user_email, esc(r.athlete_name))}</strong>` : `<strong>${esc(r.athlete_name)}</strong>`}<div class="hint-inline">${linked}${updated}</div>${aliasLine}
           ${aliasForm}
         </div>
         ${actions}
