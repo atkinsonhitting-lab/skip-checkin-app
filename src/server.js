@@ -2011,7 +2011,7 @@ function skipDataBlock(userId) {
       if (pre.focus) bits.push(`Focus: "${String(pre.focus).slice(0, 200)}"`);
       if (pre.plan) bits.push(`Plan: "${String(pre.plan).slice(0, 200)}"`);
       if (pre.flush) bits.push(`Flushing: "${String(pre.flush).slice(0, 200)}"`);
-      intentBlock = `\nTODAY'S INTENT (he set this BEFORE today's session — when he checks in after, connect the session back to what he said here):\n${bits.join('\n')}`;
+      intentBlock = `\nTODAY'S INTENT (he set this BEFORE today's session — hold him to it. When he talks about the session afterward, connect it back to what he said here and ask him directly whether he stuck to his plan — one direct accountability question):\n${bits.join('\n')}`;
     }
   } catch (e) {}  let mentalBlock = '';
   if (mb && (mb.pregame_routine || mb.morning_routine || mb.breath_work || mb.when_sped_up)) {
@@ -2437,6 +2437,11 @@ async function geminiText(systemText, userText, maxTokens) {
 
 const JOURNAL_SYSTEM = `You are Coach Skip, a direct no-fluff hitting coach. Read this hitter's journal entry and write a 2-3 sentence summary of the session, like a coach's margin note on their entry. Capture what actually happened: how they felt, what worked, what was off, and the one thing to carry forward. Judge by what the hitter WROTE first — their words, their honesty, their approach — then their numbers. Mental approach before mechanics. Be specific to what they said, never generic. Reply with ONLY the summary — no score, no rating, no number.`;
 
+// When the hitter set a pre-session intent that same Chicago day, Skip's read
+// holds him to it: tie the session back to the intent and ask one direct
+// accountability question.
+const JOURNAL_SYSTEM_INTENT = `You are Coach Skip, a direct no-fluff hitting coach. Read this hitter's journal entry and write a short coach's margin note: 2-3 sentences on what actually happened — how they felt, what worked, what was off, the one thing to carry forward. Judge by what the hitter WROTE first — their words, their honesty, their approach — then their numbers. Mental approach before mechanics. Then connect the session back to HIS PRE-SESSION INTENT from the same day: name what he said he'd focus on, say plainly whether the session shows he stuck to it, and end with ONE direct question holding him to it. Be specific to what they said, never generic. Reply with ONLY the note — no score, no rating, no number.`;
+
 function drillNamesOf(c) {
   try {
     return JSON.parse(c.drills_done || '[]')
@@ -2453,17 +2458,31 @@ function drillNamesOf(c) {
 }
 
 async function journalRead(c) {
-  const entry = [
+  const entryBits = [
+    `Session date (Chicago): ${chiDay(c.created_at)}`,
     `Environment: ${c.environment || 'n/a'}`,
     `Feel ${c.feel}/10, Confidence ${c.confidence}/10, Focus ${c.focus}/10, Difficulty ${c.difficulty != null ? c.difficulty + '/10' : 'n/a'}`,
     c.session_score != null ? `Session score: ${c.session_score} (${c.score_tier})` : null,
     drillNamesOf(c) ? `Drills: ${drillNamesOf(c)}` : null,
     c.session_notes ? `Their words: "${c.session_notes}"` : null,
     c.what_worked ? `What worked: "${c.what_worked}"` : null,
-  ]
-    .filter(Boolean)
-    .join('\n');
-  const raw = await geminiText(JOURNAL_SYSTEM, entry, 300);
+  ];
+  // Same-day pre-hit intent: if he set one before this session, Skip's read
+  // ties the session back to it and asks whether he stuck to his goal.
+  let system = JOURNAL_SYSTEM;
+  try {
+    const pre = c.user_id ? todayPreCheckin(c.user_id) : null;
+    if (pre && (pre.focus || pre.plan || pre.flush)) {
+      const ibits = [pre.kind === 'game' ? 'Pregame / Live ABs' : 'Cage session'];
+      if (pre.focus) ibits.push(`Focus: "${String(pre.focus).slice(0, 200)}"`);
+      if (pre.plan) ibits.push(`Plan: "${String(pre.plan).slice(0, 200)}"`);
+      if (pre.flush) ibits.push(`Flushing: "${String(pre.flush).slice(0, 200)}"`);
+      entryBits.push(`HIS PRE-SESSION INTENT (he set this the same morning, before hitting):\n${ibits.join('\n')}`);
+      system = JOURNAL_SYSTEM_INTENT;
+    }
+  } catch (e) {}
+  const entry = entryBits.filter(Boolean).join('\n');
+  const raw = await geminiText(system, entry, 300);
   const note = raw
     .replace(/^["'\s]+|["'\s]+$/g, '')
     .trim()
