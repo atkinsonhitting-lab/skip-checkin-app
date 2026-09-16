@@ -248,7 +248,7 @@ body.drawer-open #drawer { transform: none; }
 .level-hero-meter { margin: 16px auto; max-width: 440px; }
 /* Learn page — hitting notebook + players studied */
 .subnav { display: flex; gap: 8px; margin: 0 0 4px; position: sticky; z-index: 18;
-  top: calc(51px + env(safe-area-inset-top) + 56px);
+  top: calc(62px + env(safe-area-inset-top));
   background: var(--bg); padding: 8px 0; }
 .subnav a {
   border: 1px solid var(--line); border-radius: 999px; padding: 6px 16px;
@@ -256,7 +256,7 @@ body.drawer-open #drawer { transform: none; }
   background: var(--bg2);
 }
 .subnav a:active { border-color: var(--red); color: var(--fg); }
-.section-head { scroll-margin-top: calc(51px + env(safe-area-inset-top) + 56px + 46px); }
+.section-head { scroll-margin-top: calc(62px + env(safe-area-inset-top) + 46px); }
 .prompt-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 2px 0 10px; }
 .prompt-chip {
   background: transparent; border: 1px dashed var(--line); border-radius: 999px;

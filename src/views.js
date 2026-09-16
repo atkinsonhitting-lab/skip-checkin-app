@@ -70,7 +70,7 @@ function layout({ title, user, tabs, body }) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <title>${esc(title)} · Diamond Daily</title>
-<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/style.css?v=2">
 <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-180.png?v=2">
 <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152.png?v=2">
 <link rel="apple-touch-icon" sizes="167x167" href="/icons/icon-167.png?v=2">
