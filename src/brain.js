@@ -366,7 +366,7 @@ function libraryBlock(db, message) {
   const rel = relevantEntries(db, message, 5);
   if (!rules.length && !rel.length) return '';
   const fmt = (e) => `- [${e.type.toUpperCase()}] ${e.title}: ${e.body}`;
-  let out = "HEAD COACH'S PLAYBOOK — knowledge from your head coach. The rules always apply; use the other entries only when relevant to what the hitter just said, never force one in:\n";
+  let out = "WHAT YOU'VE LEARNED ABOUT HITTING — background knowledge you've picked up, like a coach who's watched a lot of baseball. The rules always apply. The rest is there for when it's genuinely needed — answering a question, explaining something, working through a problem — not just diagnoses and fixes. Common sense first, and the hitter's own history and words before anything here. Never force an entry in, never quote one at him, let it shape how you talk not script what you say:\n";
   out += rules.map(fmt).join('\n');
   if (rel.length) out += '\n' + rel.map(fmt).join('\n');
   return out;
