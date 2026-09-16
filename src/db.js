@@ -93,6 +93,24 @@ for (const col of ['deal_cents', 'paid_cents']) {
   if (!cols.includes(col)) db.exec(`ALTER TABLE organizations ADD COLUMN ${col} INTEGER NOT NULL DEFAULT 0;`);
 }
 
+// Finances page (Sep 16 2026): deal pipeline fields per organization — status
+// (prospect/pilot/active/past), start + renewal dates, freeform notes — plus
+// a payment ledger so every dollar collected has a dated record.
+for (const [col, type] of [['deal_status', 'TEXT NOT NULL DEFAULT ""'], ['deal_start', 'TEXT NOT NULL DEFAULT ""'], ['deal_renewal', 'TEXT NOT NULL DEFAULT ""'], ['deal_notes', 'TEXT NOT NULL DEFAULT ""']]) {
+  const cols = db.prepare('PRAGMA table_info(organizations)').all().map((c) => c.name);
+  if (!cols.includes(col)) db.exec(`ALTER TABLE organizations ADD COLUMN ${col} ${type};`);
+}
+db.exec(`
+CREATE TABLE IF NOT EXISTS org_payments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  organization_id INTEGER NOT NULL REFERENCES organizations(id),
+  amount_cents INTEGER NOT NULL DEFAULT 0,
+  paid_at TEXT NOT NULL DEFAULT '',
+  method TEXT NOT NULL DEFAULT '',
+  note TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT ''
+);`);
+
 // Organization link + birthdate on users. A coach row with organization_id set
 // is an organization coach: view-only, scoped to their organization's
 // players. date_of_birth is YYYY-MM-DD, collected at signup for every player.

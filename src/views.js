@@ -135,7 +135,7 @@ function coachTabs(active, approvalCount, user) {
     tabs.push({ href: '/settings', label: 'Settings', active: active === 'settings' });
     return tabs;
   }
-  return [
+  const tabs = [
     { href: '/coach', label: 'Home', active: active === 'home' },
     { href: '/coach/hitters', label: 'Players', active: active === 'hitters' },
     { href: '/coach/programs', label: 'Programs', active: active === 'programs' },
@@ -145,6 +145,12 @@ function coachTabs(active, approvalCount, user) {
     { href: '/coach/approvals', label: 'Approvals', active: active === 'approvals', badge: approvalCount > 0 ? String(approvalCount) : null },
     { href: '/settings', label: 'Settings', active: active === 'settings' },
   ];
+  // Finances is Bobby's page: full-access global coaches only. Cam (view-only)
+  // and organization coaches never see it.
+  if (user && user.role === 'coach' && !user.organizationId && user.canEdit !== false) {
+    tabs.splice(5, 0, { href: '/coach/finances', label: 'Finances', active: active === 'finances' });
+  }
+  return tabs;
 }
 
 // ---------- Pages ----------
@@ -1036,6 +1042,111 @@ function coachApprovalsPage(user, pending) {
     body: `<h1 class="page-title">Approvals</h1>
     <p class="hint">${canEdit ? 'Every new account waits here until you approve it. Approved players can log in right away.' : 'Every new account waits here until it gets approved.'}</p>
     ${n ? `<div class="athlete-grid">${pendingApprovalCards(pending, canEdit)}</div>` : `<div class="card empty">Nobody waiting — you're all caught up.</div>`}`,
+  });
+}
+
+// Coach Finances page (Bobby only, Sep 16 2026): everything worth knowing
+// about money — collected, outstanding, pipeline, renewals, per-org deals,
+// payment history, and individual subscriptions.
+const DEAL_STATUSES = [
+  ['', 'No status'],
+  ['prospect', 'Prospect'],
+  ['pilot', 'Pilot'],
+  ['active', 'Active'],
+  ['past', 'Past'],
+];
+function dealBadge(status) {
+  if (status === 'active') return '<span class="badge ok">Active</span>';
+  if (status === 'pilot') return '<span class="badge warn">Pilot</span>';
+  if (status === 'prospect') return '<span class="badge">Prospect</span>';
+  if (status === 'past') return '<span class="badge quiet">Past</span>';
+  return '<span class="hint-inline">no status</span>';
+}
+function financeOrgCard(o) {
+  const balance = Math.max((o.deal_cents || 0) - (o.paid_cents || 0), 0);
+  const statusOpts = DEAL_STATUSES.map(([v, l]) => `<option value="${v}"${o.deal_status === v ? ' selected' : ''}>${l}</option>`).join('');
+  return `<div class="card fin-org">
+    <div class="fin-org-head">
+      <div><strong>${esc(o.name)}</strong> ${dealBadge(o.deal_status)}
+        <div class="hint-inline">${o.players} player${o.players === 1 ? '' : 's'}${o.deal_renewal ? ` · renews ${esc(o.deal_renewal)}` : ''}</div>
+      </div>
+      <div class="fin-nums">
+        <div><span class="hint-inline">Deal</span><br><strong>${fmtMoney(o.deal_cents)}</strong></div>
+        <div><span class="hint-inline">Paid</span><br><strong>${fmtMoney(o.paid_cents)}</strong></div>
+        <div><span class="hint-inline">Owed</span><br><strong class="${balance > 0 ? 'fin-owed' : ''}">${fmtMoney(balance)}</strong></div>
+      </div>
+    </div>
+    ${o.deal_notes ? `<div class="hint" style="margin:6px 0">${esc(o.deal_notes)}</div>` : ''}
+    <div class="fin-forms">
+      <details><summary class="hint" style="cursor:pointer">Record a payment</summary>
+        <form method="post" action="/coach/organizations/${o.id}/payment" class="deal-form" style="margin-top:8px">
+          <label>Amount $<input name="amount" inputmode="decimal" placeholder="1500" required style="width:90px"></label>
+          <label>Date<input type="date" name="paid_at"></label>
+          <label>Method<input name="method" placeholder="Zelle / check" maxlength="40" style="width:110px"></label>
+          <label>Note<input name="note" placeholder="spring semester" maxlength="200" style="width:140px"></label>
+          <button class="btn-small" type="submit">Record</button>
+        </form>
+      </details>
+      <details><summary class="hint" style="cursor:pointer">Edit deal terms</summary>
+        <form method="post" action="/coach/organizations/${o.id}/deal" class="deal-form" style="margin-top:8px">
+          <label>Deal $<input name="deal" inputmode="decimal" style="width:90px" value="${o.deal_cents ? o.deal_cents / 100 : ''}"></label>
+          <label>Collected $<input name="paid" inputmode="decimal" style="width:90px" value="${o.paid_cents ? o.paid_cents / 100 : ''}"></label>
+          <label>Status<select name="status">${statusOpts}</select></label>
+          <label>Start<input type="date" name="start" value="${esc(o.deal_start || '')}"></label>
+          <label>Renews<input type="date" name="renewal" value="${esc(o.deal_renewal || '')}"></label>
+          <label>Notes<input name="notes" maxlength="500" style="width:160px" value="${esc(o.deal_notes || '')}"></label>
+          <button class="btn-small" type="submit">Save</button>
+        </form>
+      </details>
+    </div>
+  </div>`;
+}
+function coachFinancesPage(user, fin) {
+  const maxMonth = Math.max(1, ...fin.monthly.map((m) => m.cents));
+  const bars = fin.monthly.map((m) => {
+    const h = Math.round((m.cents / maxMonth) * 90);
+    return `<div class="fin-bar-col"><div class="fin-bar" style="height:${h}px" title="${fmtMoney(m.cents)}"></div>
+      <div class="hint-inline">${m.label}</div><div class="hint-inline">${m.cents ? fmtMoney(m.cents).replace('.00', '') : ''}</div></div>`;
+  }).join('');
+  const renewals = fin.renewalsDue.length
+    ? `<div class="card fin-renew"><strong>Renewals due soon</strong>${fin.renewalsDue.map((o) => {
+        const balance = Math.max((o.deal_cents || 0) - (o.paid_cents || 0), 0);
+        return `<div class="org-row"><div><strong>${esc(o.name)}</strong><div class="hint-inline">renews ${esc(o.deal_renewal)}</div></div>
+          <div class="org-money">${balance ? `<span class="badge warn">${fmtMoney(balance)} owed</span>` : '<span class="badge ok">paid up</span>'}</div></div>`;
+      }).join('')}</div>`
+    : '';
+  const payments = fin.payments.length
+    ? `<div class="card"><div class="fin-table">${fin.payments.map((p) => `<div class="fin-trow">
+        <div>${esc(p.paid_at || '')}</div><div><strong>${esc(p.org_name)}</strong>${p.note ? ` <span class="hint-inline">${esc(p.note)}</span>` : ''}</div>
+        <div>${esc(p.method || '')}</div><div class="fin-amt">${fmtMoney(p.amount_cents)}</div></div>`).join('')}</div></div>`
+    : '<div class="card empty">No payments recorded yet — record the first one on an organization above.</div>';
+  const subs = fin.subs.length
+    ? `<div class="card"><div class="fin-table">${fin.subs.map((s) => `<div class="fin-trow">
+        <div><strong>${esc(s.athlete_name || s.email)}</strong></div><div>${esc(s.plan)}</div>
+        <div class="hint-inline">renews ${esc(s.current_period_end || '—')}</div></div>`).join('')}</div></div>`
+    : '<div class="card empty">No individual subscriptions yet — billing hasn\u2019t launched.</div>';
+  return layout({
+    title: 'Finances',
+    user,
+    tabs: coachTabs('finances', user.approvalCount, user),
+    body: `<h1 class="page-title">Finances</h1>
+    <div class="stat-grid">
+      <div class="stat-card"><div class="stat-num">${fmtMoney(fin.collected)}</div><div class="stat-label">Collected · all time</div></div>
+      <div class="stat-card"><div class="stat-num">${fmtMoney(fin.outstanding)}</div><div class="stat-label">Outstanding</div></div>
+      <div class="stat-card"><div class="stat-num">${fmtMoney(fin.pipeline)}</div><div class="stat-label">Pipeline · prospects</div></div>
+      <div class="stat-card"><div class="stat-num">${fmtMoney(fin.mrr)}<span class="hint-inline">/mo</span></div><div class="stat-label">Subscriptions MRR</div></div>
+      <div class="stat-card"><div class="stat-num">${fin.activeDeals}</div><div class="stat-label">Active deals</div></div>
+      <div class="stat-card"><div class="stat-num">${fin.renewalsDue.length}</div><div class="stat-label">Renewals · 60d</div></div>
+    </div>
+    ${renewals}
+    <h2 class="section-head">Collected per month</h2>
+    <div class="card fin-bars">${bars}</div>
+    <h2 class="section-head">Deals by organization</h2>
+    ${fin.orgs.map(financeOrgCard).join('') || '<div class="card empty">No organizations yet.</div>'}
+    <h2 class="section-head">Payment history</h2>
+    ${payments}
+    <h2 class="section-head">Individual subscriptions</h2>
+    ${subs}`,
   });
 }
 
@@ -2306,6 +2417,7 @@ module.exports = {
   coachHittersPage,
   coachProgramsPage,
   coachApprovalsPage,
+  coachFinancesPage,
   coachOrganizationsPage,
   coachOrganizationDeletePage,
   coachTeamDeletePage,

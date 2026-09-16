@@ -322,6 +322,7 @@ body.drawer-open #drawer { transform: none; }
 .badge.ok { background: rgba(47,191,113,.15); color: #7ee2a8; }
 .badge.warn { background: rgba(245,165,36,.15); color: #ffcf7a; }
 .badge.bad { background: rgba(243,18,96,.15); color: #ff8fab; }
+.badge.quiet { background: rgba(255,255,255,.08); color: #9a9a9a; }
 .badge-lg { font-size: 16px; padding: 8px 22px; }
 .badge.role-hitter { background: rgba(225,6,0,.15); color: #ff6b61; }
 .badge.role-pitcher { background: rgba(66,133,244,.15); color: #8ab4ff; }
@@ -641,3 +642,21 @@ body.has-tabbar .chat-form { bottom: calc(62px + env(safe-area-inset-bottom)); }
 }
 .check input { accent-color: var(--red); }
 .check:has(input:checked) { border-color: var(--red); background: color-mix(in srgb, var(--red) 8%, transparent); }
+
+/* Finances page */
+.fin-org-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.fin-nums { display: flex; gap: 18px; text-align: right; }
+.fin-owed { color: #ffcf7a; }
+.fin-forms { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 8px; }
+.fin-bars { display: flex; align-items: flex-end; gap: 10px; padding: 18px 16px 12px; min-height: 150px; }
+.fin-bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; min-width: 0; }
+.fin-bar { width: 100%; max-width: 56px; background: linear-gradient(180deg, #e10600, #8f0400); border-radius: 4px 4px 0 0; min-height: 4px; }
+.fin-table { display: flex; flex-direction: column; }
+.fin-trow { display: grid; grid-template-columns: 110px 1fr auto auto; gap: 10px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,.07); align-items: baseline; }
+.fin-trow:last-child { border-bottom: none; }
+.fin-amt { font-weight: 700; text-align: right; }
+.fin-renew { border-left: 3px solid #f5a524; }
+@media (max-width: 640px) {
+  .fin-trow { grid-template-columns: 96px 1fr auto; }
+  .fin-trow > :nth-child(3) { display: none; }
+}

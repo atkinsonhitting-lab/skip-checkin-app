@@ -2124,16 +2124,93 @@ function coachAnalytics(scope, stats) {
 }
 
 // Set an organization's deal price and collected revenue (Bobby only).
-app.post('/coach/organizations/:id/deal', requireCoach, (req, res) => {
+// (Deal terms live on the full-terms route below, under Finances.)
+
+// Finances page (Sep 16 2026): Bobby-only (global coach with edit rights).
+// Everything worth knowing about money: collected, outstanding, pipeline,
+// renewals, per-org deals, payment history, individual subscriptions.
+function coachFinances() {
+  const orgs = db.prepare(`SELECT o.*, COUNT(u.id) AS players
+    FROM organizations o LEFT JOIN users u ON u.organization_id = o.id AND u.role = 'athlete' AND u.status = 'approved'
+    GROUP BY o.id ORDER BY o.name`).all();
+  const collected = orgs.reduce((s, o) => s + (o.paid_cents || 0), 0);
+  const outstanding = orgs.reduce((s, o) => s + Math.max((o.deal_cents || 0) - (o.paid_cents || 0), 0), 0);
+  const pipeline = orgs.filter((o) => o.deal_status === 'prospect').reduce((s, o) => s + (o.deal_cents || 0), 0);
+  const activeDeals = orgs.filter((o) => (o.deal_status === 'pilot' || o.deal_status === 'active') && o.deal_cents > 0).length;
+  const today = new Date().toISOString().slice(0, 10);
+  const soon = new Date(); soon.setDate(soon.getDate() + 60);
+  const soonStr = soon.toISOString().slice(0, 10);
+  const renewalsDue = orgs.filter((o) => o.deal_renewal && o.deal_renewal >= today && o.deal_renewal <= soonStr
+    && (o.deal_status === 'pilot' || o.deal_status === 'active'));
+  const payments = db.prepare(`SELECT p.*, o.name AS org_name FROM org_payments p
+    JOIN organizations o ON o.id = p.organization_id
+    ORDER BY p.paid_at DESC, p.id DESC LIMIT 100`).all();
+  // Monthly collection trend: last 6 calendar months from the payment ledger.
+  const monthly = [];
+  const d = new Date(); d.setDate(1);
+  for (let i = 5; i >= 0; i--) {
+    const m = new Date(d.getFullYear(), d.getMonth() - i, 1);
+    const key = m.toISOString().slice(0, 7);
+    const label = m.toLocaleString('en-US', { month: 'short' });
+    const sum = db.prepare(`SELECT COALESCE(SUM(amount_cents),0) AS s FROM org_payments WHERE substr(paid_at,1,7) = ?`).get(key).s;
+    monthly.push({ key, label, cents: sum });
+  }
+  // Individual subscriptions (ready for when billing launches).
+  const subs = db.prepare(`SELECT s.*, u.athlete_name, u.email FROM user_subscriptions s
+    JOIN users u ON u.id = s.user_id WHERE s.status = 'active'`).all();
+  const planMrr = { monthly: 999, annual: Math.round(7999 / 12), founding: Math.round(4900 / 12) };
+  const mrr = subs.reduce((sum, s) => sum + (planMrr[s.plan] || 0), 0);
+  return { orgs, collected, outstanding, pipeline, activeDeals, renewalsDue, payments, monthly, subs, mrr };
+}
+
+function requireFinances(req, res, next) {
+  const u = req.user;
+  if (!u || u.role !== 'coach') return res.redirect('/login');
+  if (u.canEdit && !u.organizationId) return next();
+  return res.status(403).send('Forbidden');
+}
+
+app.get('/coach/finances', requireCoach, requireFinances, (req, res) => {
+  res.send(views.coachFinancesPage(req.user, coachFinances()));
+});
+
+// Full deal terms per organization (Bobby-only). Paid/collected stays editable
+// here too; recording a payment bumps paid_cents automatically.
+app.post('/coach/organizations/:id/deal', requireCoach, requireFinances, (req, res) => {
   const c = db.prepare('SELECT id FROM organizations WHERE id = ?').get(Number(req.params.id));
-  if (!c) return res.redirect('/coach/organizations');
+  if (!c) return res.redirect('/coach/finances');
   const dollars = (v) => {
     const n = Math.round(Number(String(v).replace(/[^0-9.]/g, '')) * 100);
     return Number.isFinite(n) && n >= 0 ? n : 0;
   };
-  db.prepare('UPDATE organizations SET deal_cents = ?, paid_cents = ? WHERE id = ?')
-    .run(dollars(req.body.deal), dollars(req.body.paid), c.id);
-  res.redirect('/coach/organizations');
+  const date = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || '').trim()) ? String(v).trim() : '';
+  const status = ['prospect', 'pilot', 'active', 'past'].includes(req.body.status) ? req.body.status : '';
+  // The Organizations page posts only deal/paid; the Finances page posts the
+  // full terms. Only touch the pipeline fields when they're actually sent.
+  const sets = ['deal_cents = ?', 'paid_cents = ?'];
+  const vals = [dollars(req.body.deal), dollars(req.body.paid)];
+  if ('status' in req.body) { sets.push('deal_status = ?'); vals.push(status); }
+  if ('start' in req.body) { sets.push('deal_start = ?'); vals.push(date(req.body.start)); }
+  if ('renewal' in req.body) { sets.push('deal_renewal = ?'); vals.push(date(req.body.renewal)); }
+  if ('notes' in req.body) { sets.push('deal_notes = ?'); vals.push(String(req.body.notes || '').slice(0, 500)); }
+  vals.push(c.id);
+  db.prepare(`UPDATE organizations SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  res.redirect('status' in req.body ? '/coach/finances' : '/coach/organizations');
+});
+
+// Record a payment: dated ledger row + bumps the org's collected total.
+app.post('/coach/organizations/:id/payment', requireCoach, requireFinances, (req, res) => {
+  const c = db.prepare('SELECT id FROM organizations WHERE id = ?').get(Number(req.params.id));
+  if (!c) return res.redirect('/coach/finances');
+  const n = Math.round(Number(String(req.body.amount).replace(/[^0-9.]/g, '')) * 100);
+  if (!Number.isFinite(n) || n <= 0) return res.redirect('/coach/finances');
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.body.paid_at || '').trim())
+    ? String(req.body.paid_at).trim() : new Date().toISOString().slice(0, 10);
+  db.prepare(`INSERT INTO org_payments (organization_id, amount_cents, paid_at, method, note, created_at)
+    VALUES (?,?,?,?,?,datetime('now'))`)
+    .run(c.id, n, date, String(req.body.method || '').slice(0, 40), String(req.body.note || '').slice(0, 200));
+  db.prepare('UPDATE organizations SET paid_cents = paid_cents + ? WHERE id = ?').run(n, c.id);
+  res.redirect('/coach/finances');
 });
 
 // Hitters gone quiet: at least one check-in, but none in 3+ Chicago days.
