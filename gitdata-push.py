@@ -8,6 +8,7 @@ Auth: secure custom.github connector via dynamic credential surrogates.
 import base64
 import json
 import subprocess
+import os
 import sys
 import urllib.request
 
@@ -54,11 +55,16 @@ def main():
 
     tree_entries = []
     for path in files:
-        with open(path, "rb") as f:
-            content = base64.b64encode(f.read()).decode()
-        blob = api("POST", f"/repos/{repo}/git/blobs", {"content": content, "encoding": "base64"})
-        tree_entries.append({"path": path, "mode": "100644", "type": "blob", "sha": blob["sha"]})
-        print(f"blob {path}: {blob['sha'][:8]}")
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                content = base64.b64encode(f.read()).decode()
+            blob = api("POST", f"/repos/{repo}/git/blobs", {"content": content, "encoding": "base64"})
+            tree_entries.append({"path": path, "mode": "100644", "type": "blob", "sha": blob["sha"]})
+            print(f"blob {path}: {blob['sha'][:8]}")
+        else:
+            # Deleted file: null sha removes it from the tree.
+            tree_entries.append({"path": path, "mode": "100644", "type": "blob", "sha": None})
+            print(f"delete {path}")
 
     new_tree = api("POST", f"/repos/{repo}/git/trees", {"base_tree": base_tree, "tree": tree_entries})["sha"]
     commit = api("POST", f"/repos/{repo}/git/commits",
