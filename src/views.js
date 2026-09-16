@@ -60,7 +60,7 @@ function layout({ title, user, tabs, body }) {
   const drawer = tabHtml
     ? `<div id="drawer-overlay" hidden></div>
        <aside id="drawer" aria-label="Navigation" hidden>
-         <div class="drawer-head"><span>THE DAILY HITTER</span><button type="button" id="drawer-close" aria-label="Close menu">\u2715</button></div>
+         <div class="drawer-head"><span>DIAMOND DAILY</span><button type="button" id="drawer-close" aria-label="Close menu">\u2715</button></div>
          <nav>${tabHtml}</nav>
        </aside>`
     : '';
@@ -69,7 +69,7 @@ function layout({ title, user, tabs, body }) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-<title>${esc(title)} · The Daily Hitter</title>
+<title>${esc(title)} · Diamond Daily</title>
 <link rel="stylesheet" href="/style.css">
 <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-180.png">
 <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152.png">
@@ -79,12 +79,12 @@ function layout({ title, user, tabs, body }) {
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="The Daily Hitter">
+<meta name="apple-mobile-web-app-title" content="Diamond Daily">
 <meta name="theme-color" content="#0a0a0a">
 </head>
 <body${tabbarHtml ? ' class="has-tabbar"' : ''}>
 <header class="topbar">
-  <div class="topbar-left">${tabHtml ? `<button type="button" id="drawer-btn" aria-label="Open menu">\u2630</button>` : ''}<div class="brand"><img src="/daily-hitter-logo.jpg" class="brand-logo-icon" alt=""> THE DAILY HITTER</div></div>
+  <div class="topbar-left">${tabHtml ? `<button type="button" id="drawer-btn" aria-label="Open menu">\u2630</button>` : ''}<div class="brand"><img src="/diamond-daily-logo.jpg" class="brand-logo-icon" alt=""> DIAMOND DAILY</div></div>
   ${user ? `<div class="userbox">${esc(user.displayName)} · <a href="/logout">Log out</a></div>` : ''}
 </header>
 ${drawer}
@@ -133,7 +133,7 @@ function coachTabs(active, approvalCount, user) {
   if (user && user.role === 'coach' && user.organizationId) {
     const tabs = [
       { href: '/coach', label: 'Home', active: active === 'home' },
-      { href: '/coach/hitters', label: 'Hitters', active: active === 'hitters' },
+      { href: '/coach/hitters', label: 'Players', active: active === 'hitters' },
       { href: '/coach/approvals', label: 'Approvals', active: active === 'approvals', badge: approvalCount > 0 ? String(approvalCount) : null },
     ];
     if (!user.teamId) tabs.push({ href: '/coach/organizations', label: 'Organizations', active: active === 'organizations' });
@@ -142,7 +142,7 @@ function coachTabs(active, approvalCount, user) {
   }
   return [
     { href: '/coach', label: 'Home', active: active === 'home' },
-    { href: '/coach/hitters', label: 'Hitters', active: active === 'hitters' },
+    { href: '/coach/hitters', label: 'Players', active: active === 'hitters' },
     { href: '/coach/programs', label: 'Programs', active: active === 'programs' },
     { href: '/coach/videos', label: 'Videos', active: active === 'videos' },
     { href: '/coach/organizations', label: 'Organizations', active: active === 'organizations' },
@@ -160,8 +160,8 @@ function loginPage(error, notice) {
     user: null,
     tabs: [],
     body: `<div class="login-card card">
-      <img src="/daily-hitter-logo.jpg" class="brand-logo-full" alt="The Daily Hitter — A Hitting Journal">
-      <p class="hint">Step into The Daily Hitter. Skip reads your sessions and learns what your best days look like.</p>
+      <img src="/diamond-daily-logo.jpg" class="brand-logo-full" alt="Diamond Daily — A Baseball Journal">
+      <p class="hint">Step into Diamond Daily. Skip reads your sessions and learns what your best days look like.</p>
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
       ${notice ? `<div class="notice">${esc(notice)}</div>` : ''}
       <form method="post" action="/login" class="form">
@@ -181,7 +181,7 @@ function registerPage(error) {
     user: null,
     tabs: [],
     body: `<div class="login-card card">
-      <img src="/daily-hitter-logo.jpg" class="brand-logo-full" alt="The Daily Hitter — A Hitting Journal">
+      <img src="/diamond-daily-logo.jpg" class="brand-logo-full" alt="Diamond Daily — A Baseball Journal">
       <p class="hint">Free. Use your email, set a password, start checking in. Your coach approves every new account.</p>
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
       <form method="post" action="/register" class="form">
@@ -228,7 +228,7 @@ function pendingPage() {
     user: null,
     tabs: [],
     body: `<div class="login-card card">
-      <img src="/daily-hitter-logo.jpg" class="brand-logo-full" alt="The Daily Hitter — A Hitting Journal">
+      <img src="/diamond-daily-logo.jpg" class="brand-logo-full" alt="Diamond Daily — A Baseball Journal">
       <h1 class="page-title">You're on the list.</h1>
       <p class="hint">Every account is personally approved. You'll be able to log in as soon as you get the green light.</p>
       <p class="hint" style="text-align:center"><a href="/login">Back to log in</a></p>
@@ -1209,7 +1209,7 @@ function coachHomePage(user, quiet, latest, pending, pushOn) {
     ? `<div class="notice">${esc(user.organizationName)}${user.teamName ? ` · ${esc(user.teamName)}` : ''} — you\u2019re seeing ${user.teamName ? 'this team' : 'this program'}\u2019s players only.</div>`
     : '';
   const approvalNudge = pending && pending.length
-    ? `<a class="card approval-nudge" href="/coach/approvals">${pending.length} hitter${pending.length === 1 ? '' : 's'} waiting for approval →</a>`
+    ? `<a class="card approval-nudge" href="/coach/approvals">${pending.length} player${pending.length === 1 ? '' : 's'} waiting for approval →</a>`
     : '';
   const quietCards = (quiet || [])
     .map(
@@ -1228,7 +1228,7 @@ function coachHomePage(user, quiet, latest, pending, pushOn) {
     tabs: coachTabs('home', user.approvalCount, user),
     body: `<h1 class="page-title">Skip Dashboard</h1>
     ${orgBanner}
-    ${canEdit && !pushOn ? '<p><button type="button" class="btn-small" id="push-enable-btn">Turn on notifications</button> <span class="hint-inline">get a push when a hitter needs approval</span></p>' : ''}
+    ${canEdit && !pushOn ? '<p><button type="button" class="btn-small" id="push-enable-btn">Turn on notifications</button> <span class="hint-inline">get a push when a player needs approval</span></p>' : ''}
     ${approvalNudge}
     <h2 class="section-head">Gone quiet</h2>
     ${quietCards || '<div class="card empty">Everyone\u2019s checking in.</div>'}
@@ -1262,17 +1262,17 @@ function coachHittersPage(user, userStats) {
         </a>
         <form method="post" action="/coach/view-as" style="margin:8px 0 0">
           <input type="hidden" name="id" value="${a.id}">
-          <button class="btn-small btn-quiet" type="submit">View as hitter</button>
+          <button class="btn-small btn-quiet" type="submit">View as player</button>
         </form>
       </div>`
     )
     .join('');
   return layout({
-    title: 'Hitters',
+    title: 'Players',
     user,
     tabs: coachTabs('hitters', user.approvalCount, user),
-    body: `<h1 class="page-title">Hitters</h1>
-    ${userStats.length ? `<input type="search" id="hitter-search" class="searchbar" placeholder="Search hitters…" autocomplete="off">` : ''}
+    body: `<h1 class="page-title">Players</h1>
+    ${userStats.length ? `<input type="search" id="hitter-search" class="searchbar" placeholder="Search players…" autocomplete="off">` : ''}
     ${userStats.length ? `<div class="pill-row" id="role-filter">
       <button type="button" class="pill-link active" data-rolefilter="all">All</button>
       <button type="button" class="pill-link" data-rolefilter="hitter">Hitters</button>
@@ -1280,7 +1280,7 @@ function coachHittersPage(user, userStats) {
       <button type="button" class="pill-link" data-rolefilter="two_way">Two-way</button>
     </div>` : ''}
     <div class="athlete-grid">${cards || '<div class="card empty">Nobody has signed up yet.</div>'}</div>
-    <div class="card empty" id="hitter-no-match" hidden>No hitters match that search.</div>`,
+    <div class="card empty" id="hitter-no-match" hidden>No players match that search.</div>`,
   });
 }
 
@@ -1853,7 +1853,7 @@ function coachUser(user, name, checkins, whatWorks, thread, email, memories, rou
     user,
     tabs: coachTabs('hitters', user.approvalCount, user),
     body: `<h1 class="page-title">${esc(name)} ${rolePill(pt)}</h1>
-    <p><a href="/coach/hitters">← Back to hitters</a></p>
+    <p><a href="/coach/hitters">← Back to players</a></p>
     ${pt === 'pitcher' ? '' : routineReadonly(routine)}
     ${pt !== 'hitter' ? throwingSummarySection(throwSum) : ''}
     ${memorySection(email, memories, canEdit)}
@@ -1884,7 +1884,7 @@ function routineReadonly(drills) {
     </div>`).join('') : `<div class="card empty">No routine set yet.</div>`}`;
 }
 
-// What Skip has learned about this hitter over time — Bobby's durable notes,
+// What Skip has learned about this player over time — Bobby's durable notes,
 // injected into every Skip chat with this hitter. This is how Skip learns hitters.
 function memorySection(email, memories, canEdit) {
   const items = (memories || [])
@@ -1903,8 +1903,8 @@ function memorySection(email, memories, canEdit) {
     <button type="submit" class="btn-primary">Save to Skip's memory</button>
   </form></div>`
     : '';
-  return `<h2 class="section-head">What Skip has learned about this hitter</h2>
-  <p class="hint">Durable memory — Skip reads this before every chat with this hitter. His best-day patterns, cues that work for him, what fixed his slumps. This is how he learns hitters over time.</p>
+  return `<h2 class="section-head">What Skip has learned about this player</h2>
+  <p class="hint">Durable memory — Skip reads this before every chat with this player. His best-day patterns, cues that work for him, what fixed his slumps. This is how he learns players over time.</p>
   ${items || '<div class="card empty">Nothing saved yet.</div>'}
   ${addForm}`;
 }
@@ -1917,7 +1917,7 @@ function coachDeleteHitterPage(user, hitter, name, checkinCount) {
     tabs: coachTabs('hitters', user.approvalCount, user),
     body: `<h1 class="page-title">Delete hitter?</h1>
     <div class="card">
-      <p>This will permanently remove <strong>${esc(name)}</strong> (${esc(hitter.email)}) from The Daily Hitter — their account, ${checkinCount} check-in${checkinCount === 1 ? '' : 's'}, chat history, and routine.</p>
+      <p>This will permanently remove <strong>${esc(name)}</strong> (${esc(hitter.email)}) from Diamond Daily — their account, ${checkinCount} check-in${checkinCount === 1 ? '' : 's'}, chat history, and routine.</p>
       <p class="hint">This can't be undone.</p>
       <form method="post" action="/coach/user/${encodeURIComponent(hitter.email)}/delete" class="form">
         <button type="submit" class="btn-primary" style="background:#a02020">Yes, delete ${esc(String(name).split(' ')[0] || 'hitter')}</button>
@@ -2048,7 +2048,7 @@ function coachSkipPage(user, entries, hitters, thread, chatEnabled, saved, propo
         : chatEnabled
         ? `<div id="chat-log" class="chat-log">${
             msgs ||
-            `<div class="msg msg-skip">${skipImg}<div class="msg-bubble">Coach — what do you want me doing different with your hitters?</div></div>`
+            `<div class="msg msg-skip">${skipImg}<div class="msg-bubble">Coach — what do you want me doing different with your players?</div></div>`
           }</div>
         <form id="chat-form" class="chat-form" data-endpoint="/api/coach/chat" autocomplete="off">
           <input id="chat-input" type="text" placeholder="Train Skip…" maxlength="2000" required>
@@ -2189,7 +2189,7 @@ function settingsPage(user, opts) {
            <form method="post" action="/settings/organization" class="form">
              <button class="btn-small btn-quiet" type="submit" name="organization_code" value="">Leave ${esc(user.organizationName)}</button>
            </form>`
-        : `<p class="hint">Playing for a organization on The Daily Hitter? Enter the signup code your coach gave you \u2014 the program code or your team\u2019s code.</p>
+        : `<p class="hint">Playing for a organization on Diamond Daily? Enter the signup code your coach gave you \u2014 the program code or your team\u2019s code.</p>
            <form method="post" action="/settings/organization" class="form">
              <label>Organization or team code<input name="organization_code" autocomplete="off" placeholder="e.g. TESTUN-X7K2" style="text-transform:uppercase"></label>
              <button class="btn-primary" type="submit">Join organization</button>

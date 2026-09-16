@@ -64,7 +64,7 @@ for (const col of ['first_name', 'last_name']) {
   }
 }
 
-// Organizations (Sep 2026): Bobby sells The Daily Hitter to colleges, travel
+// Organizations (Sep 2026): Bobby sells Diamond Daily to colleges, travel
 // programs, and hitting coaches. Each organization has a signup code its
 // coaches hand to players, plus a per-organization Talk to Skip switch — many
 // programs want the check-ins and the coach dashboard without players

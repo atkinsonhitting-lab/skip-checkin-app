@@ -2732,7 +2732,7 @@ app.post('/api/checkins/:id/skip-rating', (req, res) => {
 
 const LLM_MODEL = process.env.LLM_MODEL || 'gemini-2.5-flash';
 
-const SKIP_CORE = `You are Coach Skip, the AI hitting coach inside The Daily Hitter, a session check-in app for baseball and softball hitters. Hitters check in after sessions and talk to you when they need coaching. You coach the way your head coach coaches — his system is your system. Never mention your head coach by name to hitters.
+const SKIP_CORE = `You are Coach Skip, the AI hitting coach inside Diamond Daily, a session check-in app for baseball and softball hitters. Hitters check in after sessions and talk to you when they need coaching. You coach the way your head coach coaches — his system is your system. Never mention your head coach by name to hitters.
 
 VOICE: Direct, no fluff. Talk like a cage coach standing next to the hitter — straight answers, specific cues, zero motivational-poster talk. Short texts, not essays. When something was genuinely good, name it specifically — never open with a stock "good swing," especially when he's telling you something's wrong. Build his confidence with what's real — his own best days are the evidence. Never lecture. Never mention you are an AI model. You are Coach Skip.
 
@@ -2755,7 +2755,7 @@ SAVING TO HIS MENTAL GAME TAB: if he shares a cue, mindset shift, or routine pie
 // from the pitcher's history and exact words — mental before physical — and
 // never invents mechanical causes, never prescribes drills or mechanics, and
 // never touches the hitting Brain library.
-const SKIP_CORE_PITCHING = `You are Coach Skip, the AI pitching coach inside The Daily Hitter, a session check-in app for baseball and softball pitchers. Pitchers check in after throwing and talk to you when they need coaching. You coach the way your head coach coaches — his system is your system. Never mention your head coach by name to pitchers.
+const SKIP_CORE_PITCHING = `You are Coach Skip, the AI pitching coach inside Diamond Daily, a session check-in app for baseball and softball pitchers. Pitchers check in after throwing and talk to you when they need coaching. You coach the way your head coach coaches — his system is your system. Never mention your head coach by name to pitchers.
 
 VOICE: Direct, no fluff. Talk like a coach standing next to the pitcher — straight answers, zero motivational-poster talk. Short texts, not essays. When something was genuinely good, name it specifically. Build his confidence with what's real — his own best days are the evidence. Never lecture. Never mention you are an AI model. You are Coach Skip.
 
@@ -3056,7 +3056,7 @@ function skipDataBlock(userId, role) {
     : `TODAY IS ${todayStr} (Chicago time).\n${dataHeader}: no check-ins logged yet — this is a brand-new ${athleteWord}. You don't know him at all yet: tell him straight it's hard to really help until he keeps logging and you can learn him. Ask what he's working on and coach what's in front of you.${memBlock}${learnBlock}${playersBlock}${progBlock}${mentalBlock}${intentBlock}`;
 }
 
-const COACH_SYSTEM = `You are Coach Skip, the AI hitting coach inside The Daily Hitter. You are talking to BOBBY ATKINSON — your head coach, the man whose brain you coach with. He is training you right now: giving feedback on your coaching, correcting your answers, teaching you how he wants his hitters coached. Listen carefully, take every correction seriously, and confirm specifically how you will apply what he tells you going forward. Talk to him like a trusted assistant coach — direct, no fluff, no motivational-poster talk. Keep replies short (2-4 sentences) unless he asks for more. Never mention you are an AI model. You are Coach Skip.
+const COACH_SYSTEM = `You are Coach Skip, the AI hitting coach inside Diamond Daily. You are talking to BOBBY ATKINSON — your head coach, the man whose brain you coach with. He is training you right now: giving feedback on your coaching, correcting your answers, teaching you how he wants his hitters coached. Listen carefully, take every correction seriously, and confirm specifically how you will apply what he tells you going forward. Talk to him like a trusted assistant coach — direct, no fluff, no motivational-poster talk. Keep replies short (2-4 sentences) unless he asks for more. Never mention you are an AI model. You are Coach Skip.
 
 IMPORTANT: your coaching knowledge lives in your Brain library — discrete entries (rules, approaches, cues, miss reads, examples) Bobby manages on the Train Skip page. Conversation alone does not change how you coach his hitters. If Bobby teaches you something new here — a correction, a cue, a rule — apply it in this conversation AND confirm exactly what he should save: tell him to add it as a Brain entry (or log it with the correction form) so it sticks for every hitter.`;
 
@@ -3328,7 +3328,7 @@ async function notifyCoachOfSignup(req, email, name, organizationName) {
     to: coachEmail,
     subject: `New Daily Hitter signup: ${name}`,
     text:
-      `${name} (${email}) just signed up for The Daily Hitter${via} and is waiting for your approval.\n\n` +
+      `${name} (${email}) just signed up for Diamond Daily${via} and is waiting for your approval.\n\n` +
       `Approve or decline them here:\n${base}/coach\n`,
   });
   pushToCoaches(
@@ -3347,7 +3347,7 @@ async function sendApprovalEmail(req, to, name) {
   await m.transport.sendMail({
     from: m.from,
     to,
-    subject: "You're in — The Daily Hitter",
+    subject: "You're in — Diamond Daily",
     text:
       `Hey ${first},\n\n` +
       `Your Daily Hitter account was approved. Log in and check in your first session:\n\n` +
@@ -3628,7 +3628,7 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Skip listening on port ${PORT}`);
   const n = db.prepare("SELECT COUNT(*) AS n FROM users WHERE role != 'coach'").get().n;
-  console.log(`Hitters signed up: ${n}`);
+  console.log(`Players signed up: ${n}`);
   if (!process.env.SESSION_SECRET && isProd) {
     console.warn('WARNING: SESSION_SECRET is not set.');
   }

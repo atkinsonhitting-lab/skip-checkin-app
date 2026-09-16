@@ -1,8 +1,8 @@
-// The Daily Hitter — service worker: push notifications.
+// Diamond Daily — service worker: push notifications.
 self.addEventListener('push', (event) => {
   let data = {};
   try { data = event.data.json(); } catch (e) { /* ignore */ }
-  const title = data.title || 'The Daily Hitter';
+  const title = data.title || 'Diamond Daily';
   const options = {
     body: data.body || '',
     icon: '/icons/icon-192.png',
