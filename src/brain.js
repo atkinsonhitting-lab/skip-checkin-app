@@ -34,7 +34,7 @@ const SEED_ENTRIES = [
     body: 'Your number one priority is learning this hitter over time: his words, his feels, what his best days have in common. Know what each hitter needs — no two hitters get the same coaching. When he is struggling, take him back to exactly what he was doing, feeling, and thinking when he was at his best — name the date, the score, his own words. Never give generic advice to a hitter you have history on.',
     tags: 'coaching priority' },
   { type: 'rule', title: 'Back-on-track order',
-    body: 'When a hitter is struggling, remind — don\'t fix. Bring him back to the state he felt when he was good: what he was doing, feeling, and thinking on his best days, in his own words, name the date and level. Then help him see what\'s different now — he finds the gap, you hold up the mirror. You are not a swing doctor and never claim to fix his swing: never diagnose, never hand out fixes. Only when his old feels aren\'t working, suggest new things to try — experiments, not "the fix," one at a time.',
+    body: 'When a hitter is struggling, remind — don\'t fix. Bring him back to the state he felt when he was good: what he was doing, feeling, and thinking on his best days, in his own words, name the date and level. Name the FEEL and recommend it overall — never tell him where or how to work on it (no "take it to the tee", no drill or setting prescriptions). Then ASK him what\'s different now, and stop there. Remind, then ask — the reminder IS the coaching. He finds the gap, you hold up the mirror. You are not a swing doctor and never claim to fix his swing: never diagnose, never hand out fixes. Only when his old feels aren\'t working, suggest new things to try — experiments, not "the fix," one at a time.',
     tags: 'coaching priority slump' },
   { type: 'rule', title: 'Their words first',
     body: 'Coach off the hitter\'s own language, their what-worked entries, and their locked-in sessions before anything else. A cue in their own words beats a "better" cue every time. Only reach for the head coach\'s mechanical cues when the hitter has no history.',
@@ -288,6 +288,20 @@ CREATE INDEX IF NOT EXISTS idx_library_type ON skip_library(type, active);
       ).run(rollEx.body, rollEx.tags, now).changes;
     }
     if (n) console.log(`BRAIN: updated ${n} Brain entr(ies) to mirror philosophy.`);
+  }
+  // One-time (Sep 16 2026): Bobby's "remind, then ask" refinement — Skip names
+  // the feel and recommends it overall but never prescribes where/how to work
+  // on it, then asks what's different now and stops. Updates the entry from
+  // the previous migration; idempotent.
+  {
+    const now = new Date().toISOString();
+    const backtrack = SEED_ENTRIES.find((e) => e.title === 'Back-on-track order');
+    if (backtrack) {
+      const n = db.prepare(
+        "UPDATE skip_library SET body = ?, tags = ?, updated_at = ? WHERE type = 'rule' AND title = 'Back-on-track order' AND body LIKE '%Then help him see what''s different now — he finds the gap%'"
+      ).run(backtrack.body, backtrack.tags, now).changes;
+      if (n) console.log(`BRAIN: updated ${n} Brain entr(ies) to remind-then-ask.`);
+    }
   }
   // One-time (Sep 16 2026): backfill the "Build him up" rule (help hitters
   // feel good and confident, help them mentally) into databases seeded
