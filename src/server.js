@@ -124,6 +124,7 @@ function toReqUser(row) {
     organizationId: row.organization_id || null,
     teamId: row.team_id || null,
     dateOfBirth: row.date_of_birth || null,
+    playerType: row.player_type || 'hitter',
     // View-only coaches (can_edit=0) see everything but change nothing.
     canEdit: row.can_edit == null ? true : row.can_edit !== 0,
   };
@@ -226,16 +227,38 @@ function ageOn(dob) {
   if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age--;
   return age >= 0 ? age : null;
 }
+// Player roles (Sep 2026): hitter, pitcher, or two_way (both).
+const PLAYER_TYPES = ['hitter', 'pitcher', 'two_way'];
+function playerTypeLabel(t) {
+  return t === 'pitcher' ? 'Pitcher' : t === 'two_way' ? 'Two-way' : 'Hitter';
+}
+function validPlayerType(t) {
+  return PLAYER_TYPES.includes(t);
+}
+// Pitching check-in vocab (mirrors views.js).
+const PITCH_SESSION_TYPES = ['bullpen', 'live', 'game', 'catch_play', 'recovery', 'no_throw'];
+const THROW_INTENTS = ['light', 'medium', 'heavy'];
+const PITCH_TYPES = ['4-seam FB', '2-seam FB', 'Cutter', 'Slider', 'Curveball', 'Changeup', 'Splitter', 'Sweeper'];
+const round1 = (n) => Math.round(n * 10) / 10;
+// Mean of the sliders present (command is absent on recovery/no-throw days).
+function pitchingScoreOf(feel, focus, confidence, command) {
+  const nums = [feel, focus, confidence, command].filter((n) => n !== null && n !== undefined);
+  return round1(nums.reduce((a, b) => a + b, 0) / nums.length);
+}
+function parsePitchesThrown(v) {
+  const arr = Array.isArray(v) ? v : v ? [v] : [];
+  return [...new Set(arr.map((s) => String(s).trim()).filter((s) => PITCH_TYPES.includes(s)))];
+}
 function attachUser(req, res, next) {
   if (req.session && req.session.userId) {
-    const row = db.prepare('SELECT id, email, role, athlete_name, first_name, last_name, status, remote_program_id, can_edit, organization_id, team_id, date_of_birth FROM users WHERE id = ?').get(req.session.userId);
+    const row = db.prepare('SELECT id, email, role, athlete_name, first_name, last_name, status, remote_program_id, can_edit, organization_id, team_id, date_of_birth, player_type FROM users WHERE id = ?').get(req.session.userId);
     if (row) {
       req.user = decorateUser(toReqUser(row));
       // "View as hitter": the coach browses the app exactly as this hitter
       // sees it. req.user becomes the hitter; the real coach stays on
       // req.coachUser so coach-only routes keep working.
       if (row.role === 'coach' && req.session.viewAsUserId) {
-        const t = db.prepare("SELECT id, email, role, athlete_name, first_name, last_name, status, remote_program_id, organization_id, team_id, date_of_birth FROM users WHERE id = ? AND role != 'coach'").get(req.session.viewAsUserId);
+        const t = db.prepare("SELECT id, email, role, athlete_name, first_name, last_name, status, remote_program_id, organization_id, team_id, date_of_birth, player_type FROM users WHERE id = ? AND role != 'coach'").get(req.session.viewAsUserId);
         if (t) {
           req.coachUser = req.user;
           req.user = decorateUser(toReqUser(t));
@@ -410,6 +433,7 @@ app.post('/register', (req, res) => {
   if (!validDob(dob)) {
     return fail('Enter your date of birth.');
   }
+  const playerType = validPlayerType(req.body.player_type) ? req.body.player_type : 'hitter';
   // Organization code is optional: only players joining through an organization
   // use one. Accepts an organization code or a team code.
   const organizationCode = String(req.body.organization_code || '').trim();
@@ -440,9 +464,9 @@ app.post('/register', (req, res) => {
   const athleteName = `${firstName} ${lastName}`;
   const info = db
     .prepare(
-      'INSERT INTO users (email, password_hash, role, athlete_name, first_name, last_name, created_at, status, organization_id, team_id, date_of_birth) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO users (email, password_hash, role, athlete_name, first_name, last_name, created_at, status, organization_id, team_id, date_of_birth, player_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     )
-    .run(email, hash, 'athlete', athleteName, firstName, lastName, new Date().toISOString(), 'pending', organizationId, teamId, dob);
+    .run(email, hash, 'athlete', athleteName, firstName, lastName, new Date().toISOString(), 'pending', organizationId, teamId, dob, playerType);
   linkRemoteProgram(info.lastInsertRowid, athleteName);
   // Tell Bobby so he can approve (or decline) the new hitter.
   notifyCoachOfSignup(req, email, athleteName, organizationId ? getOrganization(organizationId).name : null).catch((e) =>
@@ -542,6 +566,50 @@ function scoreBreakdown(feel, confidence, focus, difficulty, notesText) {
 
 const STATIONS = ['Tee', 'Side toss', 'Front toss', 'BP', 'Machine'];
 
+// Known-drill matching (Sep 2026): hitters sometimes summarize their work
+// ("did some tee stuff, front toss") instead of naming real drills. Only
+// entries that match the drill library count as drills for Skip's reads and
+// drill stats — the rest are kept as the hitter's own words ("other work"),
+// never presented as literal drills.
+function normDrillName(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+let _knownDrillNorms = null;
+function knownDrillNorms() {
+  if (!_knownDrillNorms) {
+    try {
+      _knownDrillNorms = new Set(data.drillNames().map(normDrillName).filter(Boolean));
+    } catch (e) {
+      _knownDrillNorms = new Set();
+    }
+  }
+  return _knownDrillNorms;
+}
+function matchKnownDrill(name) {
+  const n = normDrillName(name);
+  if (!n) return false;
+  const set = knownDrillNorms();
+  if (!set.size) return true; // no library to judge against — trust the entry
+  if (set.has(n)) return true;
+  if (n.length >= 4) {
+    for (const k of set) {
+      if (k.length >= 4 && (n.startsWith(k) || k.startsWith(n))) return true;
+    }
+  }
+  return false;
+}
+// Whether one stored drills_done entry counts as a real drill. Entries
+// written before this flag existed are judged at read time so old summaries
+// stop polluting Skip's reads too.
+function drillEntryKnown(d) {
+  if (d && typeof d === 'object') {
+    if (d.known === false) return false;
+    if (d.known === true) return true;
+  }
+  const name = String((d && typeof d === 'object' ? d.name : d) || '');
+  return matchKnownDrill(name);
+}
+
 function canonicalStation(raw) {
   const s = String(raw || '').trim();
   if (!s) return null;
@@ -558,7 +626,7 @@ function parseDrillsDone(raw) {
     if (d && typeof d === 'object') {
       const name = String(d.name || '').trim();
       if (!name) return null;
-      return { name, station: canonicalStation(d.station) };
+      return { name, station: canonicalStation(d.station), known: drillEntryKnown(d) };
     }
     let name = String(d || '').trim();
     if (!name) return null;
@@ -568,7 +636,7 @@ function parseDrillsDone(raw) {
       station = canonicalStation(m[2]);
       if (station) name = m[1].trim();
     }
-    return { name, station };
+    return { name, station, known: matchKnownDrill(name) };
   };
   if (!raw) return [];
   const s = String(raw).trim();
@@ -607,6 +675,7 @@ function drillStats(athleteName) {
     try { drills = JSON.parse(r.drills_done || '[]'); } catch (e) { drills = []; }
     const seen = new Set();
     for (const d of drills) {
+      if (!drillEntryKnown(d)) continue; // summaries aren't drills — Skip shouldn't rank them
       const name = String((d && typeof d === 'object' ? d.name : d) || '').trim();
       const key = name.toLowerCase();
       if (!name || seen.has(key)) continue;
@@ -630,9 +699,10 @@ function drillStats(athleteName) {
 function thoughtGroups(athleteName) {
   const rows = db
     .prepare(
-      `SELECT what_worked, session_score FROM checkins
+      `SELECT COALESCE(what_worked, '') || ' ' || COALESCE(felt_good, '') || ' ' || COALESCE(what_was_working, '') AS what_worked,
+              session_score FROM checkins
        WHERE athlete_name = ? AND session_score IS NOT NULL
-       AND what_worked IS NOT NULL AND TRIM(what_worked) <> ''`
+       AND TRIM(COALESCE(what_worked, '') || ' ' || COALESCE(felt_good, '') || ' ' || COALESCE(what_was_working, '')) <> ''`
     )
     .all(athleteName);
   const STOP = new Set([
@@ -735,7 +805,7 @@ function sessionDrills(drillsDoneJson) {
     const key = name.toLowerCase();
     if (!name || seen.has(key)) continue;
     seen.add(key);
-    out.push({ name, station: d && typeof d === 'object' ? d.station || null : null });
+    out.push({ name, station: d && typeof d === 'object' ? d.station || null : null, known: drillEntryKnown(d) });
   }
   return out;
 }
@@ -770,6 +840,11 @@ function whatWorksData(athleteName, userId) {
     .filter((g) => g.avg < data.overallAvg)
     .sort((a, b) => a.avg - b.avg)
     .slice(0, 3);
+  // Pitchers: the cue analysis above runs on their throwing reflections (see
+  // thoughtGroups). Drills and daily routines are hitting concepts — phase 1
+  // keeps "What works for you" to cues only for pitcher-only athletes.
+  const ptype = (db.prepare('SELECT player_type FROM users WHERE id = ?').get(userId) || {}).player_type || 'hitter';
+  if (ptype === 'pitcher') return data;
   data.drills = drillStats(athleteName);
 
   const routine = getRoutine(userId);
@@ -779,6 +854,7 @@ function whatWorksData(athleteName, userId) {
     const map = new Map();
     for (const c of goodSessions) {
       for (const d of sessionDrills(c.drills_done)) {
+        if (!d.known) continue;
         const key = d.name.toLowerCase();
         const e = map.get(key) || { name: d.name, stations: {}, total: 0, count: 0 };
         if (d.station) e.stations[d.station] = (e.stations[d.station] || 0) + 1;
@@ -872,6 +948,11 @@ app.get('/', requireLogin, (req, res) => {
 
 app.get('/checkin', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
+  // The form follows the player's role: hitters get the hitting check-in,
+  // pitchers get the throwing check-in, two-ways get one combined form.
+  const pt = req.user.playerType || 'hitter';
+  if (pt === 'pitcher') return res.send(views.pitchingCheckinForm(req.user, null, {}));
+  if (pt === 'two_way') return res.send(views.combinedCheckinForm(req.user, null, {}));
   res.send(views.checkinForm(req.user, null, {}, data.drillNames(), getRoutine(req.user.id)));
 });
 
@@ -1466,6 +1547,8 @@ app.get('/checkin/score/:id', requireLogin, (req, res) => {
 
 app.post('/checkin', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.status(403).send('Forbidden');
+  // The hitting form is for hitters; pitchers and two-ways have their own.
+  if ((req.user.playerType || 'hitter') !== 'hitter') return res.redirect('/checkin');
   const b = req.body;
   const fail = (msg) => res.send(views.checkinForm(req.user, msg, b, data.drillNames(), getRoutine(req.user.id)));
   if (!ENVIRONMENTS.includes(b.environment)) {
@@ -1523,6 +1606,167 @@ app.post('/checkin', requireLogin, (req, res) => {
 // ---- Optional pre-hit check-in: set the intent BEFORE the session ----
 // Never required. Skip reads today's intent and connects the post-session
 // check-in back to it.
+
+// Shared validation for the throwing half of pitching + combined check-ins.
+// Returns the cleaned throwing fields, or null after rendering `failView`.
+function validateThrowing(b, failView) {
+  const t = b.pitch_session_type;
+  if (!PITCH_SESSION_TYPES.includes(t)) {
+    failView('Pick what kind of throwing it was.');
+    return null;
+  }
+  const isThrow = t === 'bullpen' || t === 'live' || t === 'game';
+  const isRecovery = t === 'recovery';
+  const isNoThrow = t === 'no_throw';
+  let intent = '';
+  if (!isRecovery && !isNoThrow) {
+    if (!THROW_INTENTS.includes(b.intent)) {
+      failView('Pick the intent for the day — light, medium, or heavy.');
+      return null;
+    }
+    intent = b.intent;
+  }
+  let command = null;
+  if (!isRecovery && !isNoThrow) {
+    command = parseRating(b.command);
+    if (command === null) {
+      failView('Rate your command from 1 to 10.');
+      return null;
+    }
+  }
+  let pitchCount = null;
+  if (isThrow) {
+    // Bullpen / live / game days require a pitch count and at least one pitch.
+    const n = parseInt(b.pitch_count, 10);
+    if (!Number.isFinite(n) || n < 1 || n > 300) {
+      failView('How many pitches did you throw?');
+      return null;
+    }
+    pitchCount = n;
+  }
+  const pitchesThrown = isThrow ? parsePitchesThrown(b.pitches_thrown) : [];
+  if (isThrow && !pitchesThrown.length) {
+    failView('Check off at least one pitch you threw.');
+    return null;
+  }
+  let veloMax = null;
+  if (isThrow && String(b.velo_max || '').trim() !== '') {
+    const n = parseFloat(b.velo_max);
+    if (!Number.isFinite(n) || n < 40 || n > 110) {
+      failView('Top velo should be a number between 40 and 110.');
+      return null;
+    }
+    veloMax = Math.round(n * 10) / 10;
+  }
+  const catchDistance = t === 'catch_play' ? String(b.catch_distance || '').trim().slice(0, 30) : '';
+  const recoveryNotes = isRecovery ? String(b.recovery_notes || '').trim().slice(0, 2000) : '';
+  if (isRecovery && !recoveryNotes) {
+    failView('What recovery work did you do?');
+    return null;
+  }
+  const noThrowNote = isNoThrow ? String(b.no_throw_note || '').trim().slice(0, 2000) : '';
+  if (isNoThrow && !noThrowNote) {
+    failView('Say what you did to get better today.');
+    return null;
+  }
+  return { t, intent, command, pitchCount, pitchesThrown, veloMax, catchDistance, recoveryNotes, noThrowNote };
+}
+
+const PITCHING_INSERT = `INSERT INTO checkins
+  (user_id, athlete_name, created_at, environment, drills_done, feel, confidence, focus,
+   difficulty, session_score, score_tier, session_notes, what_worked, whats_next,
+   session_kind, pitch_session_type, intent, command, pitch_count, pitches_thrown,
+   velo_max, catch_distance, recovery_notes, no_throw_note,
+   felt_good, what_was_working, biggest_struggle, hitting_score, pitching_score)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+// Pitcher-only check-in.
+app.post('/checkin/pitching', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.status(403).send('Forbidden');
+  if ((req.user.playerType || 'hitter') !== 'pitcher') return res.redirect('/checkin');
+  const b = req.body;
+  const viewValues = { ...b, pitches_thrown: parsePitchesThrown(b.pitches_thrown) };
+  const fail = (msg) => res.send(views.pitchingCheckinForm(req.user, msg, viewValues));
+  const th = validateThrowing(b, fail);
+  if (!th) return;
+  const feel = parseRating(b.feel);
+  const focus = parseRating(b.focus);
+  const confidence = parseRating(b.confidence);
+  if (feel === null || focus === null || confidence === null) {
+    return fail('Rate feel, focus, and confidence from 1 to 10.');
+  }
+  const pitchingScore = pitchingScoreOf(feel, focus, confidence, th.command);
+  const tier = scoreTier(pitchingScore);
+  const info = db.prepare(PITCHING_INSERT).run(
+    req.user.id, req.user.athleteName, new Date().toISOString(),
+    '', '[]', feel, confidence, focus,
+    null, pitchingScore, tier, '', '', '',
+    'pitching', th.t, th.intent, th.command, th.pitchCount, JSON.stringify(th.pitchesThrown),
+    th.veloMax, th.catchDistance, th.recoveryNotes, th.noThrowNote,
+    (b.felt_good || '').trim().slice(0, 2000),
+    (b.what_was_working || '').trim().slice(0, 2000),
+    (b.biggest_struggle || '').trim().slice(0, 2000),
+    null, pitchingScore
+  );
+  res.redirect(`/checkin/score/${info.lastInsertRowid}`);
+});
+
+// Two-way combined check-in: one row, hitting and/or throwing.
+app.post('/checkin/combined', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.status(403).send('Forbidden');
+  if ((req.user.playerType || 'hitter') !== 'two_way') return res.redirect('/checkin');
+  const b = req.body;
+  const didHit = b.did_hit === 'yes';
+  const didThrow = b.did_throw === 'yes';
+  const viewValues = { ...b, pitches_thrown: parsePitchesThrown(b.pitches_thrown) };
+  const fail = (msg) => res.send(views.combinedCheckinForm(req.user, msg, viewValues));
+  if (!didHit && !didThrow) {
+    return fail('Tell Skip what you did today — hitting, throwing, or both.');
+  }
+  const feel = parseRating(b.feel);
+  const focus = parseRating(b.focus);
+  const confidence = parseRating(b.confidence);
+  if (feel === null || focus === null || confidence === null) {
+    return fail('Rate feel, focus, and confidence from 1 to 10.');
+  }
+  const feltGood = (b.felt_good || '').trim().slice(0, 2000);
+  const whatWasWorking = (b.what_was_working || '').trim().slice(0, 2000);
+  const biggestStruggle = (b.biggest_struggle || '').trim().slice(0, 2000);
+  let environment = '', difficulty = null, hittingScore = null;
+  if (didHit) {
+    if (!ENVIRONMENTS.includes(b.environment)) return fail('Pick where you hit.');
+    difficulty = parseRating(b.difficulty);
+    if (difficulty === null) return fail('Rate the difficulty of the hitting from 1 to 10.');
+    environment = b.environment;
+    hittingScore = scoreBreakdown(feel, confidence, focus, difficulty, `${feltGood} ${whatWasWorking}`).total;
+  }
+  let th = { t: '', intent: '', command: null, pitchCount: null, pitchesThrown: [], veloMax: null, catchDistance: '', recoveryNotes: '', noThrowNote: '' };
+  let pitchingScore = null;
+  if (didThrow) {
+    th = validateThrowing(b, fail);
+    if (!th) return;
+    pitchingScore = pitchingScoreOf(feel, focus, confidence, th.command);
+  }
+  const subs = [hittingScore, pitchingScore].filter((s) => s !== null);
+  const sessionScore = round1(subs.reduce((a, s) => a + s, 0) / subs.length);
+  const tier = scoreTier(sessionScore);
+  // Hitting-only days read as hitting, throwing-only as pitching.
+  const sessionKind = didHit && didThrow ? 'combined' : didHit ? 'hitting' : 'pitching';
+  const info = db.prepare(PITCHING_INSERT).run(
+    req.user.id, req.user.athleteName, new Date().toISOString(),
+    environment, '[]', feel, confidence, focus,
+    difficulty, sessionScore, tier, '', '', '',
+    sessionKind, th.t, th.intent, th.command, th.pitchCount, JSON.stringify(th.pitchesThrown),
+    th.veloMax, th.catchDistance, th.recoveryNotes, th.noThrowNote,
+    feltGood, whatWasWorking, biggestStruggle,
+    hittingScore, pitchingScore
+  );
+  res.redirect(`/checkin/score/${info.lastInsertRowid}`);
+});
+
+// ---- Optional pre-hit check-in: set the intent BEFORE the session ----
+// Never required. Skip reads today's intent and connects the post-session
+// check-in back to it.
 function todayPreCheckin(userId) {
   const rows = db
     .prepare('SELECT * FROM pre_checkins WHERE user_id = ? ORDER BY created_at DESC LIMIT 5')
@@ -1533,22 +1777,58 @@ function todayPreCheckin(userId) {
 
 app.get('/precheckin', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
+  // The pre-check-in follows the player's role: hitters pick cage/game,
+  // pitchers set a throwing intent, two-ways get one combined form.
+  const pt = req.user.playerType || 'hitter';
+  if (pt === 'pitcher') return res.send(views.preCheckinPage(req.user, 'throwing', null, {}));
+  if (pt === 'two_way') return res.send(views.preCheckinPage(req.user, 'both', null, {}));
   const kind = req.query.kind === 'game' ? 'game' : 'cage';
   res.send(views.preCheckinPage(req.user, kind, null, {}));
 });
 
 app.post('/precheckin', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.status(403).send('Forbidden');
-  const kind = req.body.kind === 'game' ? 'game' : 'cage';
+  const pt = req.user.playerType || 'hitter';
+  const kind = req.body.kind;
+  // Pitcher pre-throw check-in: throwing intent + throwing focus.
+  if (kind === 'throwing') {
+    if (pt !== 'pitcher') return res.redirect('/precheckin');
+    const throwIntent = THROW_INTENTS.includes(req.body.throw_intent) ? req.body.throw_intent : '';
+    const throwFocus = String(req.body.throw_focus || '').trim().slice(0, 2000);
+    if (!throwFocus) {
+      return res.send(views.preCheckinPage(req.user, 'throwing', 'Give me one thing — what\u2019s the throwing focus?', { throw_intent: throwIntent, throw_focus: throwFocus }));
+    }
+    db.prepare(
+      'INSERT INTO pre_checkins (user_id, kind, focus, plan, flush, throw_intent, throw_focus, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(req.user.id, 'throwing', '', '', '', throwIntent, throwFocus, new Date().toISOString());
+    return res.redirect('/');
+  }
+  // Two-way pre-session check-in: hitting goal/focus + throwing intent/focus.
+  if (kind === 'both') {
+    if (pt !== 'two_way') return res.redirect('/precheckin');
+    const focus = String(req.body.focus || '').trim().slice(0, 2000);
+    const plan = String(req.body.plan || '').trim().slice(0, 2000);
+    const throwIntent = THROW_INTENTS.includes(req.body.throw_intent) ? req.body.throw_intent : '';
+    const throwFocus = String(req.body.throw_focus || '').trim().slice(0, 2000);
+    if (!focus && !throwFocus) {
+      return res.send(views.preCheckinPage(req.user, 'both', 'Give me at least one thing — a hitting focus or a throwing focus.', { focus, plan, throw_intent: throwIntent, throw_focus: throwFocus }));
+    }
+    db.prepare(
+      'INSERT INTO pre_checkins (user_id, kind, focus, plan, flush, throw_intent, throw_focus, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(req.user.id, 'both', focus, plan, '', throwIntent, throwFocus, new Date().toISOString());
+    return res.redirect('/');
+  }
+  const k = kind === 'game' ? 'game' : 'cage';
+  if (pt !== 'hitter') return res.redirect('/precheckin');
   const focus = String(req.body.focus || '').trim().slice(0, 2000);
   const plan = String(req.body.plan || '').trim().slice(0, 2000);
   const flush = String(req.body.flush || '').trim().slice(0, 2000);
   if (!focus) {
-    return res.send(views.preCheckinPage(req.user, kind, 'Give me at least one thing — what\u2019s the focus?', { focus, plan, flush }));
+    return res.send(views.preCheckinPage(req.user, k, 'Give me at least one thing — what\u2019s the focus?', { focus, plan, flush }));
   }
   db.prepare(
     'INSERT INTO pre_checkins (user_id, kind, focus, plan, flush, created_at) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(req.user.id, kind, focus, plan, flush, new Date().toISOString());
+  ).run(req.user.id, k, focus, plan, flush, new Date().toISOString());
   res.redirect('/');
 });
 
@@ -1599,6 +1879,18 @@ app.post('/settings/profile', requireLogin, (req, res) => {
   if (req.user.role !== 'coach' && dob) {
     db.prepare('UPDATE users SET date_of_birth = ? WHERE id = ?').run(dob, req.user.id);
   }
+  res.redirect('/settings?saved=1');
+});
+
+// Athletes can switch their role later (hitter / pitcher / two-way). This
+// changes which check-in form they get from then on; past check-ins keep
+// their original kind.
+app.post('/settings/role', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.status(403).send('Forbidden');
+  const fail = (msg) => res.send(views.settingsPage(req.user, { subscription: getSubscription(req.user.id), error: msg, ...coachAdminOpts(req) }));
+  const playerType = req.body.player_type;
+  if (!validPlayerType(playerType)) return fail('Pick hitter, pitcher, or two-way.');
+  db.prepare('UPDATE users SET player_type = ? WHERE id = ?').run(playerType, req.user.id);
   res.redirect('/settings?saved=1');
 });
 
@@ -1661,16 +1953,20 @@ app.post('/settings/delete', requireLogin, (req, res) => {
 
 app.get('/notebook', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
-  const checkins = db
+  const all = db
     .prepare('SELECT * FROM checkins WHERE user_id = ? ORDER BY created_at DESC')
     .all(req.user.id);
+  // Session-kind filter (only shown when the athlete has more than one kind).
+  const kinds = [...new Set(all.map((c) => c.session_kind || 'hitting'))];
+  const kind = ['hitting', 'pitching', 'combined'].includes(req.query.kind) ? req.query.kind : 'all';
+  const checkins = kind === 'all' ? all : all.filter((c) => (c.session_kind || 'hitting') === kind);
   const notes = db
     .prepare('SELECT * FROM learning_notes WHERE user_id = ? ORDER BY created_at DESC')
     .all(req.user.id);
   const players = db
     .prepare('SELECT * FROM study_players WHERE user_id = ? ORDER BY created_at DESC')
     .all(req.user.id);
-  res.send(views.notebookPage(req.user, checkins, notes, players, req.query.saved === '1'));
+  res.send(views.notebookPage(req.user, checkins, notes, players, req.query.saved === '1', { kinds, kind }));
 });
 
 // Old routes fold into the notebook.
@@ -1690,7 +1986,7 @@ function pendingList(scope) {
   const sp = scopeParams(scope);
   return db
     .prepare(
-      `SELECT u.id, u.email, u.athlete_name, u.first_name, u.last_name, u.created_at,
+      `SELECT u.id, u.email, u.athlete_name, u.first_name, u.last_name, u.created_at, u.player_type,
               c.name AS organization_name, t.name AS team_name
        FROM users u LEFT JOIN organizations c ON c.id = u.organization_id
                     LEFT JOIN teams t ON t.id = u.team_id
@@ -1724,7 +2020,7 @@ function coachUserStats(scope) {
   const sp = scopeParams(scope);
   const users = db
     .prepare(
-      `SELECT u.id, u.email, u.athlete_name, u.first_name, u.last_name, u.created_at, u.date_of_birth,
+      `SELECT u.id, u.email, u.athlete_name, u.first_name, u.last_name, u.created_at, u.date_of_birth, u.player_type,
               t.name AS team_name
        FROM users u LEFT JOIN teams t ON t.id = u.team_id
        WHERE u.role != 'coach' AND u.status = 'approved'
@@ -1737,7 +2033,7 @@ function coachUserStats(scope) {
       .prepare('SELECT COUNT(*) AS total, MAX(created_at) AS last FROM checkins WHERE user_id = ?')
       .get(u.id);
     const name = [u.first_name, u.last_name].filter(Boolean).join(' ') || u.athlete_name || u.email;
-    return { id: u.id, email: u.email, name, total: row.total, last: row.last, age: ageOn(u.date_of_birth), team: u.team_name || null };
+    return { id: u.id, email: u.email, name, total: row.total, last: row.last, age: ageOn(u.date_of_birth), team: u.team_name || null, playerType: u.player_type || 'hitter' };
   });
 }
 
@@ -2052,7 +2348,7 @@ app.get('/coach/user/:email', requireCoachAny, (req, res) => {
   const em = (req.params.email || '').toLowerCase();
   const sp = scopeParams(orgScope(req));
   const user = db
-    .prepare(`SELECT id, email, athlete_name, first_name, last_name FROM users WHERE email = ? AND role != 'coach' ${SCOPE_CLAUSE}`)
+    .prepare(`SELECT id, email, athlete_name, first_name, last_name, player_type FROM users WHERE email = ? AND role != 'coach' ${SCOPE_CLAUSE}`)
     .get(em, ...sp);
   if (!user) return res.status(404).send('Unknown user.');
   const rows = db
@@ -2063,8 +2359,40 @@ app.get('/coach/user/:email', requireCoachAny, (req, res) => {
     .prepare('SELECT role, content, created_at FROM chat_messages WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 200')
     .all(user.id)
     .reverse();
-  res.send(views.coachUser(realUser(req), name, rows, whatWorksData(name, user.id), thread, user.email, brain.listMemory(db, user.id), getRoutine(user.id)));
+  const pt = user.player_type || 'hitter';
+  res.send(views.coachUser(realUser(req), name, rows, whatWorksData(name, user.id), thread, user.email, brain.listMemory(db, user.id), getRoutine(user.id), pt, pt === 'hitter' ? null : throwingSummary(user.id)));
 });
+
+// Throwing summary for a pitcher's or two-way player's coach view: session
+// mix, average command, workload, and velo over the last 30 throwing sessions.
+function throwingSummary(userId) {
+  const rows = db
+    .prepare(
+      `SELECT pitch_session_type, command, pitch_count, velo_max
+       FROM checkins
+       WHERE user_id = ? AND session_kind IN ('pitching', 'combined')
+         AND pitch_session_type IS NOT NULL AND pitch_session_type <> ''
+       ORDER BY created_at DESC LIMIT 30`
+    )
+    .all(userId);
+  if (!rows.length) return null;
+  const byType = {};
+  let cmdSum = 0, cmdN = 0, pitchSum = 0, veloSum = 0, veloN = 0;
+  for (const r of rows) {
+    byType[r.pitch_session_type] = (byType[r.pitch_session_type] || 0) + 1;
+    if (r.command != null) { cmdSum += r.command; cmdN++; }
+    if (r.pitch_count != null) pitchSum += r.pitch_count;
+    if (r.velo_max != null) { veloSum += r.velo_max; veloN++; }
+  }
+  const r1 = (n) => Math.round(n * 10) / 10;
+  return {
+    sessions: rows.length,
+    byType,
+    avgCommand: cmdN ? r1(cmdSum / cmdN) : null,
+    totalPitches: pitchSum,
+    avgVelo: veloN ? r1(veloSum / veloN) : null,
+  };
+}
 
 // Skip's memory of a hitter: Bobby's durable notes on what works for them.
 app.post('/coach/user/:email/memory', requireCoach, (req, res) => {
@@ -2423,6 +2751,39 @@ WHEN HE WANTS TO SKIP A QUESTION: if he asks to skip a question, just skip it �
 
 SAVING TO HIS MENTAL GAME TAB: if he shares a cue, mindset shift, or routine piece he wants to keep, tell him: say 'add this to my mental game' followed by the thing, and you'll put it on his Mental Game tab for him.`;
 
+// Phase 1 pitcher mode: Skip is a MIRROR, not a pitching mechanic. He coaches
+// from the pitcher's history and exact words — mental before physical — and
+// never invents mechanical causes, never prescribes drills or mechanics, and
+// never touches the hitting Brain library.
+const SKIP_CORE_PITCHING = `You are Coach Skip, the AI pitching coach inside The Daily Hitter, a session check-in app for baseball and softball pitchers. Pitchers check in after throwing and talk to you when they need coaching. You coach the way your head coach coaches — his system is your system. Never mention your head coach by name to pitchers.
+
+VOICE: Direct, no fluff. Talk like a coach standing next to the pitcher — straight answers, zero motivational-poster talk. Short texts, not essays. When something was genuinely good, name it specifically. Build his confidence with what's real — his own best days are the evidence. Never lecture. Never mention you are an AI model. You are Coach Skip.
+
+DATES & TIME: I always tell you today's date (Chicago time) alongside the pitcher's data — stay oriented to it. When you talk about his session from today, say "today" — never the calendar date. Yesterday's session is "yesterday." Older sessions get short natural dates like "Sept 10" — never raw YYYY-MM-DD like 2026-09-15. Talk about time like a person: "earlier this week," "a few days ago," not timestamps.
+
+HOW YOU COACH (MIRROR MODE):
+1. LEARN HIM OVER TIME — your #1 job. Every throwing session and chat teaches you this pitcher: his words, his feels, what his best days have in common. No two pitchers get the same coaching.
+2. REMIND, DON'T FIX — you are not a pitching mechanic and you never claim to fix his delivery. You're a helper. Your job when he's struggling: bring him back to the state he felt when he was good — what he was doing, feeling, and thinking on his best throwing days, in his own words, name the date and level. Make the reminder RELEVANT to what he's struggling with — a best day where he was doing well at THIS exact thing. If his history has no best day for this, ask him when he last felt good at it instead of forcing one. Name the FEEL — but never tell him where or how to work on it: no drill, bullpen, mechanical, or pitch-design prescriptions. Then ASK him what's different now, and stop there. Remind, then ask. Never jump from the reminder to telling him what to try — the reminder IS the coaching. He finds the gap; you hold up the mirror. Never mention numeric scores to pitchers — talk only in levels and colors: red, yellow, green, bright green (bright green = best day).
+3. HELP HIM FEEL GOOD AND CONFIDENT — build him up and help him mentally. Notice what's going right and name it. When he's spiraling, steady him with what's true: he's done it before, and his best days are the proof. Confidence comes from evidence — his own history.
+4. MENTAL BEFORE PHYSICAL — always. How he felt, what he was thinking, his focus and intent come before anything physical.
+5. NEVER INVENT A CAUSE — no matter what problem he describes — command issues, velo down, a pitch not biting, feeling off on the mound — never state or imply a specific mechanical cause as THE reason: not arm slot, not stride, not release point, not sequencing, nothing. The only exceptions: HE described that detail himself, or you've seen video of him throwing. Translating his symptom into mechanics IS the diagnosis. Stay in HIS words. When he brings a problem, bring him back to the state he felt when he was good and help him see what's different now. If his old feels aren't getting it done, talk through what it could be — ask what HE thinks, lay out possibilities (never a diagnosis) — and suggest new things to try, one at a time. A guessed cause teaches the wrong fix.
+6. Their words first — a feel in the pitcher's own words beats a "better" cue every time.
+7. One thing at a time — praise what's good first. When his old feels aren't working and you're suggesting something new to try, one thing at a time — never dump three changes in one message.
+WHEN HE WANTS TO SKIP A QUESTION: if he asks to skip a question, just skip it — acknowledge briefly and move on. Never push back with 'remember you logged this today' or any version of that. He knows what he logged; he just doesn't want to answer right now. No guilt, and don't rephrase the question or circle back to the same topic — drop that thread entirely. Keep helping some other way, or leave the floor open.
+
+SAVING TO HIS MENTAL GAME TAB: if he shares a cue, mindset shift, or routine piece he wants to keep, tell him: say 'add this to my mental game' followed by the thing, and you'll put it on his Mental Game tab for him.`;
+
+// Two-way athletes get the hitting core, but hitting knowledge must NEVER be
+// applied to a throwing problem. This guard rides along with SKIP_CORE.
+const TWOWAY_PITCHING_GUARD = `
+TWO-WAY ATHLETE — HITTING KNOWLEDGE STAYS ON THE HITTING SIDE: this athlete does both — he hits AND he throws, and his data below is labeled [Hitting] or [Throwing] per session. When he talks about THROWING — command, velo, a pitch, the mound, his arm — coach it in mirror mode from his THROWING history and his words only: NEVER apply the hitting material below to a throwing problem. Never translate a throwing struggle into hitting mechanics, never prescribe hitting drills for a pitching problem, never invent a mechanical cause for anything on the mound. When he talks about hitting, coach it exactly as the rules above say.`;
+
+function skipCoreFor(role) {
+  if (role === 'pitcher') return SKIP_CORE_PITCHING;
+  if (role === 'two_way') return SKIP_CORE + TWOWAY_PITCHING_GUARD;
+  return SKIP_CORE;
+}
+
 // ---- Check-in streak (Chicago days) ----
 const chiDayFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' });
 const chiLongFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
@@ -2450,27 +2811,71 @@ function streakData(userId) {
   return { streak, lastCheckinDay: last, daysSince };
 }
 
-function hitterSnapshot(userId) {
+const slice200 = (s) => String(s || '').slice(0, 200);
+
+// Throwing-session history line for Skip's data block. His words, labeled —
+// never mixed with hitting drills or mechanics.
+function throwSnapshotBits(r, tag) {
+  let pitches = [];
+  try {
+    const p = JSON.parse(r.pitches_thrown || '[]');
+    if (Array.isArray(p)) pitches = p;
+  } catch (e) {}
+  const bits = [
+    `${String(r.created_at).slice(0, 10)}${tag ? ` · ${tag}` : ''} · ${views.pitchSessionTypeLabel(r.pitch_session_type)}${r.intent ? ` · ${views.throwIntentLabel(r.intent)}` : ''}`,
+    r.session_score != null ? `Level: ${r.score_tier}` : 'Unscored',
+    `Feel ${r.feel} Conf ${r.confidence} Focus ${r.focus}${r.command != null ? ` Command ${r.command}` : ''}`,
+    r.pitch_count != null
+      ? `${r.pitch_count} pitches${pitches.length ? `: ${pitches.join(', ')}` : ''}`
+      : pitches.length ? `Pitches: ${pitches.join(', ')}` : null,
+    r.velo_max != null ? `Top velo ${r.velo_max}` : null,
+    r.catch_distance ? `Distance: ${r.catch_distance}` : null,
+    r.felt_good ? `What felt good: "${slice200(r.felt_good)}"` : null,
+    r.what_was_working ? `What was working: "${slice200(r.what_was_working)}"` : null,
+    r.biggest_struggle ? `Biggest struggle: "${slice200(r.biggest_struggle)}"` : null,
+    r.recovery_notes ? `Recovery work: "${slice200(r.recovery_notes)}"` : null,
+    r.no_throw_note ? `No-throw day, got better by: "${slice200(r.no_throw_note)}"` : null,
+  ].filter(Boolean);
+  return bits;
+}
+
+function hitterSnapshot(userId, role) {
+  role = role || 'hitter';
   const rows = db
     .prepare(
       `SELECT created_at, environment, drills_done, feel, confidence, focus, difficulty,
-              session_score, score_tier, session_notes, what_worked, whats_next
+              session_score, score_tier, session_notes, what_worked, whats_next,
+              session_kind, pitch_session_type, intent, command, pitch_count, pitches_thrown,
+              velo_max, catch_distance, recovery_notes, no_throw_note,
+              felt_good, what_was_working, biggest_struggle
        FROM checkins WHERE user_id = ? ORDER BY created_at DESC LIMIT 8`
     )
     .all(userId);
   const lines = rows.map((r) => {
+    const kind = r.session_kind || 'hitting';
+    // Throwing rows (pitcher-only or the throwing half of a combined day)
+    // are labeled and kept separate from hitting history.
+    if (kind !== 'hitting') {
+      const tag = role === 'two_way' ? (kind === 'combined' ? '[Hitting + Throwing]' : '[Throwing]') : '';
+      return '- ' + throwSnapshotBits(r, tag).join(' · ');
+    }
     let drills = [];
     try { drills = JSON.parse(r.drills_done || '[]'); } catch (e) { drills = []; }
-    const drillBits = drills.map((d) => {
+    const fmtD = (d) => {
       const name = String((d && typeof d === 'object' ? d.name : d) || '').trim();
       const station = d && typeof d === 'object' ? d.station : null;
       return station ? `${name} (${station})` : name;
-    }).filter(Boolean);
+    };
+    // Real drills vs the hitter's own summaries — Skip must never treat a
+    // summary ("did some tee stuff") as a literal drill.
+    const realDrills = drills.filter(drillEntryKnown).map(fmtD).filter(Boolean);
+    const otherWork = drills.filter((d) => !drillEntryKnown(d)).map(fmtD).filter(Boolean);
     const bits = [
-      `${String(r.created_at).slice(0, 10)} · ${r.environment}`,
+      `${String(r.created_at).slice(0, 10)}${role === 'two_way' ? ' · [Hitting]' : ''} · ${r.environment}`,
       r.session_score != null ? `Level: ${r.score_tier}` : 'Unscored',
       `Feel ${r.feel} Conf ${r.confidence} Focus ${r.focus}${r.difficulty != null ? ` Difficulty ${r.difficulty}` : ''}`,
-      drillBits.length ? `Drills: ${drillBits.join(', ')}` : null,
+      realDrills.length ? `Drills: ${realDrills.join(', ')}` : null,
+      otherWork.length ? `Other work he mentioned (his words, NOT formal drills — never list these as drills he did): "${otherWork.join('", "')}"` : null,
       r.session_notes ? `Notes: "${String(r.session_notes).slice(0, 200)}"` : null,
       r.what_worked ? `What worked: "${String(r.what_worked).slice(0, 200)}"` : null,
     ].filter(Boolean);
@@ -2499,26 +2904,36 @@ function hitterSnapshot(userId) {
   const best = db
     .prepare(
       `SELECT created_at, environment, drills_done, feel, confidence, focus,
-              session_score, session_notes, what_worked
+              session_score, session_notes, what_worked,
+              session_kind, pitch_session_type, intent, command, pitch_count, pitches_thrown,
+              velo_max, catch_distance, recovery_notes, no_throw_note,
+              felt_good, what_was_working, biggest_struggle
        FROM checkins WHERE user_id = ? AND session_score IS NOT NULL
        ORDER BY session_score DESC, created_at DESC LIMIT 1`
     )
     .get(userId);
   let bestDay = '';
   if (best) {
-    let drills = [];
-    try { drills = JSON.parse(best.drills_done || '[]'); } catch (e) { drills = []; }
-    const names = drills
-      .map((d) => String((d && typeof d === 'object' ? d.name : d) || '').trim())
-      .filter(Boolean);
-    const bits = [
-      `${String(best.created_at).slice(0, 10)} · ${best.environment} · Level: ${scoreTier(best.session_score)}`,
-      `Feel ${best.feel} Conf ${best.confidence} Focus ${best.focus}`,
-      names.length ? `Drills: ${names.join(', ')}` : null,
-      best.what_worked ? `What worked: "${String(best.what_worked).slice(0, 200)}"` : null,
-      best.session_notes ? `Notes: "${String(best.session_notes).slice(0, 200)}"` : null,
-    ].filter(Boolean);
-    bestDay = bits.join(' · ');
+    const bestKind = best.session_kind || 'hitting';
+    if (bestKind !== 'hitting') {
+      // Best throwing day — his words and throwing details, no hitting framing.
+      bestDay = throwSnapshotBits(best, bestKind === 'combined' ? '[Hitting + Throwing]' : '[Throwing]').join(' · ');
+    } else {
+      let drills = [];
+      try { drills = JSON.parse(best.drills_done || '[]'); } catch (e) { drills = []; }
+      const names = drills
+        .filter(drillEntryKnown)
+        .map((d) => String((d && typeof d === 'object' ? d.name : d) || '').trim())
+        .filter(Boolean);
+      const bits = [
+        `${String(best.created_at).slice(0, 10)} · ${best.environment} · Level: ${scoreTier(best.session_score)}`,
+        `Feel ${best.feel} Conf ${best.confidence} Focus ${best.focus}`,
+        names.length ? `Drills: ${names.join(', ')}` : null,
+        best.what_worked ? `What worked: "${String(best.what_worked).slice(0, 200)}"` : null,
+        best.session_notes ? `Notes: "${String(best.session_notes).slice(0, 200)}"` : null,
+      ].filter(Boolean);
+      bestDay = bits.join(' · ');
+    }
   }
   return { lines, avg, total, trend, top, bestDay };
 }
@@ -2545,8 +2960,9 @@ function programCueBlock(userId) {
   return `\nHIS PROGRAM (his coach wrote this — coach FROM it, don't recite it back at him):\n${bits.join('\n')}`;
 }
 
-function skipDataBlock(userId) {
-  const snap = hitterSnapshot(userId);
+function skipDataBlock(userId, role) {
+  role = role || 'hitter';
+  const snap = hitterSnapshot(userId, role);
   const u = db.prepare('SELECT first_name FROM users WHERE id = ?').get(userId) || {};
   const mem = brain.memoryBlock(db, userId, u.first_name);
   const memBlock = mem ? `\n${mem}` : '';
@@ -2563,24 +2979,40 @@ function skipDataBlock(userId) {
         .map((r) => `- ${r.d}${r.category ? ` (${r.category})` : ''}: "${String(r.note).slice(0, 200)}"`)
         .join('\n')}`
     : '';
-  const playersBlock = playerRows.length
-    ? `\nPLAYERS HE STUDIES (connect your coaching to these guys):\n${playerRows
+  // Players he studies + his remote program are hitting concepts — pitcher-only
+  // coaching stays in mirror mode on his throwing history.
+  const playersBlock = role === 'pitcher' || !playerRows.length
+    ? ''
+    : `\nPLAYERS HE STUDIES (connect your coaching to these guys):\n${playerRows
         .map((r) => `- ${r.player_name}${r.takeaway ? ` — "${String(r.takeaway).slice(0, 200)}"` : ''}`)
-        .join('\n')}`
-    : '';
-  const progBlock = programCueBlock(userId);
+        .join('\n')}`;
+  const progBlock = role === 'pitcher' ? '' : programCueBlock(userId);
   const mb = getMentalBaseline(userId);
-  // Today's pre-hit intent (Sep 2026): what he set BEFORE hitting. When he
-  // checks in after, connect the session back to this.
+  // Today's pre-session intent. Pitchers set a throwing intent, two-ways set
+  // both — hold him to whichever he set.
   let intentBlock = '';
   try {
     const pre = todayPreCheckin(userId);
     if (pre) {
-      const bits = [pre.kind === 'game' ? 'Pregame / Live ABs' : 'Cage session'];
-      if (pre.focus) bits.push(`Focus: "${String(pre.focus).slice(0, 200)}"`);
-      if (pre.plan) bits.push(`Plan: "${String(pre.plan).slice(0, 200)}"`);
-      if (pre.flush) bits.push(`Flushing: "${String(pre.flush).slice(0, 200)}"`);
-      intentBlock = `\nTODAY'S INTENT (he set this BEFORE today's session — hold him to it. When he talks about the session afterward, connect it back to what he said here and ask him directly whether he stuck to his plan — one direct accountability question):\n${bits.join('\n')}`;
+      if (pre.kind === 'throwing') {
+        const bits = [];
+        if (pre.throw_intent) bits.push(`Throwing intent: ${views.throwIntentLabel(pre.throw_intent)}`);
+        if (pre.throw_focus) bits.push(`Throwing focus: "${String(pre.throw_focus).slice(0, 200)}"`);
+        if (bits.length) intentBlock = `\nTODAY'S THROWING INTENT (he set this BEFORE throwing today — hold him to it. When he talks about the session afterward, connect it back to what he said here and ask him directly whether he stuck to it — one direct accountability question):\n${bits.join('\n')}`;
+      } else if (pre.kind === 'both') {
+        const bits = [];
+        if (pre.focus) bits.push(`Hitting focus: "${String(pre.focus).slice(0, 200)}"`);
+        if (pre.plan) bits.push(`Hitting plan: "${String(pre.plan).slice(0, 200)}"`);
+        if (pre.throw_intent) bits.push(`Throwing intent: ${views.throwIntentLabel(pre.throw_intent)}`);
+        if (pre.throw_focus) bits.push(`Throwing focus: "${String(pre.throw_focus).slice(0, 200)}"`);
+        if (bits.length) intentBlock = `\nTODAY'S INTENT (he set this BEFORE today's session — hold him to it. When he talks about the session afterward, connect it back to what he said here and ask him directly whether he stuck to it — one direct accountability question):\n${bits.join('\n')}`;
+      } else {
+        const bits = [pre.kind === 'game' ? 'Pregame / Live ABs' : 'Cage session'];
+        if (pre.focus) bits.push(`Focus: "${String(pre.focus).slice(0, 200)}"`);
+        if (pre.plan) bits.push(`Plan: "${String(pre.plan).slice(0, 200)}"`);
+        if (pre.flush) bits.push(`Flushing: "${String(pre.flush).slice(0, 200)}"`);
+        intentBlock = `\nTODAY'S INTENT (he set this BEFORE today's session — hold him to it. When he talks about the session afterward, connect it back to what he said here and ask him directly whether he stuck to his plan — one direct accountability question):\n${bits.join('\n')}`;
+      }
     }
   } catch (e) {}  let mentalBlock = '';
   if (mb && (mb.pregame_routine || mb.morning_routine || mb.breath_work || mb.when_sped_up)) {
@@ -2596,23 +3028,32 @@ function skipDataBlock(userId) {
     mentalBlock = `\nMENTAL GAME BASELINE (what he already does — build on this, one small practice at a time):\n${bits.join('\n')}\nWhen he feels sped up or rushed in a game, recommend ONE concrete practice anchored to what he already does above. Never lecture — one thing, in his language.`;
   }
   const todayStr = chiLongFmt.format(new Date());
+  const dataHeader = role === 'pitcher'
+    ? 'THROWING DATA (newest first)'
+    : role === 'two_way'
+      ? 'SESSION DATA (newest first — [Hitting] and [Throwing] labeled per session)'
+      : 'HITTER DATA (newest first)';
+  const athleteWord = role === 'pitcher' ? 'pitcher' : role === 'two_way' ? 'two-way player' : 'hitter';
+  const bestDayHead = role === 'pitcher'
+    ? 'HIS BEST THROWING DAY — when he\'s struggling, take him back to exactly this (this is your #1 job)'
+    : 'HIS BEST DAY — when he\'s struggling, take him back to exactly this (this is your #1 job)';
   return snap.lines.length
-    ? `TODAY IS ${todayStr} (Chicago time).\nHITTER DATA (newest first):\n${snap.lines.join('\n')}\nSessions logged: ${snap.total}${
+    ? `TODAY IS ${todayStr} (Chicago time).\n${dataHeader}:\n${snap.lines.join('\n')}\nSessions logged: ${snap.total}${
         snap.avg != null ? ` · Average level: ${scoreTier(snap.avg)}` : ''
       }\n${snap.trend}${
         snap.total < 3
-          ? `\nNOT ENOUGH HISTORY YET — only ${snap.total} check-in(s) logged. You barely know this hitter: be straight with him that it's hard to really help until he keeps logging and you can learn him. Say it in your voice when he's asking for coaching. Don't fake personalized reads from almost nothing — coach what's in front of you, ask questions, nudge him to log today.\n`
+          ? `\nNOT ENOUGH HISTORY YET — only ${snap.total} check-in(s) logged. You barely know this ${athleteWord}: be straight with him that it's hard to really help until he keeps logging and you can learn him. Say it in your voice when he's asking for coaching. Don't fake personalized reads from almost nothing — coach what's in front of you, ask questions, nudge him to log today.\n`
           : ''
       }${
-        snap.top.length
+        role !== 'pitcher' && snap.top.length
           ? `\nDrills tied to their best days: ${snap.top.map((d) => `${d.name} (${scoreTier(d.avg)} over ${d.count} sessions)`).join(', ')}`
           : ''
       }${
         snap.bestDay
-          ? `\nHIS BEST DAY — when he's struggling, take him back to exactly this (this is your #1 job):\n${snap.bestDay}`
+          ? `\n${bestDayHead}:\n${snap.bestDay}`
           : ''
       }${memBlock}${learnBlock}${playersBlock}${progBlock}${mentalBlock}${intentBlock}`
-    : `TODAY IS ${todayStr} (Chicago time).\nHITTER DATA: no check-ins logged yet — this is a brand-new hitter. You don't know him at all yet: tell him straight it's hard to really help until he keeps logging and you can learn him. Ask what he's working on and coach what's in front of you.${memBlock}${learnBlock}${playersBlock}${progBlock}${mentalBlock}${intentBlock}`;
+    : `TODAY IS ${todayStr} (Chicago time).\n${dataHeader}: no check-ins logged yet — this is a brand-new ${athleteWord}. You don't know him at all yet: tell him straight it's hard to really help until he keeps logging and you can learn him. Ask what he's working on and coach what's in front of you.${memBlock}${learnBlock}${playersBlock}${progBlock}${mentalBlock}${intentBlock}`;
 }
 
 const COACH_SYSTEM = `You are Coach Skip, the AI hitting coach inside The Daily Hitter. You are talking to BOBBY ATKINSON — your head coach, the man whose brain you coach with. He is training you right now: giving feedback on your coaching, correcting your answers, teaching you how he wants his hitters coached. Listen carefully, take every correction seriously, and confirm specifically how you will apply what he tells you going forward. Talk to him like a trusted assistant coach — direct, no fluff, no motivational-poster talk. Keep replies short (2-4 sentences) unless he asks for more. Never mention you are an AI model. You are Coach Skip.
@@ -2622,6 +3063,7 @@ IMPORTANT: your coaching knowledge lives in your Brain library — discrete entr
 async function askSkip(user, userMessage, opts = {}) {
   const coachMode = !!opts.coachMode;
   const userId = user.id;
+  const role = user.playerType || 'hitter';
   const apiKey = process.env.LLM_API_KEY;
   if (!apiKey) {
     const err = new Error('chat_not_configured');
@@ -2633,14 +3075,16 @@ async function askSkip(user, userMessage, opts = {}) {
     .all(userId)
     .reverse();
   const nameLine = !coachMode && user.firstName
-    ? `The hitter you're talking to is named "${user.firstName}". Call them ${user.firstName} — use their first name naturally, the way a coach would.\n\n`
+    ? `The ${role === 'pitcher' ? 'pitcher' : role === 'two_way' ? 'two-way player' : 'hitter'} you're talking to is named "${user.firstName}". Call them ${user.firstName} — use their first name naturally, the way a coach would.\n\n`
     : '';
-  const dataBlock = coachMode ? '' : skipDataBlock(userId);
+  const dataBlock = coachMode ? '' : skipDataBlock(userId, role);
   // Brain v2: short core prompt + only the playbook entries relevant to this message.
-  const playbook = brain.libraryBlock(db, userMessage);
+  // Pitcher-only coaching is mirror mode — the hitting Brain library is never
+  // injected there.
+  const playbook = role === 'pitcher' ? '' : brain.libraryBlock(db, userMessage);
   const playbookBlock = playbook ? `\n\n${playbook}` : '';
   const saveBlock = !coachMode && opts.saveNote ? `\n\n${opts.saveNote}` : '';
-  const system = coachMode ? COACH_SYSTEM + playbookBlock : `${SKIP_CORE}\n\n${nameLine}${dataBlock}${playbookBlock}${saveBlock}`;
+  const system = coachMode ? COACH_SYSTEM + playbookBlock : `${skipCoreFor(role)}\n\n${nameLine}${dataBlock}${playbookBlock}${saveBlock}`;
   // Gemini roles are "user"/"model" (our DB stores "assistant").
   const contents = [
     ...history.map((m) => ({
@@ -3020,43 +3464,107 @@ const JOURNAL_SYSTEM = `You are Coach Skip, a direct no-fluff hitting coach. Rea
 // accountability question.
 const JOURNAL_SYSTEM_INTENT = `You are Coach Skip, a direct no-fluff hitting coach. Read this hitter's journal entry and write a short coach's margin note: 2-3 sentences on what actually happened — how they felt, what worked, what was off, the one thing to carry forward. Judge by what the hitter WROTE first — their words, their honesty, their approach — then their numbers. Mental approach before mechanics. Then connect the session back to HIS PRE-SESSION INTENT from the same day: name what he said he'd focus on, say plainly whether the session shows he stuck to it, and end with ONE direct question holding him to it. Be specific to what they said, never generic. Reply with ONLY the note — no score, no rating, no number.`;
 
+// Pitcher journal reads run in mirror mode: reflect his throwing day back to
+// him from his own words — never diagnose mechanics, never prescribe drills.
+const JOURNAL_SYSTEM_PITCHING = `You are Coach Skip, a direct no-fluff pitching coach. Read this pitcher's journal entry and write a 2-3 sentence summary of the throwing session, like a coach's margin note on their entry. Capture what actually happened: how he felt, what was working, what he struggled with, and the one thing to carry forward. Judge by what HE WROTE first — his words, his honesty, his approach — then his numbers. Mental approach before anything physical. You are in mirror mode: reflect him back, never diagnose mechanics, never prescribe drills or mechanical changes. Be specific to what he said, never generic. Reply with ONLY the summary — no score, no rating, no number.`;
+
+const JOURNAL_SYSTEM_INTENT_PITCHING = `You are Coach Skip, a direct no-fluff pitching coach. Read this pitcher's journal entry and write a short coach's margin note: 2-3 sentences on what actually happened — how he felt, what was working, what he struggled with, the one thing to carry forward. Judge by what HE WROTE first — his words, his honesty, his approach — then his numbers. Mental approach before anything physical. Then connect the session back to HIS PRE-THROW INTENT from the same day: name the intent and focus he set, say plainly whether the session shows he stuck to it, and end with ONE direct question holding him to it. Mirror mode: reflect, never diagnose mechanics, never prescribe drills. Be specific to what he said, never generic. Reply with ONLY the note — no score, no rating, no number.`;
+
+// Two-way journal reads cover hitting and/or throwing in one entry.
+const JOURNAL_SYSTEM_COMBINED = `You are Coach Skip, a direct no-fluff coach. Read this two-way player's journal entry — it covers his hitting and/or his throwing today — and write a 2-3 sentence summary of the session, like a coach's margin note on their entry. Capture what actually happened on each side he did: how he felt, what worked, what was off, the one thing to carry forward. Judge by what HE WROTE first — his words, his honesty, his approach — then his numbers. Mental approach before mechanics. For the throwing side you are in mirror mode: reflect him back, never diagnose mechanics, never prescribe drills. Be specific to what he said, never generic. Reply with ONLY the summary — no score, no rating, no number.`;
+
+const JOURNAL_SYSTEM_INTENT_COMBINED = `You are Coach Skip, a direct no-fluff coach. Read this two-way player's journal entry — hitting and/or throwing — and write a short coach's margin note: 2-3 sentences on what actually happened, how he felt, what worked, what was off, the one thing to carry forward. Judge by what HE WROTE first, then his numbers. Mental approach before mechanics. Then connect the session back to HIS PRE-SESSION INTENT from the same day (his hitting focus and/or his throwing intent and focus): name what he set, say plainly whether the session shows he stuck to it, and end with ONE direct question holding him to it. For the throwing side stay in mirror mode: reflect, never diagnose mechanics, never prescribe drills. Be specific to what he said, never generic. Reply with ONLY the note — no score, no rating, no number.`;
+
 function drillNamesOf(c) {
   try {
-    return JSON.parse(c.drills_done || '[]')
-      .map((d) => {
-        const name = String((d && typeof d === 'object' ? d.name : d) || '').trim();
-        const station = d && typeof d === 'object' ? d.station : null;
-        return station ? `${name} (${station})` : name;
-      })
-      .filter(Boolean)
-      .join(', ');
+    const arr = JSON.parse(c.drills_done || '[]');
+    const fmt = (d) => {
+      const name = String((d && typeof d === 'object' ? d.name : d) || '').trim();
+      const station = d && typeof d === 'object' ? d.station : null;
+      return station ? `${name} (${station})` : name;
+    };
+    const real = arr.filter(drillEntryKnown).map(fmt).filter(Boolean);
+    const other = arr.filter((d) => !drillEntryKnown(d)).map(fmt).filter(Boolean);
+    const bits = [];
+    if (real.length) bits.push(`Drills: ${real.join(', ')}`);
+    if (other.length) bits.push(`Other work he mentioned (his words, not formal drills): ${other.join(', ')}`);
+    return bits.join('\n');
   } catch (e) {
     return '';
   }
 }
 
-async function journalRead(c) {
-  const entryBits = [
-    `Session date (Chicago): ${chiDay(c.created_at)}`,
+function hittingEntryBits(c) {
+  return [
     `Environment: ${c.environment || 'n/a'}`,
     `Feel ${c.feel}/10, Confidence ${c.confidence}/10, Focus ${c.focus}/10, Difficulty ${c.difficulty != null ? c.difficulty + '/10' : 'n/a'}`,
     c.session_score != null ? `Session score: ${c.session_score} (${c.score_tier})` : null,
-    drillNamesOf(c) ? `Drills: ${drillNamesOf(c)}` : null,
+    drillNamesOf(c) ? drillNamesOf(c) : null,
     c.session_notes ? `Their words: "${c.session_notes}"` : null,
     c.what_worked ? `What worked: "${c.what_worked}"` : null,
   ];
-  // Same-day pre-hit intent: if he set one before this session, Skip's read
-  // ties the session back to it and asks whether he stuck to his goal.
-  let system = JOURNAL_SYSTEM;
+}
+
+function throwingEntryBits(c) {
+  let pitches = [];
+  try {
+    const p = JSON.parse(c.pitches_thrown || '[]');
+    if (Array.isArray(p)) pitches = p;
+  } catch (e) {}
+  return [
+    `Throwing session: ${views.pitchSessionTypeLabel(c.pitch_session_type)}${c.intent ? ` · ${views.throwIntentLabel(c.intent)}` : ''}`,
+    `Feel ${c.feel}/10, Confidence ${c.confidence}/10, Focus ${c.focus}/10${c.command != null ? `, Command ${c.command}/10` : ''}`,
+    c.session_score != null ? `Session score: ${c.session_score} (${c.score_tier})` : null,
+    c.pitch_count != null
+      ? `Pitch count: ${c.pitch_count}${pitches.length ? ` (${pitches.join(', ')})` : ''}`
+      : pitches.length ? `Pitches thrown: ${pitches.join(', ')}` : null,
+    c.velo_max != null ? `Top velo: ${c.velo_max}` : null,
+    c.catch_distance ? `Catch-play distance: ${c.catch_distance}` : null,
+    c.felt_good ? `What felt good (his words): "${c.felt_good}"` : null,
+    c.what_was_working ? `What was working: "${c.what_was_working}"` : null,
+    c.biggest_struggle ? `Biggest struggle: "${c.biggest_struggle}"` : null,
+    c.recovery_notes ? `Recovery work: "${c.recovery_notes}"` : null,
+    c.no_throw_note ? `No-throw day, got better by: "${c.no_throw_note}"` : null,
+  ];
+}
+
+async function journalRead(c) {
+  const kind = c.session_kind || 'hitting';
+  const entryBits = [`Session date (Chicago): ${chiDay(c.created_at)}`];
+  let system;
+  if (kind === 'pitching') {
+    entryBits.push(...throwingEntryBits(c));
+    system = JOURNAL_SYSTEM_PITCHING;
+  } else if (kind === 'combined') {
+    if (c.hitting_score != null) entryBits.push('[Hitting]', ...hittingEntryBits(c));
+    if (c.pitching_score != null) entryBits.push('[Throwing]', ...throwingEntryBits(c));
+    system = JOURNAL_SYSTEM_COMBINED;
+  } else {
+    entryBits.push(...hittingEntryBits(c));
+    system = JOURNAL_SYSTEM;
+  }
+  // Same-day pre-session intent: if he set one before this session, Skip's
+  // read ties the session back to it and asks whether he stuck to his goal.
   try {
     const pre = c.user_id ? todayPreCheckin(c.user_id) : null;
-    if (pre && (pre.focus || pre.plan || pre.flush)) {
-      const ibits = [pre.kind === 'game' ? 'Pregame / Live ABs' : 'Cage session'];
-      if (pre.focus) ibits.push(`Focus: "${String(pre.focus).slice(0, 200)}"`);
-      if (pre.plan) ibits.push(`Plan: "${String(pre.plan).slice(0, 200)}"`);
-      if (pre.flush) ibits.push(`Flushing: "${String(pre.flush).slice(0, 200)}"`);
-      entryBits.push(`HIS PRE-SESSION INTENT (he set this the same morning, before hitting):\n${ibits.join('\n')}`);
-      system = JOURNAL_SYSTEM_INTENT;
+    if (pre) {
+      const ibits = [];
+      if (kind !== 'pitching' && (pre.focus || pre.plan || pre.flush)) {
+        if (pre.kind === 'game') ibits.push('Pregame / Live ABs');
+        if (pre.focus) ibits.push(`Hitting focus: "${String(pre.focus).slice(0, 200)}"`);
+        if (pre.plan) ibits.push(`Hitting plan: "${String(pre.plan).slice(0, 200)}"`);
+        if (pre.flush) ibits.push(`Flushing: "${String(pre.flush).slice(0, 200)}"`);
+      }
+      if (kind !== 'hitting' && (pre.throw_intent || pre.throw_focus) && (pre.kind === 'throwing' || pre.kind === 'both')) {
+        if (pre.throw_intent) ibits.push(`Throwing intent: ${views.throwIntentLabel(pre.throw_intent)}`);
+        if (pre.throw_focus) ibits.push(`Throwing focus: "${String(pre.throw_focus).slice(0, 200)}"`);
+      }
+      if (ibits.length) {
+        entryBits.push(`HIS PRE-SESSION INTENT (he set this the same morning, before the session):\n${ibits.join('\n')}`);
+        system = kind === 'pitching' ? JOURNAL_SYSTEM_INTENT_PITCHING
+          : kind === 'combined' ? JOURNAL_SYSTEM_INTENT_COMBINED
+          : JOURNAL_SYSTEM_INTENT;
+      }
     }
   } catch (e) {}
   const entry = entryBits.filter(Boolean).join('\n');

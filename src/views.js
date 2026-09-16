@@ -95,7 +95,7 @@ ${user && user.role === 'coach' && user.canEdit === false ? '<div class="viewonl
 ${(() => {
   const chatTab = (tabs || []).find((t) => t.href === '/chat');
   if (!chatTab || chatTab.active) return '';
-  return `<a href="/chat" class="skip-fab" aria-label="Talk to Coach Skip"><img src="/skip-avatar.webp" alt="Skip"><span class="skip-fab-bubble" aria-hidden="true">\uD83D\uDCAC</span></a>`;
+  return `<a href="/chat" class="skip-fab" aria-label="Talk to Coach Skip"><img src="${skipAvatar(user)}" alt="Skip"><span class="skip-fab-bubble" aria-hidden="true">\uD83D\uDCAC</span></a>`;
 })()}
 <script src="/app.js"></script>
 </body>
@@ -194,6 +194,14 @@ function registerPage(error) {
         <label>Date of birth
           <input type="date" name="date_of_birth" required>
         </label>
+        <fieldset class="role-picker">
+          <legend>I am a…</legend>
+          <div class="role-options">
+          <label class="role-option"><input type="radio" name="player_type" value="hitter" checked> <span><strong>Hitter</strong></span></label>
+          <label class="role-option"><input type="radio" name="player_type" value="pitcher"> <span><strong>Pitcher</strong></span></label>
+          <label class="role-option"><input type="radio" name="player_type" value="two_way"> <span><strong>Two-way</strong> <span class="hint-inline">(both)</span></span></label>
+          </div>
+        </fieldset>
         <label>Email
           <input type="email" name="email" autocomplete="email" required>
         </label>
@@ -378,6 +386,30 @@ function whatWorksSection(data, opts) {
 
 const ENVIRONMENTS = ['Game', 'Cage', 'Live BP', 'Tee Work', 'Other'];
 
+// Pitching check-ins (Sep 2026).
+const PITCH_SESSION_TYPES = [
+  ['bullpen', 'Bullpen'],
+  ['live', 'Live'],
+  ['game', 'Game'],
+  ['catch_play', 'Catch play'],
+  ['recovery', 'Recovery'],
+  ['no_throw', 'No throw'],
+];
+const THROW_INTENTS = [
+  ['light', 'Light day'],
+  ['medium', 'Medium day'],
+  ['heavy', 'Heavy day'],
+];
+const PITCH_TYPES = ['4-seam FB', '2-seam FB', 'Cutter', 'Slider', 'Curveball', 'Changeup', 'Splitter', 'Sweeper'];
+function pitchSessionTypeLabel(t) {
+  const f = PITCH_SESSION_TYPES.find((x) => x[0] === t);
+  return f ? f[1] : t;
+}
+function throwIntentLabel(t) {
+  const f = THROW_INTENTS.find((x) => x[0] === t);
+  return f ? f[1] : t;
+}
+
 function sliderField(name, label, question, value, ends, ids) {
   const v = Math.min(10, Math.max(1, Number(value) || 7));
   const lo = (ends && ends[0]) || '1';
@@ -441,31 +473,175 @@ function checkinForm(user, error, values, drillNames, routine) {
   });
 }
 
+// Combined two-way check-in (Sep 2026): one form for both. "What did you do
+// today?" toggles the condensed hitting and throwing blocks; feel, focus,
+// confidence and the three reflections are shared so he only answers once.
+function combinedCheckinForm(user, error, values) {
+  const v = values || {};
+  const didHit = v.did_hit === 'yes' || (!v.pitch_session_type && v.did_throw !== 'yes');
+  const didThrow = v.did_throw === 'yes' || !!v.pitch_session_type;
+  const envPills = ENVIRONMENTS
+    .map((e) => `<label class="pill"><input type="radio" name="environment" value="${e}"${v.environment === e ? ' checked' : ''}><span>${e}</span></label>`)
+    .join('');
+  const mic = (id) => `<button type="button" class="mic-btn" data-target="${id}" aria-label="Dictate instead of typing">🎙</button>`;
+  return layout({
+    title: 'Check In',
+    user,
+    tabs: userTabs('checkin', user),
+    body: `<h1 class="page-title">Check in with Skip</h1>
+    <div class="card"><p class="hint skip-intro">One check-in for the whole day. Tell Skip what you did — hitting, throwing, or both.</p>
+    <form method="post" action="/checkin/combined" class="form" id="combined-form" data-throw-sync>
+      ${error ? `<div class="error">${esc(error)}</div>` : ''}
+      <div class="field-label">What did you do today?</div>
+      <div class="pills">
+        <label class="pill"><input type="checkbox" name="did_hit" value="yes"${didHit ? ' checked' : ''}><span>Hitting</span></label>
+        <label class="pill"><input type="checkbox" name="did_throw" value="yes"${didThrow ? ' checked' : ''}><span>Throwing</span></label>
+      </div>
+      ${sliderField('feel', 'Feel', 'How good did you feel overall?', v.feel)}
+      ${sliderField('focus', 'Focus', 'How locked in was your focus?', v.focus)}
+      ${sliderField('confidence', 'Confidence', 'How confident did you feel?', v.confidence)}
+      <div id="combined-hitting-block"${didHit ? '' : ' hidden'}>
+        <div class="field-label">Hitting — where were you?</div>
+        <div class="pills">${envPills}</div>
+        ${sliderField('difficulty', 'Difficulty', 'How hard was the hitting?', v.difficulty, ['Easy', 'Brutal'], true)}
+      </div>
+      <div id="combined-throwing-block"${didThrow ? '' : ' hidden'}>
+        <div class="field-label">Throwing</div>
+        ${throwingFields(v, 'combined-form', `
+        <div id="combined-form-command-block"${['recovery', 'no_throw'].includes(v.pitch_session_type) ? ' hidden' : ''}>
+          ${sliderField('command', 'Command', 'How well did you command the ball?', v.command)}
+        </div>`)}
+      </div>
+      <label>What felt good?<span class="talk-wrap"><textarea id="felt_good" name="felt_good" rows="2" placeholder="What clicked today, hitting or throwing?">${esc(v.felt_good || '')}</textarea>${mic('felt_good')}</span></label>
+      <label>What was working?<span class="talk-wrap"><textarea id="what_was_working" name="what_was_working" rows="2" placeholder="Which feel, which pitch, which cue?">${esc(v.what_was_working || '')}</textarea>${mic('what_was_working')}</span></label>
+      <label>What was your biggest struggle?<span class="talk-wrap"><textarea id="biggest_struggle" name="biggest_struggle" rows="2" placeholder="Be honest — that's how Skip helps.">${esc(v.biggest_struggle || '')}</textarea>${mic('biggest_struggle')}</span></label>
+      <script src="/checkin.js"></script>
+      <button type="submit" class="btn-primary">Submit check-in</button>
+    </form></div>`,
+  });
+}
+
+// Shared throwing block for the pitcher-only and combined two-way forms:
+// session type + intent + conditional detail fields. The command slider is
+// passed in so it lands after feel/focus/confidence in each form.
+function throwingFields(v, formId, commandHtml) {
+  const typePills = PITCH_SESSION_TYPES
+    .map(([val, label]) => `<label class="pill"><input type="radio" name="pitch_session_type" value="${val}"${v.pitch_session_type === val ? ' checked' : ''} required><span>${label}</span></label>`)
+    .join('');
+  const intentPills = THROW_INTENTS
+    .map(([val, label]) => `<label class="pill"><input type="radio" name="intent" value="${val}"${v.intent === val ? ' checked' : ''}><span>${label}</span></label>`)
+    .join('');
+  const pitchChecks = PITCH_TYPES
+    .map((p) => `<label class="check"><input type="checkbox" name="pitches_thrown" value="${esc(p)}"${(v.pitches_thrown || []).includes(p) ? ' checked' : ''}><span>${esc(p)}</span></label>`)
+    .join('');
+  const mic = (id) => `<button type="button" class="mic-btn" data-target="${id}" aria-label="Dictate instead of typing">🎙</button>`;
+  return `
+      <div class="field-label">What kind of throwing was it?</div>
+      <div class="pills">${typePills}</div>
+      <div id="${formId}-intent-block"${['recovery', 'no_throw'].includes(v.pitch_session_type) ? ' hidden' : ''}>
+        <div class="field-label">What was the intent today?</div>
+        <div class="pills">${intentPills}</div>
+      </div>
+      <div id="${formId}-detail-throw"${['bullpen', 'live', 'game'].includes(v.pitch_session_type) ? '' : ' hidden'}>
+        <label>Pitch count
+          <input type="number" name="pitch_count" min="1" max="300" inputmode="numeric" placeholder="e.g. 35" value="${esc(v.pitch_count || '')}" required>
+        </label>
+        <div class="field-label">Which pitches did you throw?</div>
+        <div class="checks">${pitchChecks}</div>
+        <label>Top velo <span class="hint-inline">(optional)</span>
+          <input type="number" name="velo_max" min="40" max="110" step="0.1" inputmode="decimal" placeholder="e.g. 88.5" value="${esc(v.velo_max || '')}">
+        </label>
+      </div>
+      <div id="${formId}-detail-catch"${v.pitch_session_type === 'catch_play' ? '' : ' hidden'}>
+        <label>How far did you stretch it out? <span class="hint-inline">(optional)</span>
+          <input type="text" name="catch_distance" maxlength="30" placeholder="e.g. 120 ft" value="${esc(v.catch_distance || '')}">
+        </label>
+      </div>
+      <div id="${formId}-detail-recovery"${v.pitch_session_type === 'recovery' ? '' : ' hidden'}>
+        <label>What recovery work did you do?<span class="talk-wrap"><textarea id="${formId}_recovery_notes" name="recovery_notes" rows="3" placeholder="e.g. Bands, shoulder care, 10 min flush run">${esc(v.recovery_notes || '')}</textarea>${mic(formId + '_recovery_notes')}</span></label>
+      </div>
+      <div id="${formId}-detail-nothrow"${v.pitch_session_type === 'no_throw' ? '' : ' hidden'}>
+        <p class="hint">No throwing today — that's fine. Days off the mound still count.</p>
+        <label>What did you do to get better today?<span class="talk-wrap"><textarea id="${formId}_no_throw_note" name="no_throw_note" rows="3" placeholder="e.g. Lifted legs, watched film on my last outing, mobility">${esc(v.no_throw_note || '')}</textarea>${mic(formId + '_no_throw_note')}</span></label>
+      </div>
+      ${commandHtml || ''}`;
+}
+
+// Pitching check-in (Sep 2026): session type first, then intent, then the
+// throwing details for that type, then feel/focus/confidence/command plus
+// three reflections. Blocks show/hide based on session type.
+function pitchingCheckinForm(user, error, values) {
+  const v = values || {};
+  const mic = (id) => `<button type="button" class="mic-btn" data-target="${id}" aria-label="Dictate instead of typing">🎙</button>`;
+  return layout({
+    title: 'Check In',
+    user,
+    tabs: userTabs('checkin', user),
+    body: `<h1 class="page-title">Check in with Skip</h1>
+    <div class="card"><p class="hint skip-intro">Tell Skip about your throwing today. The more he knows, the better his reads get.</p>
+    <form method="post" action="/checkin/pitching" class="form" id="pitching-form" data-throw-sync>
+      ${error ? `<div class="error">${esc(error)}</div>` : ''}
+      ${throwingFields(v, 'pitching-form', '')}
+      ${sliderField('feel', 'Feel', 'How good did your arm/body feel?', v.feel)}
+      ${sliderField('focus', 'Focus', 'How locked in was your focus?', v.focus)}
+      ${sliderField('confidence', 'Confidence', 'How confident did you feel?', v.confidence)}
+      <div id="pitching-form-command-block"${['recovery', 'no_throw'].includes(v.pitch_session_type) ? ' hidden' : ''}>
+        ${sliderField('command', 'Command', 'How well did you command the ball?', v.command)}
+      </div>
+      <label>What felt good?<span class="talk-wrap"><textarea id="felt_good" name="felt_good" rows="2" placeholder="What clicked physically?">${esc(v.felt_good || '')}</textarea>${mic('felt_good')}</span></label>
+      <label>What was working?<span class="talk-wrap"><textarea id="what_was_working" name="what_was_working" rows="2" placeholder="Which pitch, which feel, which sequence?">${esc(v.what_was_working || '')}</textarea>${mic('what_was_working')}</span></label>
+      <label>What was your biggest struggle?<span class="talk-wrap"><textarea id="biggest_struggle" name="biggest_struggle" rows="2" placeholder="Be honest — that's how Skip helps.">${esc(v.biggest_struggle || '')}</textarea>${mic('biggest_struggle')}</span></label>
+      <script src="/checkin.js"></script>
+      <button type="submit" class="btn-primary">Submit check-in</button>
+    </form></div>`,
+  });
+}
+
 // Optional pre-hit check-in: set the intent BEFORE the session. Cage mode asks
 // what he's working on and how; game mode asks approach, one goal, and what
 // he's flushing. Never required — Skip reads today's intent when he checks in
 // after and connects the session back to it.
 function preCheckinPage(user, kind, error, v) {
-  const k = kind === 'game' ? 'game' : 'cage';
+  const k = kind === 'game' ? 'game' : kind === 'throwing' ? 'throwing' : kind === 'both' ? 'both' : 'cage';
   const isGame = k === 'game';
+  const isThrowing = k === 'throwing';
+  const isBoth = k === 'both';
   const mic = (id) => `<button type="button" class="mic-btn" data-target="${id}" aria-label="Dictate instead of typing">🎙</button>`;
+  const intentPills = THROW_INTENTS
+    .map(([val, label]) => `<label class="pill"><input type="radio" name="throw_intent" value="${val}"${v.throw_intent === val ? ' checked' : ''}><span>${label}</span></label>`)
+    .join('');
+  const throwingFields = `
+      <div class="field-label">Throwing intent</div>
+      <div class="pills">${intentPills}</div>
+      <label>Throwing focus <span class="hint-inline">(one thing — command, a pitch, a feel)</span><span class="talk-wrap"><textarea id="pre_throw_focus" name="throw_focus" rows="2" placeholder="e.g. Landing the changeup arm-side, staying tall on the back leg">${esc(v.throw_focus || '')}</textarea>${mic('pre_throw_focus')}</span></label>`;
   const fields = isGame ? `
       <label>What's your approach today? <span class="hint-inline">(what are you hunting? what's the plan vs this guy?)</span><span class="talk-wrap"><textarea id="pre_focus" name="focus" rows="2" placeholder="e.g. Hunting the fastball early, spitting on the slider away">${esc(v.focus || '')}</textarea>${mic('pre_focus')}</span></label>
       <label>What's your ONE job today? <span class="hint-inline">(one goal — nothing else)</span><span class="talk-wrap"><textarea id="pre_plan" name="plan" rows="2" placeholder="e.g. See it up, be on time">${esc(v.plan || '')}</textarea>${mic('pre_plan')}</span></label>
       <label>What are you flushing before first pitch? <span class="hint-inline">(leave it in the parking lot)</span><span class="talk-wrap"><textarea id="pre_flush" name="flush" rows="2" placeholder="e.g. Yesterday's 0-for, the last cage session">${esc(v.flush || '')}</textarea>${mic('pre_flush')}</span></label>`
+    : isThrowing ? throwingFields
+    : isBoth ? `
+      <div class="field-label">Hitting</div>
+      <label>What are you working on at the plate?<span class="talk-wrap"><textarea id="pre_focus" name="focus" rows="2" placeholder="e.g. Staying inside the ball to right-center">${esc(v.focus || '')}</textarea>${mic('pre_focus')}</span></label>
+      <label>How are you going to do it? <span class="hint-inline">(your plan)</span><span class="talk-wrap"><textarea id="pre_plan" name="plan" rows="2" placeholder="e.g. Fence drill off the tee, then front toss hunting inner half">${esc(v.plan || '')}</textarea>${mic('pre_plan')}</span></label>
+      <div class="field-label">Throwing</div>
+      ${throwingFields}`
     : `
-      <label>What are you working on today? <span class="talk-wrap"><textarea id="pre_focus" name="focus" rows="2" placeholder="e.g. Staying inside the ball to right-center">${esc(v.focus || '')}</textarea>${mic('pre_focus')}</span></label>
+      <label>What are you working on today?<span class="talk-wrap"><textarea id="pre_focus" name="focus" rows="2" placeholder="e.g. Staying inside the ball to right-center">${esc(v.focus || '')}</textarea>${mic('pre_focus')}</span></label>
       <label>How are you going to do it? <span class="hint-inline">(drills, pitch types, constraints — your plan)</span><span class="talk-wrap"><textarea id="pre_plan" name="plan" rows="3" placeholder="e.g. Fence drill off the tee, then front toss hunting inner half">${esc(v.plan || '')}</textarea>${mic('pre_plan')}</span></label>`;
+  const title = isThrowing ? 'Pre-throw check-in' : isBoth ? 'Pre-session check-in' : 'Pre-hit check-in';
+  const intro = isThrowing ? 'Two minutes before you throw. Set the intent — then go do it.'
+    : isBoth ? 'Two minutes before the day. One intent for the plate, one for the mound.'
+    : 'Two minutes before you hit. Set the intent — then go do it.';
   return layout({
-    title: 'Pre-Hit Check-In',
+    title,
     user,
     tabs: userTabs('home', user),
-    body: `<h1 class="page-title">Pre-hit check-in</h1>
-    <div class="card"><p class="hint skip-intro">Two minutes before you hit. Set the intent — then go do it. <span class="hint-inline">Totally optional.</span></p>
-    <div class="pill-row">
+    body: `<h1 class="page-title">${title}</h1>
+    <div class="card"><p class="hint skip-intro">${intro} <span class="hint-inline">Totally optional.</span></p>
+    ${isGame || k === 'cage' ? `<div class="pill-row">
       <a class="pill-link${isGame ? '' : ' active'}" href="/precheckin?kind=cage">Cage</a>
       <a class="pill-link${isGame ? ' active' : ''}" href="/precheckin?kind=game">Pregame / Live ABs</a>
-    </div>
+    </div>` : ''}
     <form method="post" action="/precheckin" class="form">
       <input type="hidden" name="kind" value="${k}">
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
@@ -520,7 +696,14 @@ function routinePage(user, drills, error, drillNames, stations) {
 
 const LEARN_CATEGORIES = ['Mechanics', 'Mental', 'Approach', 'Drills', 'Other'];
 
-function notebookPage(user, checkins, notes, players, justSubmitted) {
+function notebookPage(user, checkins, notes, players, justSubmitted, filter) {
+  const kindLabels = { hitting: 'Hitting', pitching: 'Throwing', combined: 'Both' };
+  const f = filter || {};
+  const activeKind = f.kind || 'all';
+  const kindPills = (f.kinds && f.kinds.length > 1)
+    ? `<div class="pill-row">${['all', ...f.kinds].map((k) => `<a class="pill-link${activeKind === k ? ' active' : ''}" href="/notebook${k === 'all' ? '' : `?kind=${k}`}">${k === 'all' ? 'All sessions' : kindLabels[k] || k}</a>`).join('')}</div>`
+    : '';
+  const kindName = activeKind !== 'all' ? (kindLabels[activeKind] || '') : '';
   const catChips = LEARN_CATEGORIES.map(
     (c, i) =>
       `<label class="chip-radio"><input type="radio" name="category" value="${c}"${i === 0 ? ' checked' : ''}><span>${c}</span></label>`
@@ -558,7 +741,7 @@ function notebookPage(user, checkins, notes, players, justSubmitted) {
     : null;
   const checkinsHtml = `
     ${avg !== null ? `<div class="level-head"><p class="hint">Skip's read on you over ${scored.length} session${scored.length === 1 ? '' : 's'}:</p>${levelLine(avg)}</div>` : ''}
-    ${checkins.length ? checkins.map(checkinCard).join('') : `<div class="card empty">No check-ins yet. <a href="/checkin">Log your first session</a>.</div>`}`;
+    ${checkins.length ? checkins.map(checkinCard).join('') : `<div class="card empty">${kindName ? `No ${kindName.toLowerCase()} sessions logged yet.` : `No check-ins yet. <a href="/checkin">Log your first session</a>.`}</div>`}`;
   return layout({
     title: 'Notebook',
     user,
@@ -567,6 +750,7 @@ function notebookPage(user, checkins, notes, players, justSubmitted) {
     <div class="subnav"><a href="#checkins">Check-ins</a><a href="#notes">Notes</a></div>
     ${justSubmitted ? `<div class="success">Check-in saved. Good work.</div>` : ''}
     <h2 class="section-head" id="checkins">Check-ins</h2>
+    ${kindPills}
     ${checkinsHtml}
     <h2 class="section-head" id="notes">Notes</h2>
     <div class="card"><p class="hint skip-intro">Your hitting notebook — jot down anything about your swing and your game, no check-in needed. Skip reads this too.</p>
@@ -641,6 +825,20 @@ function levelLine(score, tier) {
 }
 
 function scorePage(user, c) {
+  const isPitching = c.session_kind === 'pitching';
+  const isCombined = c.session_kind === 'combined';
+  const throwBits = [];
+  if (isPitching || isCombined) {
+    if (c.pitch_session_type) throwBits.push(['Session', pitchSessionTypeLabel(c.pitch_session_type)]);
+    if (c.intent) throwBits.push(['Intent', throwIntentLabel(c.intent)]);
+    if (c.command != null) throwBits.push(['Command', c.command]);
+    if (c.pitch_count != null) throwBits.push(['Pitch count', c.pitch_count]);
+    if (c.velo_max != null) throwBits.push(['Top velo', c.velo_max]);
+    if (c.catch_distance) throwBits.push(['Distance', c.catch_distance]);
+    let pitchNames = [];
+    try { const pp = JSON.parse(c.pitches_thrown || '[]'); if (Array.isArray(pp)) pitchNames = pp; } catch (e) {}
+    if (pitchNames.length) throwBits.push(['Pitches', pitchNames.join(', ')]);
+  }
   return layout({
     title: "Skip's Session Level",
     user,
@@ -655,7 +853,9 @@ function scorePage(user, c) {
         <div><span class="label">Confidence</span><strong>${esc(c.confidence)}</strong></div>
         <div><span class="label">Focus</span><strong>${esc(c.focus)}</strong></div>
         ${c.difficulty != null ? `<div><span class="label">Difficulty</span><strong>${esc(c.difficulty)}</strong></div>` : ''}
+        ${throwBits.map(([l, val]) => `<div><span class="label">${esc(l)}</span><strong>${esc(val)}</strong></div>`).join('')}
       </div>
+      ${isCombined && c.hitting_score != null && c.pitching_score != null ? `<p class="hint">Hitting ${esc(c.hitting_score)} · Throwing ${esc(c.pitching_score)}</p>` : ''}
       ${skipReadBlock(c)}
       <div class="score-actions">
         <a href="/notebook" class="btn-primary">See your notebook</a>
@@ -667,21 +867,50 @@ function scorePage(user, c) {
 }
 
 function drillsOf(c) {
-  // Normalizes drills_done to [{name, station|null}]; handles legacy
-  // rows stored as plain name strings.
+  // Normalizes drills_done to [{name, station|null, known}]; handles legacy
+  // rows stored as plain name strings. Summaries ("did some tee stuff")
+  // are flagged known:false so they're never shown as drill chips.
   try {
     const arr = JSON.parse(c.drills_done || '[]');
     if (!Array.isArray(arr)) return [];
     return arr
-      .map((d) =>
-        d && typeof d === 'object'
-          ? { name: String(d.name || ''), station: d.station || null }
-          : { name: String(d || ''), station: null }
-      )
+      .map((d) => {
+        const name = d && typeof d === 'object' ? String(d.name || '') : String(d || '');
+        const station = d && typeof d === 'object' ? d.station || null : null;
+        const known = d && typeof d === 'object' && d.known === false ? false
+          : d && typeof d === 'object' && d.known === true ? true
+          : viewKnownDrill(name);
+        return { name, station, known };
+      })
       .filter((d) => d.name);
   } catch (e) {
     return [];
   }
+}
+
+// Same known-drill judgment as the server (kept local — views can't import
+// server). Summaries are never rendered as drill chips.
+let _viewKnownDrills = null;
+function viewKnownDrill(name) {
+  if (!_viewKnownDrills) {
+    try {
+      const data = require('./data');
+      const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+      _viewKnownDrills = new Set(data.drillNames().map(norm).filter(Boolean));
+    } catch (e) {
+      _viewKnownDrills = new Set();
+    }
+  }
+  const n = String(name || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!n) return false;
+  if (!_viewKnownDrills.size) return true;
+  if (_viewKnownDrills.has(n)) return true;
+  if (n.length >= 4) {
+    for (const k of _viewKnownDrills) {
+      if (k.length >= 4 && (n.startsWith(k) || k.startsWith(n))) return true;
+    }
+  }
+  return false;
 }
 
 function drillChip(d) {
@@ -702,22 +931,48 @@ function skipReadBlock(c) {
 
 function checkinCard(c) {
   const drills = drillsOf(c);
+  const realDrills = drills.filter((d) => d.known);
+  const otherWork = drills.filter((d) => !d.known);
+  const kind = c.session_kind || 'hitting';
+  const kindBadge = kind === 'pitching'
+    ? `<span class="badge env">Throwing</span>`
+    : kind === 'combined'
+      ? `<span class="badge env">Hitting + Throwing</span>`
+      : '';
   const head = `<div class="checkin-head">
       <span class="checkin-date">${fmtDate(c.created_at)}</span>
       ${c.environment ? `<span class="badge env">${esc(c.environment)}</span>` : ''}
+      ${kindBadge}
     </div>
     ${c.athlete_name && c.showAthlete ? `<div class="checkin-athlete">${esc(c.athlete_name)}</div>` : ''}`;
+  const throwBits = [];
+  if (kind !== 'hitting') {
+    if (c.pitch_session_type) throwBits.push(pitchSessionTypeLabel(c.pitch_session_type));
+    if (c.intent) throwBits.push(throwIntentLabel(c.intent));
+    if (c.pitch_count != null) throwBits.push(`${c.pitch_count} pitches`);
+    if (c.velo_max != null) throwBits.push(`top ${c.velo_max}`);
+    if (c.catch_distance) throwBits.push(esc(c.catch_distance));
+  }
+  let pitchesThrown = [];
+  try { pitchesThrown = JSON.parse(c.pitches_thrown || '[]'); } catch (e) {}
   const score = `${c.session_score != null ? `<div class="checkin-score">
       ${levelLine(c.session_score, c.score_tier)}
-      <span class="hint-inline">Feel ${esc(c.feel)} · Conf ${esc(c.confidence)} · Focus ${esc(c.focus)}${c.difficulty != null ? ` · Difficulty ${esc(c.difficulty)}` : ''}</span>
+      <span class="hint-inline">Feel ${esc(c.feel)} · Conf ${esc(c.confidence)} · Focus ${esc(c.focus)}${c.difficulty != null ? ` · Difficulty ${esc(c.difficulty)}` : ''}${c.command != null ? ` · Command ${esc(c.command)}` : ''}</span>
+      ${throwBits.length ? `<div class="hint-inline">${throwBits.join(' · ')}</div>` : ''}
+      ${pitchesThrown.length ? `<div class="drill-chips">${pitchesThrown.map((p) => `<span class="chip">${esc(p)}</span>`).join('')}</div>` : ''}
     </div>` : ''}`;
-  const drillRow = `${drills.length ? `<div class="drill-chips">${drills.map(drillChip).join('')}</div>` : ''}`;
+  const drillRow = `${realDrills.length ? `<div class="drill-chips">${realDrills.map(drillChip).join('')}</div>` : ''}${otherWork.length ? `<p class="hint" style="margin:6px 0 0">Also mentioned: ${esc(otherWork.map((d) => d.name).join(', '))}</p>` : ''}`;
   const read = `${skipReadBlock(c)}`;
   const notes = `${c.session_notes ? `<p>${esc(c.session_notes)}</p>` : ''}`;
-  const worked = `<div class="checkin-grid">
-      ${c.what_worked ? `<div><span class="label">What worked</span>${esc(c.what_worked)}</div>` : ''}
-    </div>`;
-  const words = `${notes}${worked}`;
+  const reflections = [
+    c.felt_good ? `<div><span class="label">What felt good</span>${esc(c.felt_good)}</div>` : '',
+    c.what_was_working ? `<div><span class="label">What was working</span>${esc(c.what_was_working)}</div>` : '',
+    c.biggest_struggle ? `<div><span class="label">Biggest struggle</span>${esc(c.biggest_struggle)}</div>` : '',
+    c.recovery_notes ? `<div><span class="label">Recovery work</span>${esc(c.recovery_notes)}</div>` : '',
+    c.no_throw_note ? `<div><span class="label">Got better by</span>${esc(c.no_throw_note)}</div>` : '',
+    c.what_worked ? `<div><span class="label">What worked</span>${esc(c.what_worked)}</div>` : '',
+  ].filter(Boolean).join('');
+  const words = `${notes}${reflections ? `<div class="checkin-grid">${reflections}</div>` : ''}`;
   return `<div class="card checkin">
     ${head}
     ${score}
@@ -728,7 +983,9 @@ function checkinCard(c) {
 }
 
 function chatPage(user, messages, chatEnabled) {
-  const skipImg = `<img src="/skip-avatar.webp" class="skip-avatar" alt="Skip">`;
+  const img = skipAvatar(user);
+  const isPitcher = (user && (user.playerType || user.player_type)) === 'pitcher';
+  const skipImg = `<img src="${img}" class="skip-avatar" alt="Skip">`;
   const msgs = (messages || [])
     .map(
       (m) => `<div class="msg ${m.role === 'user' ? 'msg-user' : 'msg-skip'}">${m.role === 'user' ? '' : skipImg}<div class="msg-bubble">${esc(m.content)}</div></div>`
@@ -738,11 +995,11 @@ function chatPage(user, messages, chatEnabled) {
     title: 'Coach Skip',
     user,
     tabs: userTabs('chat', user),
-    body: `<h1 class="page-title chat-title"><img src="/skip-avatar.webp" class="skip-avatar" alt="Skip">Coach Skip</h1>
-    <p class="hint">Struggling? Tell Skip what's going on at the plate — he's seen your check-ins and will point you back on track.</p>
+    body: `<h1 class="page-title chat-title">${skipImg}Coach Skip</h1>
+    <p class="hint">${isPitcher ? "Struggling? Tell Skip what\u2019s going on with your throwing \u2014 he\u2019s seen your sessions and will point you back on track." : "Struggling? Tell Skip what\u2019s going on at the plate \u2014 he\u2019s seen your check-ins and will point you back on track."}</p>
     ${chatEnabled
       ? `<div id="text-panel">
-        <div id="chat-log" class="chat-log">${msgs || `<div class="msg msg-skip">${skipImg}<div class="msg-bubble">What's going on at the plate? Tell me what feels off.</div></div>`}</div>
+        <div id="chat-log" class="chat-log" data-skip-avatar="${img}">${msgs || `<div class="msg msg-skip">${skipImg}<div class="msg-bubble">${isPitcher ? "What\u2019s going on with your throwing? Tell me what feels off." : "What\u2019s going on at the plate? Tell me what feels off."}</div></div>`}</div>
         <form id="chat-form" class="chat-form" autocomplete="off">
           <input id="chat-input" type="text" placeholder="Ask Skip…" maxlength="2000" required>
           <button type="submit" class="btn-primary">Send</button>
@@ -957,7 +1214,7 @@ function coachHomePage(user, quiet, latest, pending, pushOn) {
   const quietCards = (quiet || [])
     .map(
       (a) => `<a href="/coach/user/${encodeURIComponent(a.email)}" class="card athlete-card" style="display:block;color:inherit;text-decoration:none">
-        <div class="athlete-card-name">${esc(a.name)}</div>
+        <div class="athlete-card-name">${esc(a.name)} ${rolePill(a.playerType)}</div>
         <div class="athlete-card-meta">last check-in ${a.daysAgo} day${a.daysAgo === 1 ? '' : 's'} ago</div>
       </a>`
     )
@@ -981,12 +1238,25 @@ function coachHomePage(user, quiet, latest, pending, pushOn) {
 }
 
 // Coach Hitters tab: the search bar + athlete cards.
+function roleLabel(t) {
+  return t === 'pitcher' ? 'Pitcher' : t === 'two_way' ? 'Two-way' : 'Hitter';
+}
+function rolePill(t) {
+  const cls = t === 'pitcher' ? 'pitcher' : t === 'two_way' ? 'twoway' : 'hitter';
+  return `<span class="badge role-${cls}">${roleLabel(t)}</span>`;
+}
+// Skip's face follows the athlete: pitchers get the glove variant, everyone
+// else gets the classic bat-on-the-shoulder.
+function skipAvatar(user) {
+  const pt = user && (user.playerType || user.player_type);
+  return pt === 'pitcher' ? '/skip-avatar-pitching.webp' : '/skip-avatar.webp';
+}
 function coachHittersPage(user, userStats) {
   const cards = userStats
     .map(
-      (a) => `<div class="card athlete-card" data-search="${esc(`${a.name} ${a.email}`.toLowerCase())}">
+      (a) => `<div class="card athlete-card" data-search="${esc(`${a.name} ${a.email}`.toLowerCase())}" data-role="${esc(a.playerType || 'hitter')}">
         <a href="/coach/user/${encodeURIComponent(a.email)}" style="display:block;color:inherit;text-decoration:none">
-          <div class="athlete-card-name">${esc(a.name)}</div>
+          <div class="athlete-card-name">${esc(a.name)} ${rolePill(a.playerType)}</div>
           <div class="athlete-card-email">${esc(a.email)}</div>
           <div class="athlete-card-meta">${a.total} check-in${a.total === 1 ? '' : 's'}${a.last ? ` · last ${fmtDate(a.last)}` : ' · none yet'}${a.age != null ? ` · age ${a.age}` : ''}${a.team ? ` · ${esc(a.team)}` : ''}</div>
         </a>
@@ -1003,6 +1273,12 @@ function coachHittersPage(user, userStats) {
     tabs: coachTabs('hitters', user.approvalCount, user),
     body: `<h1 class="page-title">Hitters</h1>
     ${userStats.length ? `<input type="search" id="hitter-search" class="searchbar" placeholder="Search hitters…" autocomplete="off">` : ''}
+    ${userStats.length ? `<div class="pill-row" id="role-filter">
+      <button type="button" class="pill-link active" data-rolefilter="all">All</button>
+      <button type="button" class="pill-link" data-rolefilter="hitter">Hitters</button>
+      <button type="button" class="pill-link" data-rolefilter="pitcher">Pitchers</button>
+      <button type="button" class="pill-link" data-rolefilter="two_way">Two-way</button>
+    </div>` : ''}
     <div class="athlete-grid">${cards || '<div class="card empty">Nobody has signed up yet.</div>'}</div>
     <div class="card empty" id="hitter-no-match" hidden>No hitters match that search.</div>`,
   });
@@ -1539,8 +1815,26 @@ function coachLibraryPage(user, cats, activeCat, videos, playing) {
   });
 }
 
-function coachUser(user, name, checkins, whatWorks, thread, email, memories, routine) {
-  const skipImg = `<img src="/skip-avatar.webp" class="skip-avatar" alt="Skip">`;
+// Throwing summary for pitchers and two-way players: last 30 throwing
+// sessions at a glance — session mix, command, workload, velo.
+function throwingSummarySection(sum) {
+  if (!sum) return '';
+  const mix = Object.entries(sum.byType)
+    .map(([t, n]) => `${pitchSessionTypeLabel(t)} ×${n}`)
+    .join(' · ');
+  return `<h2 class="section-head">Throwing summary</h2>
+  <div class="card"><div class="checkin-grid">
+    <div><span class="label">Sessions</span>${sum.sessions}</div>
+    ${mix ? `<div><span class="label">Mix</span>${esc(mix)}</div>` : ''}
+    ${sum.avgCommand != null ? `<div><span class="label">Avg command</span>${esc(sum.avgCommand)}</div>` : ''}
+    ${sum.totalPitches ? `<div><span class="label">Total pitches</span>${esc(sum.totalPitches)}</div>` : ''}
+    ${sum.avgVelo != null ? `<div><span class="label">Avg top velo</span>${esc(sum.avgVelo)}</div>` : ''}
+  </div><p class="hint">Last ${sum.sessions} throwing session${sum.sessions === 1 ? '' : 's'}.</p></div>`;
+}
+
+function coachUser(user, name, checkins, whatWorks, thread, email, memories, routine, playerType, throwSum) {
+  const pt = playerType || 'hitter';
+  const skipImg = `<img src="${skipAvatar({ playerType: pt })}" class="skip-avatar" alt="Skip">`;
   const canEdit = user.role === 'coach' && user.canEdit !== false;
   const convo =
     thread && thread.length
@@ -1558,9 +1852,10 @@ function coachUser(user, name, checkins, whatWorks, thread, email, memories, rou
     title: name,
     user,
     tabs: coachTabs('hitters', user.approvalCount, user),
-    body: `<h1 class="page-title">${esc(name)}</h1>
+    body: `<h1 class="page-title">${esc(name)} ${rolePill(pt)}</h1>
     <p><a href="/coach/hitters">← Back to hitters</a></p>
-    ${routineReadonly(routine)}
+    ${pt === 'pitcher' ? '' : routineReadonly(routine)}
+    ${pt !== 'hitter' ? throwingSummarySection(throwSum) : ''}
     ${memorySection(email, memories, canEdit)}
     ${whatWorksSection(whatWorks || {}, { readOnly: true })}
     ${convo}
@@ -1873,6 +2168,20 @@ function settingsPage(user, opts) {
       </form>
     </div>
     ${isCoach ? '' : `<div class="card">
+      <h2 class="section-head">Player role</h2>
+      <p class="hint">This decides which check-in you get: hitting, pitching, or a combined one for both.</p>
+      <form method="post" action="/settings/role" class="form">
+        <fieldset class="role-picker">
+          <div class="role-options">
+          <label class="role-option"><input type="radio" name="player_type" value="hitter"${user.playerType !== 'pitcher' && user.playerType !== 'two_way' ? ' checked' : ''}> <span><strong>Hitter</strong></span></label>
+          <label class="role-option"><input type="radio" name="player_type" value="pitcher"${user.playerType === 'pitcher' ? ' checked' : ''}> <span><strong>Pitcher</strong></span></label>
+          <label class="role-option"><input type="radio" name="player_type" value="two_way"${user.playerType === 'two_way' ? ' checked' : ''}> <span><strong>Two-way</strong></span></label>
+          </div>
+        </fieldset>
+        <button class="btn-primary" type="submit">Save role</button>
+      </form>
+    </div>`}
+    ${isCoach ? '' : `<div class="card">
       <h2 class="section-head">Organization / organization</h2>
       ${user.organizationId && user.organizationName
         ? `<p>You&apos;re with <strong>${esc(user.organizationName)}</strong>${user.teamName ? ` \u00b7 team <strong>${esc(user.teamName)}</strong>` : ''} \u2014 your organization&apos;s coach can see your check-ins.</p>
@@ -1926,6 +2235,10 @@ module.exports = {
   pendingPage,
   userHome,
   checkinForm,
+  pitchingCheckinForm,
+  combinedCheckinForm,
+  pitchSessionTypeLabel,
+  throwIntentLabel,
   preCheckinPage,
   routinePage,
   notebookPage,

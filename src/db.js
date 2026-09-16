@@ -119,6 +119,17 @@ db.exec(`CREATE TABLE IF NOT EXISTS teams (
   }
 }
 
+// Pitchers + two-way players (Sep 2026): every player has a role — hitter,
+// pitcher, or two_way. The users-side migration lives here (users table is
+// created above); the checkins/pre_checkins column migrations live AFTER
+// those tables are created, near the bottom of this file.
+{
+  const ucols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+  if (!ucols.includes('player_type')) {
+    db.exec("ALTER TABLE users ADD COLUMN player_type TEXT NOT NULL DEFAULT 'hitter';");
+  }
+}
+
 // Brain proposals (Sep 2026): Cam helps build Skip by proposing Brain entries,
 // but nothing goes live until EVERY coach has approved it. The proposer
 // auto-approves on submit; the other coach(es) approve from the Train Skip
@@ -162,7 +173,22 @@ CREATE TABLE IF NOT EXISTS checkins (
   whats_next TEXT NOT NULL DEFAULT '',
   skip_journal_score REAL,
   skip_journal_note TEXT,
-  skip_rated_at TEXT
+  skip_rated_at TEXT,
+  session_kind TEXT NOT NULL DEFAULT 'hitting', -- hitting | pitching | combined
+  pitch_session_type TEXT, -- bullpen | live | game | catch_play | recovery | no_throw
+  intent TEXT, -- light | medium | heavy (throwing intent for the day)
+  command INTEGER, -- 1-10 slider
+  pitch_count INTEGER,
+  pitches_thrown TEXT NOT NULL DEFAULT '[]', -- JSON array
+  velo_max REAL,
+  catch_distance TEXT,
+  recovery_notes TEXT NOT NULL DEFAULT '',
+  no_throw_note TEXT NOT NULL DEFAULT '',
+  felt_good TEXT NOT NULL DEFAULT '',
+  what_was_working TEXT NOT NULL DEFAULT '',
+  biggest_struggle TEXT NOT NULL DEFAULT '',
+  hitting_score REAL,
+  pitching_score REAL
 );
 CREATE INDEX IF NOT EXISTS idx_checkins_athlete_time ON checkins(athlete_name, created_at);
 CREATE INDEX IF NOT EXISTS idx_checkins_time ON checkins(created_at);
@@ -605,10 +631,44 @@ CREATE TABLE IF NOT EXISTS pre_checkins (
   focus TEXT NOT NULL DEFAULT '',
   plan TEXT NOT NULL DEFAULT '',
   flush TEXT NOT NULL DEFAULT '',
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  throw_intent TEXT NOT NULL DEFAULT '',
+  throw_focus TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_precheckins_user_time ON pre_checkins(user_id, created_at);
 `);
+
+// Pitchers + two-way players (Sep 2026): guarded migrations for databases
+// created before these columns existed in the CREATE TABLEs above (e.g.
+// production). Fresh boots get the columns from the schema itself.
+{
+  const ccols = db.prepare('PRAGMA table_info(checkins)').all().map((c) => c.name);
+  const add = (col, def) => {
+    if (!ccols.includes(col)) db.exec(`ALTER TABLE checkins ADD COLUMN ${col} ${def};`);
+  };
+  add('session_kind', "TEXT NOT NULL DEFAULT 'hitting'");
+  add('pitch_session_type', 'TEXT');
+  add('intent', 'TEXT');
+  add('command', 'INTEGER');
+  add('pitch_count', 'INTEGER');
+  add('pitches_thrown', "TEXT NOT NULL DEFAULT '[]'");
+  add('velo_max', 'REAL');
+  add('catch_distance', 'TEXT');
+  add('recovery_notes', "TEXT NOT NULL DEFAULT ''");
+  add('no_throw_note', "TEXT NOT NULL DEFAULT ''");
+  add('felt_good', "TEXT NOT NULL DEFAULT ''");
+  add('what_was_working', "TEXT NOT NULL DEFAULT ''");
+  add('biggest_struggle', "TEXT NOT NULL DEFAULT ''");
+  add('hitting_score', 'REAL');
+  add('pitching_score', 'REAL');
+  const pcols = db.prepare('PRAGMA table_info(pre_checkins)').all().map((c) => c.name);
+  if (!pcols.includes('throw_intent')) {
+    db.exec("ALTER TABLE pre_checkins ADD COLUMN throw_intent TEXT NOT NULL DEFAULT '';");
+  }
+  if (!pcols.includes('throw_focus')) {
+    db.exec("ALTER TABLE pre_checkins ADD COLUMN throw_focus TEXT NOT NULL DEFAULT '';");
+  }
+}
 
 // Coach feed REMOVED Sep 15 2026 (Bobby: Learn tab is a personal notebook, no social layer).
 // Drop the tables if a previous deploy created them.

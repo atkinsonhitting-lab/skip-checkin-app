@@ -31,7 +31,7 @@
       d.className = 'msg ' + (role === 'user' ? 'msg-user' : 'msg-skip');
       if (role !== 'user') {
         const img = document.createElement('img');
-        img.src = '/skip-avatar.webp';
+        img.src = log.dataset.skipAvatar || '/skip-avatar.webp';
         img.className = 'skip-avatar';
         img.alt = 'Skip';
         d.appendChild(img);
@@ -53,7 +53,7 @@
       addMsg('user', text);
       const thinking = document.createElement('div');
       thinking.className = 'msg msg-skip';
-      thinking.innerHTML = '<img src="/skip-avatar.webp" class="skip-avatar" alt="Skip"><div class="msg-bubble typing"><span></span><span></span><span></span></div>';
+      thinking.innerHTML = '<img src="' + (log.dataset.skipAvatar || '/skip-avatar.webp') + '" class="skip-avatar" alt="Skip"><div class="msg-bubble typing"><span></span><span></span><span></span></div>';
       log.appendChild(thinking);
       scroll();
       try {
@@ -116,22 +116,34 @@
     });
   })();
 
-  // ---- Coach dashboard: filter hitters as you type ----
+  // ---- Coach dashboard: filter hitters as you type + by role ----
   (function hitterSearch() {
     const input = document.getElementById('hitter-search');
-    if (!input) return;
+    const pills = Array.from(document.querySelectorAll('[data-rolefilter]'));
+    if (!input && !pills.length) return;
     const cards = Array.from(document.querySelectorAll('.athlete-card[data-search]'));
     const none = document.getElementById('hitter-no-match');
-    input.addEventListener('input', () => {
-      const q = input.value.trim().toLowerCase();
+    let role = 'all';
+    function apply() {
+      const q = input ? input.value.trim().toLowerCase() : '';
       let shown = 0;
       cards.forEach((c) => {
-        const hit = !q || (c.getAttribute('data-search') || '').includes(q);
+        const hitQ = !q || (c.getAttribute('data-search') || '').includes(q);
+        const hitR = role === 'all' || (c.getAttribute('data-role') || 'hitter') === role;
+        const hit = hitQ && hitR;
         c.style.display = hit ? '' : 'none';
         if (hit) shown++;
       });
       if (none) none.hidden = shown > 0;
-    });
+    }
+    if (input) input.addEventListener('input', apply);
+    pills.forEach((p) =>
+      p.addEventListener('click', () => {
+        role = p.getAttribute('data-rolefilter');
+        pills.forEach((x) => x.classList.toggle('active', x === p));
+        apply();
+      })
+    );
   })();
 
   // ---- Program day navigator (Mon-Fri pills; auto-opens today) ----
