@@ -238,7 +238,7 @@ function userHome(user, extras) {
     const n = streak.streak || 0;
     if (n >= 1) {
       const line =
-        n >= 30 ? '30 days. You\u2019re a different hitter.' :
+        n >= 30 ? '30 days. You\u2019re a different player.' :
         n >= 7 ? 'A full week \u2014 that\u2019s how habits are built.' :
         n >= 2 ? 'Keep it rolling.' :
         'Check in tomorrow to build it.';
@@ -748,7 +748,7 @@ function notebookPage(user, checkins, notes, players, justSubmitted, filter) {
     ${kindPills}
     ${checkinsHtml}
     <h2 class="section-head" id="notes">Notes</h2>
-    <div class="card"><p class="hint skip-intro">Your hitting notebook — jot down anything about your swing and your game, no check-in needed. Your notes get read too.</p>
+    <div class="card"><p class="hint skip-intro">Your notebook — jot down anything about your game, no check-in needed. Your notes get read too.</p>
     <form method="post" action="/learn/note" class="form">
       <label>Something new I'm learning
         <textarea id="note-text" name="note" rows="2" maxlength="1000" placeholder="e.g. Keeping my front shoulder closed longer lets me stay through it" required></textarea>
@@ -777,7 +777,7 @@ function notebookPage(user, checkins, notes, players, justSubmitted, filter) {
     </form></div>
     <div class="card">
       <h2 class="routine-station">Players I study</h2>
-      ${playerRows || `<p class="hint">No players yet. Add the hitters you watch and learn from.</p>`}
+      ${playerRows || `<p class="hint">No players yet. Add the players you watch and learn from.</p>`}
     </div>
     <h2 class="section-head" id="checkins">Check-ins</h2>
     ${checkinsHtml}`,
@@ -991,7 +991,7 @@ function chatPage(user, messages, chatEnabled) {
     user,
     tabs: userTabs('chat', user),
     body: `<h1 class="page-title chat-title">${skipImg}Coach Skip</h1>
-    <p class="hint">${isPitcher ? "Struggling? Tell Skip what\u2019s going on with your throwing \u2014 he\u2019s seen your sessions and will point you back on track." : "Struggling? Tell Skip what\u2019s going on at the plate \u2014 he\u2019s seen your check-ins and will point you back on track."}</p>
+    <p class="hint">Struggling? Tell Skip what\u2019s going on \u2014 he\u2019s seen your sessions and will point you back on track.</p>
     ${chatEnabled
       ? `<div id="text-panel">
         <div id="chat-log" class="chat-log" data-skip-avatar="${img}">${msgs || `<div class="msg msg-skip">${skipImg}<div class="msg-bubble">${isPitcher ? "What\u2019s going on with your throwing? Tell me what feels off." : "What\u2019s going on at the plate? Tell me what feels off."}</div></div>`}</div>
@@ -1034,7 +1034,7 @@ function coachApprovalsPage(user, pending) {
     user,
     tabs: coachTabs('approvals', user.approvalCount, user),
     body: `<h1 class="page-title">Approvals</h1>
-    <p class="hint">${canEdit ? 'Every new account waits here until you approve it. Approved hitters can log in right away.' : 'Every new account waits here until it gets approved.'}</p>
+    <p class="hint">${canEdit ? 'Every new account waits here until you approve it. Approved players can log in right away.' : 'Every new account waits here until it gets approved.'}</p>
     ${n ? `<div class="athlete-grid">${pendingApprovalCards(pending, canEdit)}</div>` : `<div class="card empty">Nobody waiting — you're all caught up.</div>`}`,
   });
 }
