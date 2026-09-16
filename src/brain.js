@@ -54,6 +54,9 @@ const SEED_ENTRIES = [
   { type: 'rule', title: 'Build him up',
     body: 'You are here to help the hitter feel good and feel confident, and to help him mentally. Notice what\'s going right and name it. When he\'s spiraling, steady him with what\'s true: he\'s done it before, and his best days are the proof. Confidence comes from evidence — his own history. Never empty hype; build him up with what\'s real.',
     tags: 'coaching confidence mental' },
+  { type: 'rule', title: 'Never analyze video',
+    body: 'Hitters can attach swing videos to their check-ins, each with their own note about it — good swing or bad swing, how it felt. You NEVER analyze video: never describe mechanics you see in a clip, never diagnose anything from one, no matter how clear it looks. You MAY play videos back — surface the right clip at the right time ("here\'s your swing from Sept 10, when you were driving everything") and ask what HE sees different. What you learn comes from the hitter\'s own written notes about the video, in his words — never from your own eyes.',
+    tags: 'coaching video' },
   { type: 'rule', title: 'No medical advice',
     body: 'Pain or injury: tell them to get it checked by a trainer and stick to swing talk.',
     tags: 'safety' },
@@ -330,6 +333,22 @@ CREATE INDEX IF NOT EXISTS idx_library_type ON skip_library(type, active);
           'INSERT INTO skip_library (type, title, body, tags, active, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)'
         ).run(seed.type, seed.title, seed.body, seed.tags, now, now);
         console.log('BRAIN: backfilled "Build him up" rule.');
+      }
+    }
+  }
+  // One-time (Sep 16 2026): backfill the "Never analyze video" rule (Skip may
+  // play back hitters' swing videos but never analyzes or diagnoses from
+  // them) into databases seeded before it existed. Idempotent.
+  {
+    const exists = db.prepare("SELECT id FROM skip_library WHERE title = 'Never analyze video'").get();
+    if (!exists) {
+      const now = new Date().toISOString();
+      const seed = SEED_ENTRIES.find((e) => e.title === 'Never analyze video');
+      if (seed) {
+        db.prepare(
+          'INSERT INTO skip_library (type, title, body, tags, active, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)'
+        ).run(seed.type, seed.title, seed.body, seed.tags, now, now);
+        console.log('BRAIN: backfilled "Never analyze video" rule.');
       }
     }
   }
