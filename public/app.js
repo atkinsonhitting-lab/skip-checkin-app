@@ -88,19 +88,40 @@
 
 })();
 
-  // ---- Check-in: show "What ones?" only when drills = yes ----
-  (function drillToggle() {
-    const wrap = document.getElementById('drill-names');
-    if (!wrap) return;
-    const sync = () => {
-      const sel = document.querySelector('input[name="did_drills"]:checked');
-      wrap.hidden = !sel || sel.value !== 'yes';
-    };
-    document.querySelectorAll('input[name="did_drills"]').forEach((r) => r.addEventListener('change', sync));
-    sync();
-  })();
+  // ---- Check-in drill field: pure helpers (unit-tested via source extraction) ----
+  // Merge comma-separated drill names: additions go on the end, no dupes
+  // (case-insensitive), no stray commas.
+  function mergeDrillNames(current, additions) {
+    const parts = String(current || '').split(',').map((s) => s.trim()).filter(Boolean);
+    const seen = new Set(parts.map((p) => p.toLowerCase()));
+    for (const a of additions || []) {
+      const name = String(a || '').trim();
+      if (name && !seen.has(name.toLowerCase())) { seen.add(name.toLowerCase()); parts.push(name); }
+    }
+    return parts.join(', ');
+  }
+  // Toggle one drill name in the comma-separated field.
+  function toggleDrillName(current, name) {
+    const parts = String(current || '').split(',').map((s) => s.trim()).filter(Boolean);
+    const key = String(name || '').toLowerCase();
+    const idx = parts.findIndex((p) => p.toLowerCase() === key);
+    if (idx >= 0) parts.splice(idx, 1);
+    else if (key) parts.push(String(name).trim());
+    return parts.join(', ');
+  }
+  function syncDrillChips() {
+    const input = document.getElementById('drills-input');
+    const chips = Array.from(document.querySelectorAll('.drill-chip'));
+    if (!input || !chips.length) return;
+    const present = new Set(input.value.split(',').map((s) => s.trim().toLowerCase()));
+    chips.forEach((chip) => {
+      chip.classList.toggle('active', present.has(String(chip.dataset.drill || '').toLowerCase()));
+    });
+  }
 
-  // ---- Check-in: fill drills from the hitter's daily routine ----
+  // ---- Check-in: add the hitter's daily routine into the drills field ----
+  // Merges with whatever is already there (Bobby: "use their routine and add
+  // to it") — never wipes chips the player already tapped.
   (function useRoutine() {
     const btn = document.getElementById('use-routine');
     if (!btn) return;
@@ -109,9 +130,11 @@
       try { drills = JSON.parse(btn.dataset.routine || '[]'); } catch (e) { drills = []; }
       const input = document.getElementById('drills-input');
       if (!input || !drills.length) return;
-      input.value = drills
-        .map((d) => (d.station ? `${d.name} (${d.station})` : d.name))
-        .join(', ');
+      input.value = mergeDrillNames(
+        input.value,
+        drills.map((d) => (d.station ? `${d.name} (${d.station})` : d.name))
+      );
+      syncDrillChips();
       input.focus();
     });
   })();
@@ -124,27 +147,13 @@
     chips.forEach((chip) => {
       chip.addEventListener('click', () => {
         if (!input) return;
-        const name = chip.dataset.drill;
-        const parts = input.value.split(',').map((s) => s.trim()).filter(Boolean);
-        const idx = parts.findIndex((p) => p.toLowerCase() === name.toLowerCase());
-        if (idx >= 0) {
-          parts.splice(idx, 1);
-          chip.classList.remove('active');
-        } else {
-          parts.push(name);
-          chip.classList.add('active');
-        }
-        input.value = parts.join(', ');
+        input.value = toggleDrillName(input.value, chip.dataset.drill);
+        syncDrillChips();
         input.focus();
       });
     });
     // Mark chips already present when the form loads (e.g. editing a draft).
-    if (input) {
-      const present = input.value.split(',').map((s) => s.trim().toLowerCase());
-      chips.forEach((chip) => {
-        if (present.includes(chip.dataset.drill.toLowerCase())) chip.classList.add('active');
-      });
-    }
+    syncDrillChips();
   })();
 
   // ---- Coach dashboard: filter hitters as you type + by role ----

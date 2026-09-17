@@ -947,7 +947,7 @@ function scoreBreakdown(feel, confidence, focus, difficulty, notesText) {
   return { base, grind, words, total };
 }
 
-const STATIONS = ['Tee', 'Side toss', 'Front toss', 'BP', 'Machine'];
+const STATIONS = ['Prep', 'Tee', 'Side toss', 'Front toss', 'BP', 'Machine'];
 
 // Known-drill matching (Sep 2026): hitters sometimes summarize their work
 // ("did some tee stuff, front toss") instead of naming real drills. Only
@@ -1051,6 +1051,40 @@ function getRoutine(userId) {
 function drillStats(athleteName) {
   const rows = db
     .prepare('SELECT drills_done, session_score FROM checkins WHERE athlete_name = ? AND session_score IS NOT NULL')
+    .all(athleteName);
+  const map = new Map();
+  for (const r of rows) {
+    let drills = [];
+    try { drills = JSON.parse(r.drills_done || '[]'); } catch (e) { drills = []; }
+    const seen = new Set();
+    for (const d of drills) {
+      if (!drillEntryKnown(d)) continue; // summaries aren't drills — Skip shouldn't rank them
+      const name = String((d && typeof d === 'object' ? d.name : d) || '').trim();
+      const key = name.toLowerCase();
+      if (!name || seen.has(key)) continue;
+      seen.add(key);
+      const e = map.get(key) || { name, total: 0, count: 0 };
+      e.total += r.session_score;
+      e.count += 1;
+      map.set(key, e);
+    }
+  }
+  return [...map.values()]
+    .filter((e) => e.count >= 3)
+    .map((e) => ({ name: e.name, avg: Math.round((e.total / e.count) * 10) / 10, count: e.count }))
+    .sort((a, b) => b.avg - a.avg)
+    .slice(0, 5);
+}
+
+// Pregame prep that correlates with good games (Bobby, Sep 17 2026): the
+// same min-3-sessions pattern as drillStats, but only Game / Live BP
+// check-ins count — on those days "what he did" was really pregame prep.
+// Training days (Cage, Tee Work, Other) never pollute this ranking.
+function pregamePrepStats(athleteName) {
+  const rows = db
+    .prepare(
+      "SELECT drills_done, session_score FROM checkins WHERE athlete_name = ? AND session_score IS NOT NULL AND environment IN ('Game', 'Live BP')"
+    )
     .all(athleteName);
   const map = new Map();
   for (const r of rows) {
@@ -1193,25 +1227,51 @@ function sessionDrills(drillsDoneJson) {
   return out;
 }
 
-// Recent drill names for the check-in quick-tap chips (Bobby: "a list of
-// drills they've already done so they can just click them in there").
-// Most-recent-first, deduped case-insensitively, capped at 8.
-function recentDrillNames(userId) {
+// Recent drills grouped by delivery method for the "What did you do today?"
+// picker (Bobby, Sep 17 2026: "they could kind of scroll through it and pick
+// if they repeated shit"). The player's own history from the last 25 check-ins:
+// most-recent-first within each section, deduped case-insensitively across
+// sections, capped at 8 per section. Delivery method comes from the drill's
+// station (canonicalized), falling back to parsing a trailing parenthetical
+// tag on legacy plain-string rows.
+function recentDrillGroups(userId) {
   const rows = db
     .prepare('SELECT drills_done FROM checkins WHERE user_id = ? ORDER BY created_at DESC LIMIT 25')
     .all(userId);
+  const groups = { prep: [], tee: [], sideToss: [], frontToss: [], bp: [], machine: [], other: [] };
+  const stationKey = (st) => {
+    const s = String(st || '').trim().toLowerCase();
+    if (s === 'prep') return 'prep';
+    if (s === 'tee') return 'tee';
+    if (s === 'side toss') return 'sideToss';
+    if (s === 'front toss') return 'frontToss';
+    if (s === 'bp' || s === 'batting practice') return 'bp';
+    if (s === 'machine') return 'machine';
+    return null;
+  };
   const seen = new Set();
-  const out = [];
   for (const r of rows) {
     for (const d of sessionDrills(r.drills_done)) {
-      const key = d.name.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push(d.name);
-      if (out.length >= 8) return out;
+      let key = stationKey(d.station);
+      let base = String(d.name);
+      if (!key) {
+        const m = String(d.name).match(/^(.*?)\s*\(([^()]*)\)\s*$/);
+        if (m && m[1].trim()) { key = stationKey(m[2]); base = m[1].trim(); }
+      }
+      // A drill literally named "prep" is prep work, even untagged.
+      if (!key && base.trim().toLowerCase() === 'prep') key = 'prep';
+      const gkey = key || 'other';
+      // Keep the delivery-method tag on the chip so re-tapping re-logs it
+      // with its method intact (Skip uses it).
+      const displayStation = d.station ? (canonicalStation(d.station) || d.station) : null;
+      const label = displayStation ? `${d.name} (${displayStation})` : d.name;
+      const lkey = label.toLowerCase();
+      if (seen.has(lkey)) continue;
+      seen.add(lkey);
+      if (groups[gkey].length < 8) groups[gkey].push(label);
     }
   }
-  return out;
+  return groups;
 }
 
 // Everything the "What works for you" section needs: good-day vs trash cues,
@@ -1350,6 +1410,47 @@ app.get('/', requireLogin, (req, res) => {
   }));
 });
 
+// Remote-program players (Bobby's remote hitters) already have a plan, so
+// "What did you do today?" is pre-filled with today's scheduled work. The
+// pre-filled text is just the input's value — chips toggle and manual edits
+// work exactly as usual. Returns '' when there's nothing to pre-fill.
+function todayProgramPrefill(userId, now) {
+  const u = db.prepare('SELECT remote_program_id FROM users WHERE id = ?').get(userId) || {};
+  if (!u.remote_program_id) return '';
+  const row = db.prepare('SELECT program_json FROM remote_programs WHERE id = ?').get(u.remote_program_id);
+  if (!row) return '';
+  let prog = {};
+  try { prog = JSON.parse(row.program_json || '{}'); } catch (e) { return ''; }
+  if (!prog || typeof prog !== 'object') return '';
+  const cats = Array.isArray(prog.routine) ? prog.routine : [];
+  const daily = [];
+  const dayCats = []; // [categoryName, drills[]], excluding Daily Routine
+  for (const c of cats) {
+    const name = String((c && c.category) || '');
+    const drills = (Array.isArray(c && c.items) ? c.items : [])
+      .map((it) => String((it && it.drill) || '').trim())
+      .filter(Boolean);
+    if (name.toLowerCase() === 'daily routine') daily.push(...drills);
+    else if (name) dayCats.push([name, drills]);
+  }
+  const sched = Array.isArray(prog.schedule) ? prog.schedule : [];
+  const weekday = chiWeekdayFmt.format(now || new Date());
+  const entry = sched.find((e) => Array.isArray(e) && String(e[0]).toLowerCase() === weekday.toLowerCase());
+  if (entry && /^(off|rest)$/i.test(String(entry[1] || '').trim())) return ''; // rest day
+  let extra = [];
+  if (entry && String(entry[1] || '').trim()) {
+    const label = String(entry[1]).trim().toLowerCase();
+    for (const [name, drills] of dayCats) {
+      if (name.toLowerCase().startsWith(label)) extra.push(...drills);
+    }
+  }
+  // No schedule or no match: just the daily routine (or blank).
+  const seen = new Set();
+  return [...daily, ...extra]
+    .filter((d) => { const k = d.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; })
+    .join(', ');
+}
+
 app.get('/checkin', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
   // The form follows the player's role: hitters get the hitting check-in,
@@ -1357,7 +1458,7 @@ app.get('/checkin', requireLogin, (req, res) => {
   const pt = req.user.playerType || 'hitter';
   if (pt === 'pitcher') return res.send(views.pitchingCheckinForm(req.user, null, {}));
   if (pt === 'two_way') return res.send(views.combinedCheckinForm(req.user, null, {}));
-  res.send(views.checkinForm(req.user, null, {}, data.drillNames(), getRoutine(req.user.id), recentDrillNames(req.user.id)));
+  res.send(views.checkinForm(req.user, null, { drills_done: todayProgramPrefill(req.user.id) }, data.drillNames(), getRoutine(req.user.id), recentDrillGroups(req.user.id)));
 });
 
 // ---- Daily routine ----
@@ -1997,7 +2098,7 @@ app.post('/checkin', requireLogin, (req, res) => {
   // The hitting form is for hitters; pitchers and two-ways have their own.
   if ((req.user.playerType || 'hitter') !== 'hitter') return res.redirect('/checkin');
   const b = req.body;
-  const fail = (msg) => res.send(views.checkinForm(req.user, msg, b, data.drillNames(), getRoutine(req.user.id), recentDrillNames(req.user.id)));
+  const fail = (msg) => res.send(views.checkinForm(req.user, msg, b, data.drillNames(), getRoutine(req.user.id), recentDrillGroups(req.user.id)));
   if (!ENVIRONMENTS.includes(b.environment)) {
     return fail('Pick the environment you were in.');
   }
@@ -2008,14 +2109,9 @@ app.post('/checkin', requireLogin, (req, res) => {
   if (feel === null || confidence === null || focus === null || difficulty === null) {
     return fail('Rate feel, confidence, focus, and difficulty from 1 to 10.');
   }
-  const didDrills = b.did_drills;
-  if (didDrills !== 'yes' && didDrills !== 'no') {
-    return fail('Say whether you did any drills.');
-  }
+  // Drills are optional (Bobby, Sep 17 2026): "What did you do today?" with
+  // blank fine — no Yes/No gate anymore.
   const drills = parseDrillsDone(b.drills_done);
-  if (didDrills === 'yes' && !drills.length) {
-    return fail('You did drills — which ones?');
-  }
   const sessionScore = scoreBreakdown(
     feel,
     confidence,
@@ -3685,6 +3781,7 @@ function skipCoreFor(role) {
 // ---- Check-in streak (Chicago days) ----
 const chiDayFmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' });
 const chiLongFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+const chiWeekdayFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', weekday: 'long' });
 const chiHourFmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', hour: 'numeric', hour12: false });
 const chiDay = (d) => chiDayFmt.format(d instanceof Date ? d : new Date(d));
 function ymdToUTC(ymd) {
@@ -3772,7 +3869,9 @@ function hitterSnapshot(userId, role) {
       `${String(r.created_at).slice(0, 10)}${role === 'two_way' ? ' · [Hitting]' : ''} · ${r.environment}`,
       r.session_score != null ? `Level: ${r.score_tier}` : 'Unscored',
       `Feel ${r.feel} Conf ${r.confidence} Focus ${r.focus}${r.difficulty != null ? ` Difficulty ${r.difficulty}` : ''}`,
-      realDrills.length ? `Drills: ${realDrills.join(', ')}` : null,
+      realDrills.length
+        ? `${r.environment === 'Game' || r.environment === 'Live BP' ? 'Pregame prep \u2014 what he did to get ready' : 'What he did'}: ${realDrills.join(', ')}`
+        : null,
       otherWork.length ? `Other work he mentioned (his words, NOT formal drills — never list these as drills he did): "${otherWork.join('", "')}"` : null,
       r.session_notes ? `Notes: "${String(r.session_notes).slice(0, 200)}"` : null,
       r.what_worked ? `What worked: "${String(r.what_worked).slice(0, 200)}"` : null,
@@ -3793,9 +3892,9 @@ function hitterSnapshot(userId, role) {
       a < b - 0.5 ? 'trending DOWN' : a > b + 0.5 ? 'trending UP' : 'holding steady'}.`;
   }
   const total = db.prepare('SELECT COUNT(*) AS n FROM checkins WHERE user_id = ?').get(userId).n;
-  const top = drillStats(
-    (db.prepare('SELECT athlete_name FROM users WHERE id = ?').get(userId) || {}).athlete_name
-  ).slice(0, 3);
+  const athleteName = (db.prepare('SELECT athlete_name FROM users WHERE id = ?').get(userId) || {}).athlete_name;
+  const top = drillStats(athleteName).slice(0, 3);
+  const pregameTop = pregamePrepStats(athleteName).slice(0, 3);
   // Best-day anchor: the highest-scored session — what Skip takes the hitter
   // back to when they're struggling. This is the #1 priority, so it gets its
   // own explicit section in the data block.
@@ -3826,14 +3925,14 @@ function hitterSnapshot(userId, role) {
       const bits = [
         `${String(best.created_at).slice(0, 10)} · ${best.environment} · Level: ${scoreTier(best.session_score)}`,
         `Feel ${best.feel} Conf ${best.confidence} Focus ${best.focus}`,
-        names.length ? `Drills: ${names.join(', ')}` : null,
+        names.length ? `${best.environment === 'Game' || best.environment === 'Live BP' ? 'Pregame prep \u2014 what he did to get ready' : 'What he did'}: ${names.join(', ')}` : null,
         best.what_worked ? `What worked: "${String(best.what_worked).slice(0, 200)}"` : null,
         best.session_notes ? `Notes: "${String(best.session_notes).slice(0, 200)}"` : null,
       ].filter(Boolean);
       bestDay = bits.join(' · ');
     }
   }
-  return { lines, avg, total, trend, top, bestDay };
+  return { lines, avg, total, trend, top, pregameTop, bestDay };
 }
 
 // Remote hitters: their program's cues + focus, so Skip coaches FROM the
@@ -3944,7 +4043,11 @@ function skipDataBlock(userId, role) {
           : ''
       }${
         role !== 'pitcher' && snap.top.length
-          ? `\nDrills tied to their best days: ${snap.top.map((d) => `${d.name} (${scoreTier(d.avg)} over ${d.count} sessions)`).join(', ')}`
+          ? `\nWhat he did on his best days: ${snap.top.map((d) => `${d.name} (${scoreTier(d.avg)} over ${d.count} sessions)`).join(', ')}`
+          : ''
+      }${
+        role !== 'pitcher' && snap.pregameTop.length
+          ? `\nPregame prep tied to his best games (Game/Live BP days only): ${snap.pregameTop.map((d) => `${d.name} (${scoreTier(d.avg)} over ${d.count} games)`).join(', ')}`
           : ''
       }${
         snap.bestDay

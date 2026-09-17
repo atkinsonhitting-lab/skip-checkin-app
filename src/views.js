@@ -26,6 +26,9 @@ function fmtDate(iso) {
 // every tab (Mental Game, Program, Routine, Videos, Settings); the bar is
 // additive, hitter-only, hidden on desktop where the drawer is the nav.
 const TABBAR_HREFS = ['/', '/checkin', '/messages', '/notebook', '/chat'];
+// Remote-program players already work from their program: the tab bar shows
+// Program in the Messages slot. Messages stays in their sidebar drawer.
+const REMOTE_TABBAR_HREFS = ['/', '/checkin', '/program', '/notebook', '/chat'];
 // Coach tab bar (Sep 2026): Bobby's coaching loop — Home (attention),
 // Hitters, Approvals (badge), Train Skip. Programs, Videos, and Settings
 // stay in the drawer. Same bar for every coach, including view-only Cam.
@@ -41,6 +44,7 @@ const TABBAR_ICONS = {
   '/': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>',
   '/checkin': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
   '/messages': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 6l-10 7L2 6"/></svg>',
+  '/program': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>',
   '/notebook': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>',
   '/routine': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>',
   '/chat': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>',
@@ -49,7 +53,7 @@ function bottomTabbar(user, tabs) {
   if (!user) return '';
   const isCoach = user.role === 'coach';
   if (!isCoach && user.role !== 'athlete') return '';
-  const hrefs = isCoach ? COACH_TABBAR_HREFS : TABBAR_HREFS;
+  const hrefs = isCoach ? COACH_TABBAR_HREFS : user.remoteProgramId ? REMOTE_TABBAR_HREFS : TABBAR_HREFS;
   const icons = isCoach ? COACH_TABBAR_ICONS : TABBAR_ICONS;
   const items = (tabs || []).filter((t) => hrefs.includes(t.href));
   if (!items.length) return '';
@@ -581,7 +585,7 @@ function whatWorksSection(data, opts) {
        ${verdict}
        ${suggested}
        ${addable}
-       ${drills ? `<div class="works-sub">Your drills</div><div class="works-rows">${drills}</div>` : ''}`
+       ${drills ? `<div class="works-sub">What you did on good days</div><div class="works-rows">${drills}</div>` : ''}`
     : `<p class="hint">Check in 3+ times and your patterns start to show.</p>`;
   return `<section id="what-works" class="card">
     <h2>What works for you</h2>
@@ -633,7 +637,7 @@ function sliderField(name, label, question, value, ends, ids) {
   </div>`;
 }
 
-function checkinForm(user, error, values, drillNames, routine, recentDrills) {
+function checkinForm(user, error, values, drillNames, routine, recentGroups) {
   const v = values || {};
   const rt = routine || [];
   const routineJson = esc(JSON.stringify(rt.map((d) => ({ name: d.name, station: d.station }))));
@@ -653,6 +657,48 @@ function checkinForm(user, error, values, drillNames, routine, recentDrills) {
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
       <div class="field-label">Where were you?</div>
       <div class="pills">${envPills}</div>
+      <div class="field-label">What did you do today?</div>
+      <p class="hint" id="drills-subtitle" data-default="Everything you did \u2014 tee work, flips, BP, machine. Blank is fine.">Everything you did \u2014 tee work, flips, BP, machine. Blank is fine.</p>
+      <p class="hint">Tap to add — or just type. Blank is fine.</p>
+      <label>What you did <span class="hint-inline">(separate with commas)</span>
+        <input id="drills-input" name="drills_done" list="drill-list" placeholder="e.g. Fence drill (tee), Walk In Drill" value="${esc(v.drills_done || '')}">
+      </label>
+      ${rt.length ? `<button type="button" id="use-routine" class="btn-ghost" data-routine="${routineJson}">Use my daily routine</button>` : ''}
+      <p class="hint"><a href="/routine">Edit daily routine →</a></p>
+      ${(() => {
+        // "What did you do today?" picker (Bobby, Sep 17 2026): the player's
+        // own history grouped by delivery method — scroll each section and tap
+        // repeats. Then quick picks, minus dupes of history drills.
+        const groups = recentGroups && typeof recentGroups === 'object' ? recentGroups : {};
+        const order = [
+          ['prep', 'Prep'],
+          ['tee', 'Off the tee'],
+          ['sideToss', 'Side toss'],
+          ['frontToss', 'Front toss'],
+          ['bp', 'BP'],
+          ['machine', 'Machine'],
+          ['other', 'Other'],
+        ];
+        const historyKeys = new Set();
+        let html = '';
+        for (const [key, label] of order) {
+          const names = Array.isArray(groups[key]) ? groups[key] : [];
+          if (!names.length) continue;
+          names.forEach((n) => historyKeys.add(String(n).toLowerCase()));
+          html += `<div class="drill-section"><div class="drill-section-label">${label}</div><div class="drill-chips drill-chips-scroll">` +
+            names.map((d) => `<button type="button" class="pill-link drill-chip" data-drill="${esc(d)}">${esc(d)}</button>`).join('') +
+            `</div></div>`;
+        }
+        const presets = ['Prep', 'Tee', 'Side Toss', 'Front Toss', 'BP', 'Machine']
+          .filter((p) => !historyKeys.has(p.toLowerCase()));
+        if (presets.length) {
+          html += `<div class="drill-section"><div class="drill-section-label">Quick picks</div><div class="drill-chips">` +
+            presets.map((d) => `<button type="button" class="pill-link drill-chip" data-drill="${esc(d)}">${esc(d)}</button>`).join('') +
+            `</div></div>`;
+        }
+        return html;
+      })()}
+      <p class="hint">Tip: add (prep), (tee), (side toss), (front toss), (BP), or (machine) after what you did &mdash; e.g. &quot;Fence drill (tee)&quot;.</p>
       ${sliderField('feel', 'Feel', 'How good did you feel?', v.feel)}
       ${sliderField('confidence', 'Confidence', 'How confident did you feel?', v.confidence)}
       ${sliderField('focus', 'Focus', 'How locked in was your focus?', v.focus)}
@@ -660,31 +706,6 @@ function checkinForm(user, error, values, drillNames, routine, recentDrills) {
       <script src="/checkin.js"></script>
       <label>Session notes <span class="hint-inline">(don't hold back — what you felt, what you saw, what was off)</span><span class="talk-wrap"><textarea id="session_notes" name="session_notes" rows="4" placeholder="How did it go? What did you feel?">${esc(v.session_notes || '')}</textarea><button type="button" class="mic-btn" data-target="session_notes" aria-label="Dictate instead of typing">🎙</button></span></label>
       <label>What worked <span class="hint-inline">(be specific — the exact drill, cue, or feel)</span><span class="talk-wrap"><textarea id="what_worked" name="what_worked" rows="2" placeholder="What clicked today?">${esc(v.what_worked || '')}</textarea><button type="button" class="mic-btn" data-target="what_worked" aria-label="Dictate instead of typing">🎙</button></span></label>
-      <div class="field-label">Did you do any drills?</div>
-      <div class="pills">
-        <label class="pill"><input type="radio" name="did_drills" value="yes"${v.did_drills === 'yes' ? ' checked' : ''} required><span>Yes</span></label>
-        <label class="pill"><input type="radio" name="did_drills" value="no"${v.did_drills === 'no' ? ' checked' : ''} required><span>No</span></label>
-      </div>
-      <div id="drill-names"${v.did_drills === 'yes' ? '' : ' hidden'}>
-        <label>What ones? <span class="hint-inline">(separate with commas)</span>
-          <input id="drills-input" name="drills_done" list="drill-list" placeholder="e.g. Deep Tee Drill, Walk In Drill" value="${esc(v.drills_done || '')}">
-        </label>
-        <div class="drill-chips" style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 4px">
-          ${(() => {
-            // Quick-tap chips (Sep 17 2026, Bobby): the player's own recent
-            // drills first so they can just tap them in, then the preset
-            // delivery methods — minus any that duplicate a recent drill.
-            const presets = ['Prep', 'Tee', 'Side Toss', 'Front Toss', 'BP', 'Machine'];
-            const recent = Array.isArray(recentDrills) ? recentDrills : [];
-            const recentKeys = new Set(recent.map((d) => String(d).toLowerCase()));
-            const names = [...recent, ...presets.filter((p) => !recentKeys.has(p.toLowerCase()))];
-            return names.map((d) => `<button type="button" class="pill-link drill-chip" data-drill="${esc(d)}">${esc(d)}</button>`).join('');
-          })()}
-        </div>
-        ${rt.length ? `<button type="button" id="use-routine" class="btn-ghost" data-routine="${routineJson}">Use my daily routine</button>` : ''}
-        <p class="hint"><a href="/routine">Edit daily routine →</a></p>
-        <p class="hint">Tip: add (tee), (side toss), (front toss), (BP), or (machine) after a drill — e.g. "Fence drill (tee)".</p>
-      </div>
       <datalist id="drill-list">${datalist}</datalist>
       <button type="submit" class="btn-primary">Submit check-in</button>
     </form></div>`,
@@ -882,10 +903,10 @@ function routinePage(user, drills, error, drillNames, stations) {
     user,
     tabs: userTabs('checkin', user),
     body: `<h1 class="page-title">Daily routine</h1>
-    <div class="card"><p class="hint skip-intro">Your everyday drills. Set it once — then one tap loads it into your check-in.</p>
+    <div class="card"><p class="hint skip-intro">Your everyday work. Set it once — then one tap loads it into your check-in.</p>
     ${error ? `<div class="error">${esc(error)}</div>` : ''}
     <form method="post" action="/routine/add" class="form routine-add">
-      <label>Drill
+      <label>Activity
         <input name="name" list="drill-list" placeholder="e.g. Fence drill" maxlength="80" required>
       </label>
       <datalist id="drill-list">${datalist}</datalist>
@@ -895,7 +916,7 @@ function routinePage(user, drills, error, drillNames, stations) {
           ${stationOpts}
         </select>
       </label>
-      <button type="submit" class="btn-primary">Add drill</button>
+      <button type="submit" class="btn-primary">Add</button>
     </form></div>
     ${groups.map((g) => `
     <div class="card routine-group">

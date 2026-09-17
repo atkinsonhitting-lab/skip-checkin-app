@@ -216,13 +216,7 @@ window.addEventListener('pageshow', function () {
         missing('environment', 'Where were you?',
           'Skip needs to know what kind of day it was to make sense of your entry.');
       }
-      if (v.did_drills !== 'yes' && v.did_drills !== 'no') {
-        missing('did_drills', 'Did you do any drills?',
-          "Yes or no, that's all — it's how Skip tracks what's working for you.");
-      } else if (v.did_drills === 'yes' && !String(v.drills_done || '').replace(/[\s,]/g, '')) {
-        missing('drills_done', 'Which drills?',
-          "You said you did drills, so name them. Skip can't use what you don't log.");
-      }
+      // Drills are optional — "What did you do today?" with blank fine (Bobby, Sep 17 2026).
     } else if (kind === 'pitching') {
       checkThrowing();
     } else if (kind === 'combined') {
@@ -256,7 +250,6 @@ window.addEventListener('pageshow', function () {
   function fieldAnchor(form, key) {
     var map = {
       environment: 'input[name="environment"]',
-      did_drills: 'input[name="did_drills"]',
       drills_done: 'input[name="drills_done"]',
       did_hit: 'input[name="did_hit"]',
       pitch_session_type: 'input[name="pitch_session_type"]',
@@ -291,7 +284,6 @@ window.addEventListener('pageshow', function () {
     }
     return {
       environment: checkedVal('environment'),
-      did_drills: checkedVal('did_drills'),
       drills_done: fieldVal('drills_done'),
       did_hit: boxChecked('did_hit'),
       did_throw: boxChecked('did_throw'),
@@ -398,4 +390,24 @@ window.addEventListener('pageshow', function () {
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = { validateValues: validateValues, HEADLINES: HEADLINES };
   }
+})();
+
+// "What did you do today?" subtitle follows the environment (Bobby, Sep 17
+// 2026): on Game / Live BP days it's really pregame prep.
+(function () {
+  var sub = document.getElementById('drills-subtitle');
+  if (!sub) return;
+  var def = sub.getAttribute('data-default') || sub.textContent;
+  function upd() {
+    var s = document.querySelector('input[name="environment"]:checked');
+    var v = s && s.value;
+    sub.textContent = v === 'Game'
+      ? 'Your pregame prep \u2014 what did you do to get ready?'
+      : v === 'Live BP'
+        ? 'What did you do to get ready for live BP?'
+        : def;
+  }
+  var radios = document.querySelectorAll('input[name="environment"]');
+  for (var i = 0; i < radios.length; i++) radios[i].addEventListener('change', upd);
+  upd();
 })();

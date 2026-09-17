@@ -36,10 +36,63 @@ async function main() {
   check('remote hitter: exactly one Routine tab', t2.filter((t) => t.label === 'Routine').length === 1);
   check('remote hitter: Routine points at /program/routine', t2.some((t) => t.label === 'Routine' && t.href === '/program/routine'));
   check('remote hitter: no base /routine tab', !t2.some((t) => t.href === '/routine'));
-  const cf = views.checkinForm({ role: 'athlete', approvalCount: 0 }, null, {}, [], []);
+  const cf = views.checkinForm({ role: 'athlete', approvalCount: 0 }, null, {}, [], [], {});
   for (const d of ['Prep', 'Tee', 'Side Toss', 'Front Toss', 'BP', 'Machine'])
     check(`drill chip "${d}" in check-in form`, cf.includes(`data-drill="${d}"`));
-  check('tip text about (tee)/(side toss)/etc. unchanged', cf.includes('add (tee), (side toss), (front toss), (BP), or (machine) after a drill'));
+  check('tip text about (prep)/(tee)/etc. present', cf.includes('add (prep), (tee), (side toss), (front toss), (BP), or (machine) after what you did'));
+  check('field framed as what you did, not drills', cf.includes('What you did <span class="hint-inline">(separate with commas)</span>') && !cf.includes('<label>Drills <span'));
+  check('"What did you do today?" heading present', cf.includes('What did you do today?'));
+  check('"Did you do any drills?" gate gone', !cf.includes('Did you do any drills?') && !cf.includes('name="did_drills"'));
+  check('drills block sits before the Feel slider',
+    cf.indexOf('What did you do today?') < cf.indexOf('name="feel"'));
+  // Grouped sections render from the grouped shape; empty sections omitted.
+  const cf2 = views.checkinForm({ role: 'athlete' }, null, {}, [], [],
+    { tee: ['Fence Drill (Tee)'], sideToss: [], frontToss: [], bp: [], machine: [], other: ['Walk In'] });
+  check('Off the tee section renders', cf2.includes('>Off the tee<'));
+  check('empty sections omitted', !cf2.includes('drill-section-label">Side toss</div>') && !cf2.includes('drill-section-label">Front toss</div>') && !cf2.includes('drill-section-label">Machine</div>'));
+  check('Other section renders', cf2.includes('>Other<'));
+  check('history drill chip keeps its tag', cf2.includes('data-drill="Fence Drill (Tee)"'));
+  // Pregame subtitle (Bobby, Sep 17 2026): hitter form only.
+  const cfSub = views.checkinForm({ role: 'athlete' }, null, {}, [], [], {});
+  check('drills subtitle element present with default text',
+    cfSub.includes('id="drills-subtitle"') && cfSub.includes('data-default="Everything you did'));
+  check('combined form keeps no pregame subtitle', !views.combinedCheckinForm({ role: 'athlete' }, null, {}).includes('drills-subtitle'));
+  const checkinSrc = fs.readFileSync(path.join(CWD, 'public/checkin.js'), 'utf8');
+  check('subtitle switches for Game', checkinSrc.includes('Your pregame prep') && checkinSrc.includes('what did you do to get ready?'));
+  check('subtitle switches for Live BP', checkinSrc.includes('What did you do to get ready for live BP?'));
+  check('subtitle watches the environment radios',
+    checkinSrc.includes("getElementById('drills-subtitle')") && checkinSrc.includes('input[name="environment"]'));
+  const cfP = views.checkinForm({ role: 'athlete' }, null, {}, [], [],
+    { prep: ['Arm Circles (Prep)'], tee: ['Fence Drill (Tee)'], sideToss: [], frontToss: [], bp: [], machine: [], other: [] });
+  check('Prep section renders before Off the tee',
+    cfP.indexOf('drill-section-label">Prep</div>') !== -1 &&
+    cfP.indexOf('drill-section-label">Prep</div>') < cfP.indexOf('drill-section-label">Off the tee</div>'));
+  check('prep-tagged drill lands in Prep section', cfP.includes('data-drill="Arm Circles (Prep)"'));
+  const cf3 = views.checkinForm({ role: 'athlete' }, null, {}, [], [{ name: 'Fence Drill', station: 'Tee' }], {});
+  check('routine button renders when routine set', cf3.includes('id="use-routine"') && cf3.includes('Edit daily routine'));
+
+  // ---- Unit: drill-field pure helpers in public/app.js (extracted from source) ----
+  const appSrc = fs.readFileSync(path.join(CWD, 'public/app.js'), 'utf8');
+  function extractFn(src, name) {
+    const start = src.indexOf('function ' + name + '(');
+    if (start < 0) throw new Error('fn not found: ' + name);
+    let i = src.indexOf('{', start), depth = 0;
+    for (let j = i; j < src.length; j++) {
+      if (src[j] === '{') depth++;
+      else if (src[j] === '}') { depth--; if (depth === 0) return src.slice(start, j + 1); }
+    }
+    throw new Error('unbalanced braces: ' + name);
+  }
+  const mergeDrillNames = new Function(extractFn(appSrc, 'mergeDrillNames') + '; return mergeDrillNames;')();
+  const toggleDrillName = new Function(extractFn(appSrc, 'toggleDrillName') + '; return toggleDrillName;')();
+  check('routine merge appends without dupes',
+    mergeDrillNames('Fence Drill (Tee)', ['Walk In Drill', 'Fence Drill (tee)']) === 'Fence Drill (Tee), Walk In Drill');
+  check('routine merge on empty field', mergeDrillNames('', ['A (Tee)', 'B']) === 'A (Tee), B');
+  check('routine merge no stray commas', mergeDrillNames('  A,, ', ['B']) === 'A, B');
+  check('routine merge keeps existing order', mergeDrillNames('B', ['A']) === 'B, A');
+  check('chip toggle adds', toggleDrillName('', 'Fence Drill (Tee)') === 'Fence Drill (Tee)');
+  check('chip toggle removes (case-insensitive)', toggleDrillName('A, FENCE DRILL (TEE)', 'Fence Drill (tee)') === 'A');
+  check('chip toggle no stray commas', toggleDrillName('A, B', 'B') === 'A');
 
   // ---- Boot 1: migration + seed ----
   fs.rmSync(DB, { force: true });
@@ -166,28 +219,44 @@ async function main() {
     check('org card shows My program toggle', html.includes('My program:'));
     check('toggle posts to /mine', html.includes(`/coach/organizations/${otherOrg}/mine`));
 
-    // ---- B refinement: history-driven drill chips ----
+    // ---- "What did you do today?" — grouped history sections ----
     const chipAthlete = run(`INSERT INTO users (email,password_hash,role,athlete_name,first_name,last_name,created_at,status) VALUES (?,?,?,?,?,?,?,?)`,
       'chips@test.com', h, 'athlete', 'Chip', 'Chip', 'Hitter', now, 'approved').lastInsertRowid;
     const addCheckin = (uid, drills, created) => run(`INSERT INTO checkins (user_id, athlete_name, created_at, drills_done) VALUES (?,?,?,?)`,
       uid, 'Chip Hitter', created, JSON.stringify(drills));
-    addCheckin(chipAthlete, ['Old Drill One', 'Fence Drill'], '2026-09-10T10:00:00');
-    addCheckin(chipAthlete, [{ name: 'Fence Drill', station: 'tee' }, 'Tee', 'New Drill Two'], '2026-09-12T10:00:00');
+    addCheckin(chipAthlete, ['Old Drill One', 'Walk In Drill (side toss)'], '2026-09-10T10:00:00');
+    addCheckin(chipAthlete, [{ name: 'Fence Drill', station: 'Tee' }, 'Tee', 'New Drill Two'], '2026-09-12T10:00:00');
     await login('chips', 'chips@test.com');
     r = await req('GET', '/checkin', null, 'chips');
     html = r.text;
     check('check-in 200 for hitter', r.status === 200);
+    check('"What did you do today?" heading in form', html.includes('What did you do today?'));
+    check('no did_drills gate in form', !html.includes('name="did_drills"') && !html.includes('Did you do any drills?'));
+    check('drills block before Feel slider', html.indexOf('What did you do today?') < html.indexOf('name="feel"'));
     const chipCount = (name) => html.split(`data-drill="${name}"`).length - 1;
-    check('recent drill chip rendered', chipCount('Fence Drill') === 1);
-    check('recent drill chip from object form', chipCount('New Drill Two') === 1);
-    check('older recent drill rendered', chipCount('Old Drill One') === 1);
-    check('preset matching recent drill not duplicated', chipCount('Tee') === 1);
+    const secIdx = (label) => html.indexOf(`drill-section-label">${label}</div>`);
+    const inSection = (chip, label, nextLabel) => {
+      const c = html.indexOf(`data-drill="${chip}"`);
+      const s = secIdx(label);
+      const n = nextLabel ? secIdx(nextLabel) : Infinity;
+      return c > s && c < n;
+    };
+    check('tagged drill chip keeps its tag', chipCount('Fence Drill (Tee)') === 1);
+    check('tee drill sits in Off the tee only', inSection('Fence Drill (Tee)', 'Off the tee', 'Side toss'));
+    check('side toss drill sits in Side toss only', inSection('Walk In Drill (side toss)', 'Side toss', 'Other'));
+    check('untagged drills sit in Other only', inSection('Old Drill One', 'Other', 'Quick picks') && inSection('New Drill Two', 'Other', 'Quick picks'));
+    check('empty sections omitted', secIdx('Front toss') === -1 && secIdx('BP') === -1 && secIdx('Machine') === -1);
+    check('preset matching literal history drill excluded', chipCount('Tee') === 1);
     check('other presets still render', ['Prep', 'Side Toss', 'Front Toss', 'BP', 'Machine'].every((d) => chipCount(d) === 1));
-    check('chips most-recent-first, recent before presets',
-      html.indexOf('data-drill="Fence Drill"') < html.indexOf('data-drill="New Drill Two"') &&
-      html.indexOf('data-drill="New Drill Two"') < html.indexOf('data-drill="Old Drill One"') &&
-      html.indexOf('data-drill="Old Drill One"') < html.indexOf('data-drill="Prep"'));
-    // Cap at 8 recent names.
+    check('sections in method order',
+      secIdx('Off the tee') < secIdx('Side toss') && secIdx('Side toss') < secIdx('Other') && secIdx('Other') < secIdx('Quick picks'));
+    // Case-insensitive dedupe across forms (string tag vs object station).
+    addCheckin(chipAthlete, ['fence drill (TEE)'], '2026-09-13T10:00:00');
+    r = await req('GET', '/checkin', null, 'chips');
+    html = r.text;
+    const fenceChips = (html.match(/data-drill="[^"]*fence drill[^"]*"/gi) || []).length;
+    check('case-insensitive dedupe across sections', fenceChips === 1);
+    // Cap at 8 per section (all untagged → Other).
     const capAthlete = run(`INSERT INTO users (email,password_hash,role,athlete_name,first_name,last_name,created_at,status) VALUES (?,?,?,?,?,?,?,?)`,
       'cap@test.com', h, 'athlete', 'Cap', 'Cap', 'Tester', now, 'approved').lastInsertRowid;
     addCheckin(capAthlete, ['D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9', 'D10'], '2026-09-12T10:00:00');
@@ -213,8 +282,113 @@ async function main() {
     check('gate: standalone player stays silent', gate(solo) === false);
     check('gate: non-mine-org player stays silent', gate(msuPlayer) === false);
     // The notify hook never breaks the check-in redirect (push off in tests).
-    r = await req('POST', '/checkin', P({ environment: 'Cage', feel: '7', confidence: '7', focus: '7', difficulty: '5', did_drills: 'no', session_notes: '', what_worked: '' }), 'briggs');
-    check('POST /checkin still redirects after notify hook', r.status === 302 && (r.loc || '').startsWith('/checkin/score/'));
+    // Drills are optional now — no did_drills gate, blank is fine.
+    r = await req('POST', '/checkin', P({ environment: 'Cage', feel: '7', confidence: '7', focus: '7', difficulty: '5', session_notes: '', what_worked: '' }), 'briggs');
+    check('POST /checkin with blank drills succeeds', r.status === 302 && (r.loc || '').startsWith('/checkin/score/'));
+    check('blank drills stored as empty array', q(`SELECT drills_done FROM checkins WHERE user_id = ? ORDER BY id DESC LIMIT 1`, briggs).drills_done === '[]');
+    r = await req('POST', '/checkin', P({ environment: 'Cage', feel: '7', confidence: '7', focus: '7', difficulty: '5', drills_done: 'Fence Drill (tee), Walk In Drill', session_notes: '', what_worked: '' }), 'briggs');
+    check('POST /checkin with drills succeeds', r.status === 302 && (r.loc || '').startsWith('/checkin/score/'));
+    const stored = q(`SELECT drills_done FROM checkins WHERE user_id = ? ORDER BY id DESC LIMIT 1`, briggs).drills_done;
+    check('drill station tags parsed on save', stored.includes('"station":"Tee"') && stored.includes('"name":"Walk In Drill"'));
+    // Skip keeps learning from the optional drills field: three scored
+    // check-ins with a registry drill, then confirm it shows up in the
+    // hitter's history picker AND in Skip's drill-derived what-works data.
+    for (let i = 0; i < 3; i++) {
+      r = await req('POST', '/checkin', P({ environment: 'Cage', feel: '8', confidence: '8', focus: '8', difficulty: '5', drills_done: 'Deep Tee Drill (Tee)', session_notes: '', what_worked: '' }), 'briggs');
+      check(`check-in ${i + 1} with Deep Tee Drill posts clean`, r.status === 302);
+    }
+    r = await req('GET', '/checkin', null, 'briggs');
+    check('submitted drill appears in the history picker (Off the tee)', r.text.includes('data-drill="Deep Tee Drill (Tee)"') && r.text.includes('drill-section-label">Off the tee</div>'));
+    r = await req('GET', '/', null, 'briggs');
+    check("Skip's what-works learned the drill", r.text.includes('What you did on good days') && r.text.includes('Deep Tee Drill'));
+
+    // ---- Remote-program pre-fill: today's scheduled work lands in
+    // "What did you do today?" on the initial GET (Bobby, Sep 17 2026) ----
+    // Build the schedule around today's actual Chicago weekday.
+    const chiWeekday = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Chicago', weekday: 'long' }).format(new Date());
+    const progJson = {
+      routine: [
+        { category: 'Daily Routine', items: [{ drill: 'No Stride Launch' }, { drill: 'Open 45 w Stride' }] },
+        { category: 'Day 1 \u2014 Tee', items: [{ drill: 'Deep Tee Drill' }, { drill: 'High Tee' }] },
+        { category: 'Day 1 \u2014 Side Flips', items: [{ drill: 'Side Flip Work' }] },
+        { category: 'Day 2 \u2014 BP', items: [{ drill: 'BP Rounds' }] },
+      ],
+      schedule: [[chiWeekday, 'Day 1']],
+    };
+    const progId = run(`INSERT INTO remote_programs (athlete_name, program_json, updated_at) VALUES (?,?,?)`,
+      'Remy Remote', JSON.stringify(progJson), now).lastInsertRowid;
+    const remy = addAthlete('remy@test.com', 'Remy', 'Remote');
+    run('UPDATE users SET remote_program_id = ?, organization_id = ? WHERE id = ?', progId, orgIdOf('Atkinson Hitting'), remy);
+    await login('remy', 'remy@test.com');
+    const drillsVal = (html) => (html.match(/id="drills-input"[^>]*value="([^"]*)"/) || [])[1];
+    r = await req('GET', '/checkin', null, 'remy');
+    check('remote player pre-fills today\u2019s scheduled work',
+      drillsVal(r.text) === 'No Stride Launch, Open 45 w Stride, Deep Tee Drill, High Tee, Side Flip Work');
+    // OFF day -> blank.
+    progJson.schedule = [[chiWeekday, 'OFF']];
+    run('UPDATE remote_programs SET program_json = ? WHERE id = ?', JSON.stringify(progJson), progId);
+    r = await req('GET', '/checkin', null, 'remy');
+    check('OFF day leaves the field blank', drillsVal(r.text) === '');
+    // POST fail path preserves the submitted value, never re-prefills.
+    progJson.schedule = [[chiWeekday, 'Day 1']];
+    run('UPDATE remote_programs SET program_json = ? WHERE id = ?', JSON.stringify(progJson), progId);
+    r = await req('POST', '/checkin', P({ environment: 'Bogus', feel: '8', confidence: '8', focus: '8', difficulty: '5', drills_done: 'My Custom Work', session_notes: '', what_worked: '' }), 'remy');
+    check('POST fail preserves submitted drills', r.status === 200 && r.text.includes('value="My Custom Work"') && !r.text.includes('value="No Stride Launch'));
+    // Non-remote player: no pre-fill.
+    r = await req('GET', '/checkin', null, 'briggs');
+    check('non-remote player gets no pre-fill', drillsVal(r.text) === '');
+
+    // ---- Tab bar: Program INSTEAD of Messages for remote players ----
+    r = await req('GET', '/', null, 'remy');
+    const tabbar = (r.text.match(/<nav id="tabbar"[\s\S]*?<\/nav>/) || [''])[0];
+    check('remote tab bar shows Program', tabbar.includes('href="/program"'));
+    check('remote tab bar hides Messages', !tabbar.includes('href="/messages"'));
+    check('remote drawer still lists Messages', r.text.includes('href="/messages"'));
+    r = await req('GET', '/', null, 'briggs');
+    const tabbar2 = (r.text.match(/<nav id="tabbar"[\s\S]*?<\/nav>/) || [''])[0];
+    check('non-remote tab bar still shows Messages', tabbar2.includes('href="/messages"'));
+    check('non-remote tab bar has no Program', !tabbar2.includes('href="/program"'));
+
+    // ---- Pregame prep learning (Bobby, Sep 17 2026): Skip-side only ----
+    const srvSrc = fs.readFileSync(path.join(CWD, 'src/server.js'), 'utf8');
+    check('game-day entries labeled pregame prep in Skip data',
+      srvSrc.includes("Pregame prep \\u2014 what he did to get ready") && srvSrc.includes("r.environment === 'Game' || r.environment === 'Live BP'"));
+    check('pregame line in Skip data block', srvSrc.includes('Pregame prep tied to his best games'));
+    check('pregame ranking filters Game/Live BP only', srvSrc.includes("environment IN ('Game', 'Live BP')"));
+    check('pregame ranking keeps the min-3-sessions threshold',
+      /function pregamePrepStats[\s\S]*?\.filter\(\(e\) => e\.count >= 3\)/.test(srvSrc));
+    // Ranking semantics, mirrored from pregamePrepStats (same pattern the
+    // suite uses for isMyProgramPlayer): 3 Game check-ins qualify, 2 Live BP
+    // stay under threshold, 5 Cage + 4 Tee Work must not pollute it.
+    const pg = addAthlete('pregame@test.com', 'Pregame', 'Pete');
+    await login('pg', 'pregame@test.com');
+    const postG = (env, drills) => req('POST', '/checkin',
+      P({ environment: env, feel: '8', confidence: '8', focus: '8', difficulty: '5', drills_done: drills, session_notes: '', what_worked: '' }), 'pg');
+    for (let i = 0; i < 3; i++) await postG('Game', 'Deep Tee Drill');
+    for (let i = 0; i < 2; i++) await postG('Live BP', 'Ball Drop Drill');
+    for (let i = 0; i < 5; i++) await postG('Cage', 'Flat Bat High Tee');
+    for (let i = 0; i < 4; i++) await postG('Tee Work', 'Deep Tee');
+    const tally = (rows) => {
+      const map = new Map();
+      for (const r of rows) {
+        for (const d of JSON.parse(r.drills_done || '[]')) {
+          const k = String(d.name || '').toLowerCase();
+          if (!k || (r._seen && r._seen.has(k))) continue;
+          (r._seen = r._seen || new Set()).add(k);
+          const e = map.get(k) || { name: d.name, total: 0, count: 0 };
+          e.total += r.session_score; e.count += 1; map.set(k, e);
+        }
+      }
+      return [...map.values()].filter((e) => e.count >= 3).map((e) => e.name);
+    };
+    const preRows = qall(
+      "SELECT drills_done, session_score FROM checkins WHERE athlete_name = ? AND session_score IS NOT NULL AND environment IN ('Game', 'Live BP')",
+      'Pregame Pete');
+    const preNames = tally(preRows).map((n) => n.toLowerCase());
+    check('pregame ranking includes the 3-game drill', preNames.includes('deep tee drill'));
+    check('below-threshold Live BP drill excluded', !preNames.includes('ball drop drill'));
+    check('Cage training days do not pollute pregame ranking', !preNames.includes('flat bat high tee'));
+    check('Tee Work training days do not pollute pregame ranking', !preNames.includes('deep tee'));
 
     // ---- D (revised): coach/player messaging — 1:1 + broadcast + inbox ----
     check('messages table exists', !!q("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'messages'"));

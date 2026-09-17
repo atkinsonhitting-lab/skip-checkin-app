@@ -89,7 +89,7 @@ async function main() {
     r = await req('GET', '/checkin', null, 'tw');
     check('two-way gets combined form', r.text.includes('id="combined-form"'));
     r = await req('GET', '/checkin', null, 'hit');
-    check('hitter keeps hitting form', r.text.includes('did_drills'));
+    check('hitter keeps hitting form', r.text.includes('What did you do today?') && !r.text.includes('data-throw-sync'));
 
     // ---- Role-gated POSTs ----
     r = await req('POST', '/checkin/pitching', P({ pitch_session_type: 'bullpen' }), 'hit');

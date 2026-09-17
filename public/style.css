@@ -303,6 +303,12 @@ body.drawer-open #drawer { transform: none; }
 .score-inline { color: var(--red); font-weight: 800; }
 .score-inline-lg { color: var(--red); font-weight: 900; font-size: 28px; }
 .drill-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+/* "What did you do today?" sections (Bobby, Sep 17 2026): each delivery-method
+   group is a horizontally scrollable chip row so players can scroll and tap repeats. */
+.drill-section { margin: 10px 0 2px; }
+.drill-section-label { font-size: 13px; font-weight: 700; color: var(--ink-soft, #5b5b5b); margin: 8px 0 2px; }
+.drill-chips-scroll { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 6px; }
+.drill-chips-scroll .drill-chip { flex: 0 0 auto; }
 .chip {
   background: var(--bg2); border: 1px solid var(--line); border-radius: 16px;
   padding: 5px 12px; font-size: 13px; font-weight: 600;
