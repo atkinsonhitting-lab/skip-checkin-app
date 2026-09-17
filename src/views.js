@@ -499,12 +499,12 @@ function userHome(user, extras) {
       <p class="skip-intro">Check in daily. Every session gets a read, and the app learns what your best days look like.</p>
       <a href="/checkin" class="btn-primary">Check in today's session</a>
     </div>
-    ${preCard}
+    ${user.viewAsRestricted ? '' : preCard}
     ${head}
     ${pushOn ? '' : streakCard}
     ${pushCard}
-    ${whatWorksSection(whatWorks)}
-    ${recent.length ? `<h2 class="section-head">Recent</h2>${recent.map(checkinCard).join('')}<p><a href="/notebook">See your notebook →</a></p>` : ''}
+    ${user.viewAsRestricted ? '' : whatWorksSection(whatWorks)}
+    ${recent.length ? `<h2 class="section-head">Recent</h2>${recent.map((c) => checkinCard(c, { restricted: user.viewAsRestricted })).join('')}<p><a href="/notebook">See your notebook →</a></p>` : ''}
     ${pushOn ? streakCard : ''}`,
   });
 }
@@ -527,7 +527,7 @@ function whatWorksSection(data, opts) {
     .map(
       (t) => `<div class="works-row">
           <div class="works-drill">&ldquo;${esc(t.text)}&rdquo;</div>
-          <div class="works-line">Shows up on your rough days \u2014 drop it <span class="hint-inline">(${t.count} sessions)</span>${levelLine(t.avg)}</div>
+          <div class="works-line">Shows up on your tough days \u2014 drop it <span class="hint-inline">(${t.count} sessions)</span>${levelLine(t.avg)}</div>
         </div>`
     )
     .join('');
@@ -998,12 +998,12 @@ function notebookPage(user, checkins, notes, players, justSubmitted, filter) {
     )
     .join('');
   const scored = checkins.filter((c) => c.session_score != null);
-  const avg = scored.length
-    ? Math.round((scored.reduce((s, c) => s + c.session_score, 0) / scored.length) * 10) / 10
-    : null;
+  // Median, not mean — one off day can't drag the read (Bobby, Sep 17 2026).
+  const med = medianOf(scored.map((c) => c.session_score));
+  const avg = med != null ? Math.round(med * 10) / 10 : null;
   const checkinsHtml = `
     ${avg !== null ? `<div class="level-head"><p class="hint">Your read over ${scored.length} session${scored.length === 1 ? '' : 's'}:</p>${levelLine(avg)}</div>` : ''}
-    ${checkins.length ? checkins.map((c) => checkinCard(c, { editable: !user.viewAs })).join('') : `<div class="card empty">${kindName ? `No ${kindName.toLowerCase()} sessions logged yet.` : `No check-ins yet. <a href="/checkin">Log your first session</a>.`}</div>`}`;
+    ${checkins.length ? checkins.map((c) => checkinCard(c, { editable: !user.viewAs, restricted: user.viewAsRestricted })).join('') : `<div class="card empty">${kindName ? `No ${kindName.toLowerCase()} sessions logged yet.` : `No check-ins yet. <a href="/checkin">Log your first session</a>.`}</div>`}`;
   return layout({
     title: 'Notebook',
     user,
@@ -1053,8 +1053,8 @@ function notebookPage(user, checkins, notes, players, justSubmitted, filter) {
 const TIER_NOTES = {
   'Locked In': "That's the standard. Remember exactly what this felt like.",
   'Solid': 'Good day. Stack another one on top of it.',
-  'Off': 'Shake it off — keep what worked, flush the rest.',
-  'Rough': 'Everyone has them. Write down one thing to fix and move on.',
+  'Building': 'Not your sharpest — but you put the work in, and that stacks.',
+  'Grind Day': 'Tough day. You showed up anyway, and that counts. Flush it and go again tomorrow.',
 };
 
 // Hitter self-serve check-in delete confirm (Bobby, Sep 17 2026).
@@ -1130,18 +1130,18 @@ function studyPlayerEditPage(user, player, error) {
 function tierBadgeClass(tier) {
   if (tier === 'Locked In') return 'ok';
   if (tier === 'Solid') return 'ok';
-  if (tier === 'Off') return 'warn';
+  if (tier === 'Building') return 'warn';
   return 'bad';
 }
 
 // Session levels — color-coded, no numeric scores shown to hitters.
 // The fuller the bar, the better the session. Bright green = best.
-const LEVEL_COLORS = { 'Rough': '#ff5252', 'Off': '#ffd54f', 'Solid': '#66bb6a', 'Locked In': '#00e676' };
+const LEVEL_COLORS = { 'Grind Day': '#ff5252', 'Building': '#ffd54f', 'Solid': '#66bb6a', 'Locked In': '#00e676' };
 function tierFor(score) {
   if (score >= 9.0) return 'Locked In';
   if (score >= 7.0) return 'Solid';
-  if (score >= 5.0) return 'Off';
-  return 'Rough';
+  if (score >= 5.0) return 'Building';
+  return 'Grind Day';
 }
 function levelColor(tier) { return LEVEL_COLORS[tier] || '#999'; }
 function levelBar(score, tier, lg) {
@@ -1178,13 +1178,13 @@ function scorePage(user, c) {
       <div class="level-hero-meter">${levelBar(c.session_score, c.score_tier, true)}</div>
       <div><span class="badge ${tierBadgeClass(c.score_tier)} badge-lg">${esc(c.score_tier)}</span></div>
       <p class="hint skip-note">${esc(TIER_NOTES[c.score_tier] || '')}</p>
-      <div class="score-breakdown">
+      ${user.viewAsRestricted ? '' : `<div class="score-breakdown">
         <div><span class="label">Feel</span><strong>${esc(c.feel)}</strong></div>
         <div><span class="label">Confidence</span><strong>${esc(c.confidence)}</strong></div>
         <div><span class="label">Focus</span><strong>${esc(c.focus)}</strong></div>
         ${c.difficulty != null ? `<div><span class="label">Difficulty</span><strong>${esc(c.difficulty)}</strong></div>` : ''}
         ${throwBits.map(([l, val]) => `<div><span class="label">${esc(l)}</span><strong>${esc(val)}</strong></div>`).join('')}
-      </div>
+      </div>`}
       ${isCombined && c.hitting_score != null && c.pitching_score != null ? `<p class="hint">Hitting ${esc(c.hitting_score)} · Throwing ${esc(c.pitching_score)}</p>` : ''}
       ${skipReadBlock(c)}
       <div class="score-actions">
@@ -1259,12 +1259,25 @@ function skipReadBlock(c) {
   return `<p class="skip-pending">Reviewing your entry — your read lands here.</p>`;
 }
 
+// Median of session scores — the typical day. A single off day can't drag
+// it the way a mean lets it (Bobby, Sep 17 2026).
+function medianOf(xs) {
+  const s = xs.filter((v) => v != null).sort((a, b) => a - b);
+  if (!s.length) return null;
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+
 function checkinCard(c, opts) {
   // Hitter self-serve edit/delete (Bobby, Sep 17 2026): shown only on the
   // hitter's own notebook — never on coach views. Server re-checks ownership.
   const editActions = opts && opts.editable && c.id
     ? `<div class="checkin-actions"><a href="/checkin/${c.id}/edit">Edit</a><a href="/checkin/${c.id}/delete" class="danger-link">Delete</a></div>`
     : '';
+  // College-org privacy (Bobby, Sep 17 2026): coaches of programs that aren't
+  // Bobby's own see the brief summary — what the player did, Skip's read —
+  // not the player's own words or feel-slider numbers.
+  const restricted = !!(opts && opts.restricted) || !!c.coachRestricted;
   const drills = drillsOf(c);
   const realDrills = drills.filter((d) => d.known);
   const otherWork = drills.filter((d) => !d.known);
@@ -1292,7 +1305,7 @@ function checkinCard(c, opts) {
   try { pitchesThrown = JSON.parse(c.pitches_thrown || '[]'); } catch (e) {}
   const score = `${c.session_score != null ? `<div class="checkin-score">
       ${levelLine(c.session_score, c.score_tier)}
-      <span class="hint-inline">Feel ${esc(c.feel)} · Conf ${esc(c.confidence)} · Focus ${esc(c.focus)}${c.difficulty != null ? ` · Difficulty ${esc(c.difficulty)}` : ''}${c.command != null ? ` · Command ${esc(c.command)}` : ''}</span>
+      ${restricted ? '' : `<span class="hint-inline">Feel ${esc(c.feel)} · Conf ${esc(c.confidence)} · Focus ${esc(c.focus)}${c.difficulty != null ? ` · Difficulty ${esc(c.difficulty)}` : ''}${c.command != null ? ` · Command ${esc(c.command)}` : ''}</span>`}
       ${throwBits.length ? `<div class="hint-inline">${throwBits.join(' · ')}</div>` : ''}
       ${pitchesThrown.length ? `<div class="drill-chips">${pitchesThrown.map((p) => `<span class="chip">${esc(p)}</span>`).join('')}</div>` : ''}
     </div>` : ''}`;
@@ -1313,7 +1326,7 @@ function checkinCard(c, opts) {
     ${score}
     ${drillRow}
     ${read}
-    <details class="checkin-more"><summary>Full entry</summary>${words || `<p class="hint">No notes written for this session.</p>`}</details>
+    ${restricted ? '' : `<details class="checkin-more"><summary>Full entry</summary>${words || `<p class="hint">No notes written for this session.</p>`}</details>`}
     ${editActions}
   </div>`;
 }
@@ -1370,6 +1383,7 @@ function pendingApprovalCards(pending, canEdit) {
 function coachApprovalsPage(user, pending, waitingOnParent) {
   const n = (pending || []).length;
   const canEdit = user.role === 'coach' && user.canEdit !== false;
+  const restricted = !!(opts && opts.restricted);
   return layout({
     title: 'Approvals',
     user,
@@ -1845,7 +1859,7 @@ function coachHittersPage(user, userStats, opts) {
         <a href="/coach/user/${encodeURIComponent(a.email)}" style="display:block;color:inherit;text-decoration:none">
           <div class="athlete-card-name">${esc(a.name)} ${rolePill(a.playerType)}</div>
           <div class="athlete-card-email">${esc(a.email)}</div>
-          <div class="athlete-card-meta">${a.total} check-in${a.total === 1 ? '' : 's'}${a.last ? ` · last ${fmtDate(a.last)}` : ' · none yet'}${a.age != null ? ` · age ${a.age}` : ''}${a.team ? ` · ${esc(a.team)}` : ''}</div>
+          <div class="athlete-card-meta">${a.total} check-in${a.total === 1 ? '' : 's'}${a.streak ? ` · 🔥 ${a.streak}-day streak` : ''}${a.weekCount != null ? ` · ${a.weekCount}/7 days` : ''}${a.last ? ` · last ${fmtDate(a.last)}` : ' · none yet'}${a.age != null ? ` · age ${a.age}` : ''}${a.team ? ` · ${esc(a.team)}` : ''}</div>
         </a>
         <div style="display:flex;gap:8px;margin:8px 0 0;flex-wrap:wrap">
           ${o.messageButton ? `<a class="btn-small" href="/coach/messages/${a.id}">Message</a>` : ''}
@@ -2031,6 +2045,7 @@ function coachThreadPage(user, other, msgs, opts) {
 // Coach Programs tab: the remote program list.
 function coachProgramsPage(user, remotePrograms) {
   const canEdit = user.role === 'coach' && user.canEdit !== false;
+  const restricted = !!(opts && opts.restricted);
   return layout({
     title: 'Programs',
     user,
@@ -2509,6 +2524,7 @@ function librarySection(library) {
 
 function coachLibraryPage(user, cats, activeCat, videos, playing) {
   const canEdit = user.role === 'coach' && user.canEdit !== false;
+  const restricted = !!(opts && opts.restricted);
   const pills = cats
     .map(
       (c) =>
@@ -2576,10 +2592,14 @@ function throwingSummarySection(sum) {
   </div><p class="hint">Last ${sum.sessions} throwing session${sum.sessions === 1 ? '' : 's'}.</p></div>`;
 }
 
-function coachUser(user, name, checkins, whatWorks, thread, email, memories, routine, playerType, throwSum, msgUserId) {
+function coachUser(user, name, checkins, whatWorks, thread, email, memories, routine, playerType, throwSum, msgUserId, opts) {
   const pt = playerType || 'hitter';
+  // College-org privacy (Bobby, Sep 17 2026): coaches of programs that aren't
+  // Bobby's own see the brief summary only — no chat history, no what-works
+  // detail, no journal words on the cards.
   const skipImg = `<img src="${skipAvatar({ playerType: pt })}" class="skip-avatar" alt="Skip">`;
   const canEdit = user.role === 'coach' && user.canEdit !== false;
+  const restricted = !!(opts && opts.restricted);
   const convo =
     thread && thread.length
       ? `<h2 class="section-head">Chat history</h2>
@@ -2601,9 +2621,9 @@ function coachUser(user, name, checkins, whatWorks, thread, email, memories, rou
     ${pt === 'pitcher' ? '' : routineReadonly(routine)}
     ${pt !== 'hitter' ? throwingSummarySection(throwSum) : ''}
     ${memorySection(email, memories, canEdit)}
-    ${whatWorksSection(whatWorks || {}, { readOnly: true })}
-    ${convo}
-    ${checkins.length ? checkins.map(checkinCard).join('') : '<div class="card empty">No check-ins yet.</div>'}
+    ${restricted ? '' : whatWorksSection(whatWorks || {}, { readOnly: true })}
+    ${restricted ? '' : convo}
+    ${checkins.length ? checkins.map((c) => checkinCard(c, { restricted })).join('') : '<div class="card empty">No check-ins yet.</div>'}
     ${canEdit ? `<p style="margin-top:28px;text-align:center"><a href="/coach/user/${encodeURIComponent(email)}/delete" style="color:#8a8a8a;font-size:14px">Delete hitter from the platform</a></p>` : ''}`,
   });
 }
@@ -2709,6 +2729,7 @@ function coachSkipPage(user, entries, hitters, thread, chatEnabled, saved, propo
   const brain = require('./brain');
   const skipImg = `<img src="/skip-avatar.webp" class="skip-avatar" alt="Skip">`;
   const canEdit = user.role === 'coach' && user.canEdit !== false;
+  const restricted = !!(opts && opts.restricted);
   const msgs = (thread || [])
     .map(
       (m) =>

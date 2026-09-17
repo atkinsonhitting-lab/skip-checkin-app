@@ -562,6 +562,14 @@ function parsePitchesThrown(v) {
   const arr = Array.isArray(v) ? v : v ? [v] : [];
   return [...new Set(arr.map((s) => String(s).trim()).filter((s) => PITCH_TYPES.includes(s)))];
 }
+// College-org privacy (Bobby, Sep 17 2026): players in programs that aren't
+// Bobby's own (organizations.is_mine != 1) get the restricted coach view —
+// coaches see the brief summary (what he did, logged/streak/frequency, Skip's
+// read), not the journal words, feel sliders, chats, or what-works detail.
+function orgIsRestricted(organizationId, isMine) {
+  return organizationId != null && isMine !== 1;
+}
+
 function attachUser(req, res, next) {
   if (req.session && req.session.userId) {
     const row = db.prepare('SELECT id, email, role, athlete_name, first_name, last_name, status, remote_program_id, can_edit, organization_id, team_id, date_of_birth, player_type FROM users WHERE id = ?').get(req.session.userId);
@@ -577,6 +585,10 @@ function attachUser(req, res, next) {
           req.user = decorateUser(toReqUser(t));
           req.user.viewAs = true;
           req.user.viewAsName = req.user.displayName;
+          const tOrg = t.organization_id
+            ? db.prepare('SELECT is_mine FROM organizations WHERE id = ?').get(t.organization_id)
+            : null;
+          req.user.viewAsRestricted = orgIsRestricted(t.organization_id, tOrg && tOrg.is_mine);
         } else {
           delete req.session.viewAsUserId;
         }
@@ -3014,14 +3026,24 @@ function coachUserStats(scope, opts) {
        ORDER BY u.created_at ASC`
     )
     .all(...sp);
+  const weekCutoff = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 19).replace('T', ' ');
   return users.map((u) => {
     const row = db
       .prepare('SELECT COUNT(*) AS total, MAX(created_at) AS last FROM checkins WHERE user_id = ?')
       .get(u.id);
     const name = [u.first_name, u.last_name].filter(Boolean).join(' ') || u.athlete_name || u.email;
     const flag = u.notify_on_checkin;
+    // Logging cadence for the coach's brief view: current streak + days logged of the last 7.
+    const streak = streakData(u.id).streak || 0;
+    let weekCount = 0;
+    try {
+      const wrows = db.prepare('SELECT created_at FROM checkins WHERE user_id = ? AND created_at >= ?').all(u.id, weekCutoff);
+      const wdays = new Set();
+      for (const r of wrows) { try { wdays.add(chiDay(r.created_at)); } catch (e) {} }
+      weekCount = wdays.size;
+    } catch (e) {}
     return { id: u.id, email: u.email, name, total: row.total, last: row.last, age: ageOn(u.date_of_birth), team: u.team_name || null, playerType: u.player_type || 'hitter',
-      notifyOn: flag === 1 || (flag == null && u.org_is_mine === 1) };
+      notifyOn: flag === 1 || (flag == null && u.org_is_mine === 1), streak, weekCount };
   });
 }
 
@@ -3242,11 +3264,13 @@ app.get('/coach', requireCoachAny, (req, res) => {
   const quiet = coachQuietHitters(stats);
   const latest = db
     .prepare(
-      `SELECT c.*, u.email AS athlete_email FROM checkins c JOIN users u ON u.id = c.user_id
+      `SELECT c.*, u.email AS athlete_email, u.organization_id, o.is_mine AS org_is_mine
+       FROM checkins c JOIN users u ON u.id = c.user_id LEFT JOIN organizations o ON o.id = u.organization_id
        WHERE (? IS NULL OR u.organization_id = ?) AND (? IS NULL OR u.team_id = ?)
        ORDER BY c.created_at DESC LIMIT 8`
     )
-    .all(...sp);
+    .all(...sp)
+    .map((r) => ({ ...r, coachRestricted: orgIsRestricted(r.organization_id, r.org_is_mine) }));
   const pending = pendingList(scope);
   const me = realUser(req);
   const analytics = coachAnalytics(scope, stats);
@@ -3797,19 +3821,26 @@ app.get('/coach/user/:email', requireCoachAny, (req, res) => {
   const em = (req.params.email || '').toLowerCase();
   const sp = scopeParams(orgScope(req));
   const user = db
-    .prepare(`SELECT id, email, athlete_name, first_name, last_name, player_type FROM users WHERE email = ? AND role != 'coach' ${SCOPE_CLAUSE}`)
+    .prepare(`SELECT id, email, athlete_name, first_name, last_name, player_type, organization_id FROM users WHERE email = ? AND role != 'coach' ${SCOPE_CLAUSE}`)
     .get(em, ...sp);
   if (!user) return res.status(404).send('Unknown user.');
+  const uOrg = user.organization_id
+    ? db.prepare('SELECT is_mine FROM organizations WHERE id = ?').get(user.organization_id)
+    : null;
+  const restricted = orgIsRestricted(user.organization_id, uOrg && uOrg.is_mine);
   const rows = db
     .prepare('SELECT * FROM checkins WHERE user_id = ? ORDER BY created_at DESC')
     .all(user.id);
+  if (restricted) rows.forEach((r) => { r.coachRestricted = true; });
   const name = user.athlete_name || user.email;
-  const thread = db
-    .prepare('SELECT role, content, created_at FROM chat_messages WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 200')
-    .all(user.id)
-    .reverse();
+  const thread = restricted
+    ? []
+    : db
+        .prepare('SELECT role, content, created_at FROM chat_messages WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 200')
+        .all(user.id)
+        .reverse();
   const pt = user.player_type || 'hitter';
-  res.send(views.coachUser(realUser(req), name, rows, whatWorksData(name, user.id), thread, user.email, brain.listMemory(db, user.id), getRoutine(user.id), pt, pt === 'hitter' ? null : throwingSummary(user.id), isMyProgramPlayer(user.id) ? user.id : null));
+  res.send(views.coachUser(realUser(req), name, rows, restricted ? null : whatWorksData(name, user.id), thread, user.email, brain.listMemory(db, user.id), getRoutine(user.id), pt, pt === 'hitter' ? null : throwingSummary(user.id), isMyProgramPlayer(user.id) ? user.id : null, { restricted }));
 });
 
 // Throwing summary for a pitcher's or two-way player's coach view: session
@@ -3894,16 +3925,31 @@ function deleteHitter(userId) {
 app.get('/coach/export', requireCoachAny, (req, res) => {  const sp = scopeParams(orgScope(req));
   const rows = db
     .prepare(
-      `SELECT c.id, c.athlete_name, u.email, c.created_at, c.environment, c.drills_done,
+      `SELECT c.id, c.athlete_name, u.email, u.organization_id, o.is_mine AS org_is_mine,
+              c.created_at, c.environment, c.drills_done,
               c.feel, c.confidence, c.focus, c.session_score, c.score_tier,
               c.session_notes, c.what_worked, c.whats_next,
               c.skip_journal_score, c.skip_journal_note, c.skip_rated_at
-       FROM checkins c JOIN users u ON u.id = c.user_id
+       FROM checkins c JOIN users u ON u.id = c.user_id LEFT JOIN organizations o ON o.id = u.organization_id
        WHERE (? IS NULL OR u.organization_id = ?) AND (? IS NULL OR u.team_id = ?)
        ORDER BY c.created_at ASC`
     )
     .all(...sp)
-    .map((r) => ({ ...r, drills_done: safeParseDrills(r.drills_done) }));
+    .map((r) => {
+      // College-org privacy: the export carries the brief summary only —
+      // journal words and feel sliders stay private.
+      const { organization_id, org_is_mine, ...rest } = r;
+      const out = { ...rest, drills_done: safeParseDrills(r.drills_done) };
+      if (orgIsRestricted(organization_id, org_is_mine)) {
+        out.feel = null;
+        out.confidence = null;
+        out.focus = null;
+        out.session_notes = null;
+        out.what_worked = null;
+        out.whats_next = null;
+      }
+      return out;
+    });
   res.setHeader('Content-Disposition', 'attachment; filename="skip-checkins-export.json"');
   res.json({ exported_at: new Date().toISOString(), checkins: rows });
 });

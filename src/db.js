@@ -822,4 +822,14 @@ if (!db.prepare("SELECT value FROM settings WHERE key = 'checkin_dedup_20260916'
   console.log(`CHECKIN DEDUP: removed ${toDelete.length} duplicate check-in row(s)${detail ? ` — ${detail}` : ''}`);
 }
 
+// Score tier rename (Bobby, Sep 17 2026): 'Off' -> 'Building', 'Rough' ->
+// 'Grind Day'. Backfills every historical check-in so past entries show the
+// new encouraging names (and their colors) everywhere. Guarded to run once.
+if (!db.prepare("SELECT value FROM settings WHERE key = 'score_tier_rename_20260917'").get()) {
+  const offN = db.prepare("UPDATE checkins SET score_tier = 'Building' WHERE score_tier = 'Off'").run().changes;
+  const roughN = db.prepare("UPDATE checkins SET score_tier = 'Grind Day' WHERE score_tier = 'Rough'").run().changes;
+  db.prepare("INSERT INTO settings (key, value) VALUES ('score_tier_rename_20260917', '1')").run();
+  console.log(`MIGRATE_TIER_NAMES: renamed ${offN} 'Off' -> 'Building', ${roughN} 'Rough' -> 'Grind Day' on historical check-ins`);
+}
+
 module.exports = db;
