@@ -45,6 +45,7 @@ async function main() {
   check('"Did you do any drills?" gate gone', !cf.includes('Did you do any drills?') && !cf.includes('name="did_drills"'));
   check('drills block sits before the Feel slider',
     cf.indexOf('What did you do today?') < cf.indexOf('name="feel"'));
+  check('session notes marked required in the form', cf.includes('Session notes <span class="req"'));
   // Sectioned inputs render from the grouped shape; every section's input
   // always renders, chips rows are omitted when the section is empty.
   const cf2 = views.checkinForm({ role: 'athlete' }, null, {}, [], [],
@@ -328,11 +329,19 @@ async function main() {
     check('gate: non-mine-org player stays silent', gate(msuPlayer) === false);
     // The notify hook never breaks the check-in redirect (push off in tests).
     // Drills are optional now — no did_drills gate, blank is fine.
-    r = await req('POST', '/checkin', P({ environment: 'Cage', feel: '7', confidence: '7', focus: '7', difficulty: '5', session_notes: '', what_worked: '' }), 'briggs');
+    r = await req('POST', '/checkin', P({ environment: 'Cage', feel: '7', confidence: '7', focus: '7', difficulty: '5', session_notes: 'Felt locked in today.', what_worked: '' }), 'briggs');
     check('POST /checkin with blank drills succeeds', r.status === 302 && (r.loc || '').startsWith('/checkin/score/'));
     check('blank drills stored as empty array', q(`SELECT drills_done FROM checkins WHERE user_id = ? ORDER BY id DESC LIMIT 1`, briggs).drills_done === '[]');
+    // Session notes are required (Bobby, Sep 17 2026); "where were you"
+    // (environment) already was — both are enforced server-side too.
+    r = await req('POST', '/checkin', P({ environment: 'Cage', feel: '7', confidence: '7', focus: '7', difficulty: '5', session_notes: '   ', what_worked: '' }), 'briggs');
+    check('POST /checkin with blank session notes fails', r.status === 200 && r.text.includes('Write a few session notes'));
+    r = await req('POST', '/checkin', P({ feel: '7', confidence: '7', focus: '7', difficulty: '5', session_notes: 'Felt good.', what_worked: '' }), 'briggs');
+    check('POST /checkin with no environment fails', r.status === 200 && r.text.includes('Pick the environment you were in.'));
+    const vjs = fs.readFileSync(path.join(CWD, 'public/checkin.js'), 'utf8');
+    check('client validator requires session notes', vjs.includes("missing('session_notes'"));
     // Sectioned submit: each section's input gets its section tag; Other keeps no tag.
-    r = await req('POST', '/checkin', P({ environment: 'Cage', feel: '7', confidence: '7', focus: '7', difficulty: '5', sec_tee: 'Fence Drill, Walk In Drill', sec_bp: 'BP Rounds', sec_other: 'Random Work', session_notes: '', what_worked: '' }), 'briggs');
+    r = await req('POST', '/checkin', P({ environment: 'Cage', feel: '7', confidence: '7', focus: '7', difficulty: '5', sec_tee: 'Fence Drill, Walk In Drill', sec_bp: 'BP Rounds', sec_other: 'Random Work', session_notes: 'Felt locked in today.', what_worked: '' }), 'briggs');
     check('POST /checkin with sectioned drills succeeds', r.status === 302 && (r.loc || '').startsWith('/checkin/score/'));
     const stored = q(`SELECT drills_done FROM checkins WHERE user_id = ? ORDER BY id DESC LIMIT 1`, briggs).drills_done;
     const storedArr = JSON.parse(stored);
@@ -343,14 +352,14 @@ async function main() {
     check('sections stored in section order',
       storedArr.map((d) => d.name).join('|') === 'Fence Drill|Walk In Drill|BP Rounds|Random Work');
     // Explicit (tag) in a section input wins over the section tag.
-    r = await req('POST', '/checkin', P({ environment: 'Cage', feel: '7', confidence: '7', focus: '7', difficulty: '5', sec_tee: 'Fence Drill (machine)', session_notes: '', what_worked: '' }), 'briggs');
+    r = await req('POST', '/checkin', P({ environment: 'Cage', feel: '7', confidence: '7', focus: '7', difficulty: '5', sec_tee: 'Fence Drill (machine)', session_notes: 'Felt locked in today.', what_worked: '' }), 'briggs');
     const stored2 = JSON.parse(q(`SELECT drills_done FROM checkins WHERE user_id = ? ORDER BY id DESC LIMIT 1`, briggs).drills_done);
     check('explicit tag kept over section tag', stored2.some((d) => d.name === 'Fence Drill' && d.station === 'Machine'));
     // Skip keeps learning from the sectioned drills field: three scored
     // check-ins with a registry drill, then confirm it shows up in the
     // hitter's history picker AND in Skip's drill-derived what-works data.
     for (let i = 0; i < 3; i++) {
-      r = await req('POST', '/checkin', P({ environment: 'Cage', feel: '8', confidence: '8', focus: '8', difficulty: '5', sec_tee: 'Deep Tee Drill', session_notes: '', what_worked: '' }), 'briggs');
+      r = await req('POST', '/checkin', P({ environment: 'Cage', feel: '8', confidence: '8', focus: '8', difficulty: '5', sec_tee: 'Deep Tee Drill', session_notes: 'Felt locked in today.', what_worked: '' }), 'briggs');
       check(`check-in ${i + 1} with Deep Tee Drill posts clean`, r.status === 302);
     }
     r = await req('GET', '/checkin', null, 'briggs');
@@ -395,7 +404,7 @@ async function main() {
     // POST fail path preserves the submitted section values, never re-prefills.
     progJson.schedule = [[chiWeekday, 'Day 1']];
     run('UPDATE remote_programs SET program_json = ? WHERE id = ?', JSON.stringify(progJson), progId);
-    r = await req('POST', '/checkin', P({ environment: 'Bogus', feel: '8', confidence: '8', focus: '8', difficulty: '5', sec_tee: 'My Custom Work', sec_bp: 'BP Stuff', session_notes: '', what_worked: '' }), 'remy');
+    r = await req('POST', '/checkin', P({ environment: 'Bogus', feel: '8', confidence: '8', focus: '8', difficulty: '5', sec_tee: 'My Custom Work', sec_bp: 'BP Stuff', session_notes: 'Felt locked in today.', what_worked: '' }), 'remy');
     check('POST fail preserves submitted section values',
       r.status === 200 && secVal(r.text, 'sec_tee') === 'My Custom Work' && secVal(r.text, 'sec_bp') === 'BP Stuff' &&
       !r.text.includes('value="No Stride Launch'));
@@ -430,7 +439,7 @@ async function main() {
     const pg = addAthlete('pregame@test.com', 'Pregame', 'Pete');
     await login('pg', 'pregame@test.com');
     const postG = (env, drills) => req('POST', '/checkin',
-      P({ environment: env, feel: '8', confidence: '8', focus: '8', difficulty: '5', sec_tee: drills, session_notes: '', what_worked: '' }), 'pg');
+      P({ environment: env, feel: '8', confidence: '8', focus: '8', difficulty: '5', sec_tee: drills, session_notes: 'Felt locked in today.', what_worked: '' }), 'pg');
     for (let i = 0; i < 3; i++) await postG('Game', 'Deep Tee Drill');
     for (let i = 0; i < 2; i++) await postG('Live BP', 'Ball Drop Drill');
     for (let i = 0; i < 5; i++) await postG('Cage', 'Flat Bat High Tee');

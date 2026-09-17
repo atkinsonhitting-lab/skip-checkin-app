@@ -2189,6 +2189,10 @@ app.post('/checkin', requireLogin, (req, res) => {
   if (feel === null || confidence === null || focus === null || difficulty === null) {
     return fail('Rate feel, confidence, focus, and difficulty from 1 to 10.');
   }
+  // Session notes are required (Bobby, Sep 17 2026) — Skip coaches from them.
+  if (!(b.session_notes || '').trim()) {
+    return fail('Write a few session notes — what you felt, what you saw, what was off.');
+  }
   // Drills are optional (Bobby, Sep 17 2026): "What did you do today?" with
   // blank fine — no Yes/No gate anymore. The 7 section inputs are parsed
   // into one drills_done array (section order); explicit (tag)s are kept.

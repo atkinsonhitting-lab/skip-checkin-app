@@ -309,6 +309,7 @@ body.drawer-open #drawer { transform: none; }
 .drill-section-label { font-size: 14px; font-weight: 800; color: var(--red); margin: 6px 0 2px; text-transform: uppercase; letter-spacing: .6px; }
 .drill-section input { padding: 9px 12px; margin-top: 2px; }
 .drill-section .drill-chips { margin: 4px 0 2px; }
+.req { color: var(--red); font-weight: 800; }
 .drill-chips-scroll { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 6px; }
 .drill-chips-scroll .drill-chip { flex: 0 0 auto; }
 .chip {

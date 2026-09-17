@@ -217,6 +217,11 @@ window.addEventListener('pageshow', function () {
           'Skip needs to know what kind of day it was to make sense of your entry.');
       }
       // Drills are optional — "What did you do today?" with blank fine (Bobby, Sep 17 2026).
+      // Session notes are required (Bobby, Sep 17 2026) — Skip coaches from them.
+      if (blank(v.session_notes)) {
+        missing('session_notes', 'Session notes',
+          'A few honest lines — what you felt, what you saw, what was off.');
+      }
     } else if (kind === 'pitching') {
       checkThrowing();
     } else if (kind === 'combined') {
@@ -259,6 +264,7 @@ window.addEventListener('pageshow', function () {
       velo_max: 'input[name="velo_max"]',
       recovery_notes: 'textarea[name="recovery_notes"]',
       no_throw_note: 'textarea[name="no_throw_note"]',
+      session_notes: 'textarea[name="session_notes"]',
       throw_focus: 'textarea[name="throw_focus"]',
       focus: 'textarea[name="focus"]'
     };
@@ -294,6 +300,7 @@ window.addEventListener('pageshow', function () {
       velo_max: fieldVal('velo_max'),
       recovery_notes: fieldVal('recovery_notes'),
       no_throw_note: fieldVal('no_throw_note'),
+      session_notes: fieldVal('session_notes'),
       throw_focus: fieldVal('throw_focus'),
       focus: fieldVal('focus'),
       pre_kind: fieldVal('kind')
