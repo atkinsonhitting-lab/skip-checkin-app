@@ -652,8 +652,9 @@ const DRILL_SECTIONS = [
   { key: 'other', field: 'sec_other', label: 'Other', quick: null },
 ];
 
-function checkinForm(user, error, values, drillNames, routine, recentGroups) {
+function checkinForm(user, error, values, drillNames, routine, recentGroups, action) {
   const v = values || {};
+  const isEdit = !!action; // hitter self-serve edit (Bobby, Sep 17 2026)
   const rt = routine || [];
   const routineJson = esc(JSON.stringify(rt.map((d) => ({ name: d.name, station: d.station }))));
   const envPills = ENVIRONMENTS
@@ -666,9 +667,9 @@ function checkinForm(user, error, values, drillNames, routine, recentGroups) {
     title: 'Check In',
     user,
     tabs: userTabs('checkin', user),
-    body: `<h1 class="page-title">Check In</h1>
-    <div class="card"><p class="hint skip-intro">Log your session. Give as much detail as you can — the more detail, the better the reads get.</p>
-    <form method="post" action="/checkin" class="form" data-validate="hitting">
+    body: `<h1 class="page-title">${isEdit ? 'Edit check-in' : 'Check In'}</h1>
+    <div class="card"><p class="hint skip-intro">${isEdit ? 'Fix anything that wasn’t right. Saving updates your entry — the session date stays the same.' : 'Log your session. Give as much detail as you can — the more detail, the better the reads get.'}</p>
+    <form method="post" action="${isEdit ? esc(action) : '/checkin'}" class="form" data-validate="hitting">
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
       <div class="field-label">Where were you?</div>
       <div class="pills">${envPills}</div>
@@ -709,7 +710,7 @@ function checkinForm(user, error, values, drillNames, routine, recentGroups) {
       <label>Session notes <span class="req" aria-hidden="true">*</span> <span class="hint-inline">(don't hold back — what you felt, what you saw, what was off)</span><span class="talk-wrap"><textarea id="session_notes" name="session_notes" rows="4" placeholder="How did it go? What did you feel?">${esc(v.session_notes || '')}</textarea><button type="button" class="mic-btn" data-target="session_notes" aria-label="Dictate instead of typing">🎙</button></span></label>
       <label>What worked <span class="hint-inline">(be specific — the exact drill, cue, or feel)</span><span class="talk-wrap"><textarea id="what_worked" name="what_worked" rows="2" placeholder="What clicked today?">${esc(v.what_worked || '')}</textarea><button type="button" class="mic-btn" data-target="what_worked" aria-label="Dictate instead of typing">🎙</button></span></label>
       <datalist id="drill-list">${datalist}</datalist>
-      <button type="submit" class="btn-primary">Submit check-in</button>
+      <button type="submit" class="btn-primary">${isEdit ? 'Save changes' : 'Submit check-in'}</button>
     </form></div>`,
   });
 }
@@ -717,8 +718,9 @@ function checkinForm(user, error, values, drillNames, routine, recentGroups) {
 // Combined two-way check-in (Sep 2026): one form for both. "What did you do
 // today?" toggles the condensed hitting and throwing blocks; feel, focus,
 // confidence and the three reflections are shared so he only answers once.
-function combinedCheckinForm(user, error, values) {
+function combinedCheckinForm(user, error, values, action) {
   const v = values || {};
+  const isEdit = !!action; // hitter self-serve edit (Bobby, Sep 17 2026)
   const didHit = v.did_hit === 'yes' || (!v.pitch_session_type && v.did_throw !== 'yes');
   const didThrow = v.did_throw === 'yes' || !!v.pitch_session_type;
   const envPills = ENVIRONMENTS
@@ -729,9 +731,9 @@ function combinedCheckinForm(user, error, values) {
     title: 'Check In',
     user,
     tabs: userTabs('checkin', user),
-    body: `<h1 class="page-title">Check In</h1>
-    <div class="card"><p class="hint skip-intro">One check-in for the whole day. Say what you did — hitting, throwing, or both.</p>
-    <form method="post" action="/checkin/combined" class="form" id="combined-form" data-throw-sync data-validate="combined">
+    body: `<h1 class="page-title">${isEdit ? 'Edit check-in' : 'Check In'}</h1>
+    <div class="card"><p class="hint skip-intro">${isEdit ? 'Fix anything that wasn\u2019t right. Saving updates your entry \u2014 the session date stays the same.' : 'One check-in for the whole day. Say what you did \u2014 hitting, throwing, or both.'}</p>
+    <form method="post" action="${isEdit ? esc(action) : '/checkin/combined'}" class="form" id="combined-form" data-throw-sync data-validate="combined">
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
       <div class="field-label">What did you do today?</div>
       <div class="pills">
@@ -757,7 +759,7 @@ function combinedCheckinForm(user, error, values) {
       <label>What was working?<span class="talk-wrap"><textarea id="what_was_working" name="what_was_working" rows="2" placeholder="Which feel, which pitch, which cue?">${esc(v.what_was_working || '')}</textarea>${mic('what_was_working')}</span></label>
       <label>What was your biggest struggle?<span class="talk-wrap"><textarea id="biggest_struggle" name="biggest_struggle" rows="2" placeholder="Be honest — that's what makes the read useful.">${esc(v.biggest_struggle || '')}</textarea>${mic('biggest_struggle')}</span></label>
       <script src="/checkin.js"></script>
-      <button type="submit" class="btn-primary">Submit check-in</button>
+      <button type="submit" class="btn-primary">${isEdit ? 'Save changes' : 'Submit check-in'}</button>
     </form></div>`,
   });
 }
@@ -811,16 +813,17 @@ function throwingFields(v, formId, commandHtml) {
 // Pitching check-in (Sep 2026): session type first, then intent, then the
 // throwing details for that type, then feel/focus/confidence/command plus
 // three reflections. Blocks show/hide based on session type.
-function pitchingCheckinForm(user, error, values) {
+function pitchingCheckinForm(user, error, values, action) {
   const v = values || {};
+  const isEdit = !!action; // hitter self-serve edit (Bobby, Sep 17 2026)
   const mic = (id) => `<button type="button" class="mic-btn" data-target="${id}" aria-label="Dictate instead of typing">🎙</button>`;
   return layout({
     title: 'Check In',
     user,
     tabs: userTabs('checkin', user),
-    body: `<h1 class="page-title">Check In</h1>
-    <div class="card"><p class="hint skip-intro">Log your throwing today. The more detail, the better the reads get.</p>
-    <form method="post" action="/checkin/pitching" class="form" id="pitching-form" data-throw-sync data-validate="pitching">
+    body: `<h1 class="page-title">${isEdit ? 'Edit check-in' : 'Check In'}</h1>
+    <div class="card"><p class="hint skip-intro">${isEdit ? 'Fix anything that wasn\u2019t right. Saving updates your entry \u2014 the session date stays the same.' : 'Log your throwing today. The more detail, the better the reads get.'}</p>
+    <form method="post" action="${isEdit ? esc(action) : '/checkin/pitching'}" class="form" id="pitching-form" data-throw-sync data-validate="pitching">
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
       ${throwingFields(v, 'pitching-form', '')}
       ${sliderField('feel', 'Feel', 'How good did your arm/body feel?', v.feel)}
@@ -833,7 +836,7 @@ function pitchingCheckinForm(user, error, values) {
       <label>What was working?<span class="talk-wrap"><textarea id="what_was_working" name="what_was_working" rows="2" placeholder="Which pitch, which feel, which sequence?">${esc(v.what_was_working || '')}</textarea>${mic('what_was_working')}</span></label>
       <label>What was your biggest struggle?<span class="talk-wrap"><textarea id="biggest_struggle" name="biggest_struggle" rows="2" placeholder="Be honest — that's what makes the read useful.">${esc(v.biggest_struggle || '')}</textarea>${mic('biggest_struggle')}</span></label>
       <script src="/checkin.js"></script>
-      <button type="submit" class="btn-primary">Submit check-in</button>
+      <button type="submit" class="btn-primary">${isEdit ? 'Save changes' : 'Submit check-in'}</button>
     </form></div>`,
   });
 }
@@ -957,9 +960,12 @@ function notebookPage(user, checkins, notes, players, justSubmitted, filter) {
           <span class="learn-date hint-inline">${esc(String(n.created_at).slice(0, 10))}</span>
           <p class="learn-text">${esc(n.note)}</p>
         </div>
-        <form method="post" action="/learn/note/${n.id}/delete" class="routine-remove">
-          <button type="submit" class="btn-ghost btn-sm" aria-label="Delete note">Remove</button>
-        </form>
+        <div class="edit-row">
+          ${user.viewAs ? '' : `<a href="/learn/note/${n.id}/edit" class="btn-ghost btn-sm">Edit</a>`}
+          <form method="post" action="/learn/note/${n.id}/delete" class="routine-remove">
+            <button type="submit" class="btn-ghost btn-sm" aria-label="Delete note">Remove</button>
+          </form>
+        </div>
       </div>`
     )
     .join('');
@@ -970,9 +976,12 @@ function notebookPage(user, checkins, notes, players, justSubmitted, filter) {
           <strong class="learn-player">${esc(p.player_name)}</strong>
           ${p.takeaway ? `<p class="learn-text">&ldquo;${esc(p.takeaway)}&rdquo;</p>` : ''}
         </div>
-        <form method="post" action="/learn/player/${p.id}/delete" class="routine-remove">
-          <button type="submit" class="btn-ghost btn-sm" aria-label="Delete player">Remove</button>
-        </form>
+        <div class="edit-row">
+          ${user.viewAs ? '' : `<a href="/learn/player/${p.id}/edit" class="btn-ghost btn-sm">Edit</a>`}
+          <form method="post" action="/learn/player/${p.id}/delete" class="routine-remove">
+            <button type="submit" class="btn-ghost btn-sm" aria-label="Delete player">Remove</button>
+          </form>
+        </div>
       </div>`
     )
     .join('');
@@ -982,7 +991,7 @@ function notebookPage(user, checkins, notes, players, justSubmitted, filter) {
     : null;
   const checkinsHtml = `
     ${avg !== null ? `<div class="level-head"><p class="hint">Your read over ${scored.length} session${scored.length === 1 ? '' : 's'}:</p>${levelLine(avg)}</div>` : ''}
-    ${checkins.length ? checkins.map(checkinCard).join('') : `<div class="card empty">${kindName ? `No ${kindName.toLowerCase()} sessions logged yet.` : `No check-ins yet. <a href="/checkin">Log your first session</a>.`}</div>`}`;
+    ${checkins.length ? checkins.map((c) => checkinCard(c, { editable: !user.viewAs })).join('') : `<div class="card empty">${kindName ? `No ${kindName.toLowerCase()} sessions logged yet.` : `No check-ins yet. <a href="/checkin">Log your first session</a>.`}</div>`}`;
   return layout({
     title: 'Notebook',
     user,
@@ -1035,6 +1044,76 @@ const TIER_NOTES = {
   'Off': 'Shake it off — keep what worked, flush the rest.',
   'Rough': 'Everyone has them. Write down one thing to fix and move on.',
 };
+
+// Hitter self-serve check-in delete confirm (Bobby, Sep 17 2026).
+function checkinDeletePage(user, c) {
+  const kind = c.session_kind || 'hitting';
+  const kindLabel = kind === 'pitching' ? 'throwing' : kind === 'combined' ? 'hitting + throwing' : 'hitting';
+  const when = c.created_at ? String(c.created_at).slice(0, 10) : '';
+  return layout({
+    title: 'Delete check-in',
+    user,
+    tabs: userTabs('notebook', user),
+    body: `<h1 class="page-title">Delete this check-in?</h1>
+    <div class="card">
+      <p>This permanently removes your <strong>${esc(when)}${c.environment ? ` · ${esc(c.environment)}` : ''}</strong> ${kindLabel} check-in.</p>
+      <p class="hint">Your other entries, notes, and chats stay exactly as they are.</p>
+      <form method="post" action="/checkin/${c.id}/delete" class="form">
+        <button class="btn-primary" type="submit">Yes, delete it</button>
+      </form>
+      <p style="margin-top:10px"><a href="/notebook">Keep it \u2014 go back</a></p>
+    </div>`,
+  });
+}
+
+// Hitter self-serve learning-note edit (Bobby, Sep 17 2026).
+function learnNoteEditPage(user, note, error) {
+  const n = note || {};
+  const catChips = LEARN_CATEGORIES.map(
+    (c) => `<label class="chip-radio"><input type="radio" name="category" value="${c}"${(n.category || 'Mechanics') === c ? ' checked' : ''}><span>${c}</span></label>`
+  ).join('');
+  return layout({
+    title: 'Edit note',
+    user,
+    tabs: userTabs('notebook', user),
+    body: `<h1 class="page-title">Edit note</h1>
+    <div class="card">
+    <form method="post" action="/learn/note/${n.id}" class="form">
+      ${error ? `<div class="error">${esc(error)}</div>` : ''}
+      <label>Something new I'm learning
+        <textarea name="note" rows="3" maxlength="1000" required>${esc(n.note || '')}</textarea>
+      </label>
+      <div class="chip-row">${catChips}</div>
+      <button type="submit" class="btn-primary">Save changes</button>
+    </form>
+    <p style="margin-top:10px"><a href="/notebook">Cancel \u2014 go back</a></p>
+    </div>`,
+  });
+}
+
+// Hitter self-serve study-player edit (Bobby, Sep 17 2026).
+function studyPlayerEditPage(user, player, error) {
+  const pl = player || {};
+  return layout({
+    title: 'Edit player',
+    user,
+    tabs: userTabs('notebook', user),
+    body: `<h1 class="page-title">Edit player</h1>
+    <div class="card">
+    <form method="post" action="/learn/player/${pl.id}" class="form">
+      ${error ? `<div class="error">${esc(error)}</div>` : ''}
+      <label>Player
+        <input name="player_name" maxlength="80" value="${esc(pl.player_name || '')}" required>
+      </label>
+      <label>What I'm stealing from them
+        <input name="takeaway" maxlength="300" value="${esc(pl.takeaway || '')}">
+      </label>
+      <button type="submit" class="btn-primary">Save changes</button>
+    </form>
+    <p style="margin-top:10px"><a href="/notebook">Cancel \u2014 go back</a></p>
+    </div>`,
+  });
+}
 
 function tierBadgeClass(tier) {
   if (tier === 'Locked In') return 'ok';
@@ -1168,7 +1247,12 @@ function skipReadBlock(c) {
   return `<p class="skip-pending">Reviewing your entry — your read lands here.</p>`;
 }
 
-function checkinCard(c) {
+function checkinCard(c, opts) {
+  // Hitter self-serve edit/delete (Bobby, Sep 17 2026): shown only on the
+  // hitter's own notebook — never on coach views. Server re-checks ownership.
+  const editActions = opts && opts.editable && c.id
+    ? `<div class="checkin-actions"><a href="/checkin/${c.id}/edit">Edit</a><a href="/checkin/${c.id}/delete" class="danger-link">Delete</a></div>`
+    : '';
   const drills = drillsOf(c);
   const realDrills = drills.filter((d) => d.known);
   const otherWork = drills.filter((d) => !d.known);
@@ -1218,6 +1302,7 @@ function checkinCard(c) {
     ${drillRow}
     ${read}
     <details class="checkin-more"><summary>Full entry</summary>${words || `<p class="hint">No notes written for this session.</p>`}</details>
+    ${editActions}
   </div>`;
 }
 
@@ -2890,6 +2975,9 @@ module.exports = {
   preCheckinPage,
   routinePage,
   notebookPage,
+  checkinDeletePage,
+  learnNoteEditPage,
+  studyPlayerEditPage,
   scorePage,
   chatPage,
   coachHomePage,

@@ -582,6 +582,143 @@ async function main() {
     r = await req('GET', '/messages', null, 'solo');
     check('compose box absent for standalone player', !r.text.includes('/messages/to-coach'));
     check('empty inbox renders', r.text.includes('No messages yet.'));
+    // ---- Hitter self-serve check-in edit + delete (Bobby, Sep 17 2026) ----
+    const edith = addAthlete('edith@test.com', 'Edith', 'Hitter');
+    const otherh = addAthlete('otherh@test.com', 'Other', 'Hitter');
+    const mkCheckin = (uid, cols) => run(
+      `INSERT INTO checkins (user_id, athlete_name, created_at, environment, drills_done, feel, confidence, focus, difficulty, session_score, score_tier, session_notes, what_worked, session_kind) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      uid, 'Edith Hitter', cols.created_at, cols.environment || '', cols.drills_done || '[]',
+      cols.feel ?? 7, cols.confidence ?? 7, cols.focus ?? 7, cols.difficulty ?? 5,
+      cols.session_score ?? 7, cols.score_tier || 'Solid', cols.session_notes || 'notes', cols.what_worked || '',
+      cols.session_kind || 'hitting');
+    const hitId = mkCheckin(edith, {
+      created_at: '2026-09-14T10:00:00', environment: 'Cage',
+      drills_done: JSON.stringify([{ name: 'Fence Drill', station: 'Tee', known: true }]),
+      session_notes: 'original notes',
+    }).lastInsertRowid;
+    const pitchId = run(
+      `INSERT INTO checkins (user_id, athlete_name, created_at, session_kind, pitch_session_type, intent, command, pitch_count, pitches_thrown, feel, focus, confidence, session_score, score_tier, felt_good) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      edith, 'Edith Hitter', '2026-09-13T10:00:00', 'pitching', 'bullpen', 'medium', 6, 30,
+      JSON.stringify(['4-seam FB']), 7, 7, 7, 7, 'Solid', 'arm felt free').lastInsertRowid;
+    const combId = run(
+      `INSERT INTO checkins (user_id, athlete_name, created_at, environment, difficulty, session_kind, pitch_session_type, intent, command, pitch_count, pitches_thrown, feel, focus, confidence, session_score, score_tier, hitting_score, pitching_score, felt_good) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      edith, 'Edith Hitter', '2026-09-12T10:00:00', 'Cage', 6, 'combined', 'bullpen', 'medium', 6, 25,
+      JSON.stringify(['4-seam FB']), 7, 7, 7, 7, 'Solid', 7, 7, 'both felt ok').lastInsertRowid;
+    await login('edith', 'edith@test.com');
+    await login('otherh', 'otherh@test.com');
+
+    // Notebook cards carry Edit/Delete for the hitter's own entries.
+    r = await req('GET', '/notebook', null, 'edith');
+    check('notebook shows Edit link for own entry', r.text.includes(`/checkin/${hitId}/edit`));
+    check('notebook shows Delete link for own entry', r.text.includes(`/checkin/${hitId}/delete`));
+
+    // Edit page: same hitting form, pre-filled.
+    r = await req('GET', `/checkin/${hitId}/edit`, null, 'edith');
+    html = r.text;
+    check('edit page 200 with Edit heading', r.status === 200 && html.includes('>Edit check-in</h1>'));
+    check('edit posts back to the entry', html.includes(`action="/checkin/${hitId}"`));
+    check('edit prefills environment', html.includes('value="Cage" checked'));
+    check('edit prefills session notes', html.includes('>original notes</textarea>'));
+    check('edit prefills drill section', html.includes('value="Fence Drill"'));
+    check('edit submit says Save changes', html.includes('>Save changes<'));
+
+    // POST update: fields change, score recomputed, date kept.
+    r = await req('POST', `/checkin/${hitId}`, P({
+      environment: 'Tee Work', feel: '9', confidence: '9', focus: '9', difficulty: '5',
+      session_notes: 'updated notes', what_worked: 'staying inside it', sec_tee: 'Walk In Drill',
+    }), 'edith');
+    check('update redirects to the score page', r.status === 302 && r.loc === `/checkin/score/${hitId}`);
+    const upd = q('SELECT * FROM checkins WHERE id = ?', hitId);
+    check('update changed environment', upd.environment === 'Tee Work');
+    check('update changed notes', upd.session_notes === 'updated notes');
+    check('update changed drills', upd.drills_done.includes('Walk In Drill'));
+    check('update recomputed the score', upd.session_score > 7 && upd.feel === 9);
+    check('update kept the session date', String(upd.created_at).startsWith('2026-09-14'));
+    check('update kept the kind', upd.session_kind === 'hitting');
+
+    // Required session notes still enforced on edit.
+    r = await req('POST', `/checkin/${hitId}`, P({
+      environment: 'Cage', feel: '7', confidence: '7', focus: '7', difficulty: '5', session_notes: '   ',
+    }), 'edith');
+    check('blank notes rejected on edit', r.status === 200 && r.text.includes('Write a few session notes'));
+    check('rejected edit changed nothing', q('SELECT environment FROM checkins WHERE id = ?', hitId).environment === 'Tee Work');
+
+    // Pitching entry: pitching form pre-filled; update works.
+    r = await req('GET', `/checkin/${pitchId}/edit`, null, 'edith');
+    html = r.text;
+    check('pitching edit uses the throwing form', r.status === 200 && html.includes('What kind of throwing was it?'));
+    check('pitching edit prefills pitch count', html.includes('value="30"'));
+    r = await req('POST', `/checkin/${pitchId}`, P({
+      pitch_session_type: 'bullpen', intent: 'heavy', command: '8', pitch_count: '40',
+      pitches_thrown: '4-seam FB', feel: '8', focus: '8', confidence: '8', felt_good: 'heavy day, felt strong',
+    }), 'edith');
+    check('pitching update redirects', r.status === 302 && r.loc === `/checkin/score/${pitchId}`);
+    const updP = q('SELECT * FROM checkins WHERE id = ?', pitchId);
+    check('pitching update changed count + intent', updP.pitch_count === 40 && updP.intent === 'heavy');
+    check('pitching update kept the date', String(updP.created_at).startsWith('2026-09-13'));
+
+    // Combined entry: combined form pre-filled.
+    r = await req('GET', `/checkin/${combId}/edit`, null, 'edith');
+    check('combined edit uses the combined form', r.status === 200 && r.text.includes('What did you do today?') && r.text.includes('>Edit check-in</h1>'));
+
+    // Delete confirm + delete.
+    r = await req('GET', `/checkin/${hitId}/delete`, null, 'edith');
+    check('delete confirm page renders', r.status === 200 && r.text.includes('Delete this check-in?'));
+    check('delete confirm posts to the entry', r.text.includes(`/checkin/${hitId}/delete`));
+    r = await req('POST', `/checkin/${hitId}/delete`, P({}), 'edith');
+    check('delete redirects to notebook', r.status === 302 && r.loc === '/notebook');
+    check('delete removed the row', !q('SELECT id FROM checkins WHERE id = ?', hitId));
+
+    // Ownership + roles: 403s and 404s.
+    r = await req('GET', `/checkin/${pitchId}/edit`, null, 'otherh');
+    check('other hitter cannot edit (GET)', r.status === 403);
+    r = await req('POST', `/checkin/${pitchId}`, P({}), 'otherh');
+    check('other hitter cannot update (POST)', r.status === 403);
+    r = await req('POST', `/checkin/${pitchId}/delete`, P({}), 'otherh');
+    check('other hitter cannot delete', r.status === 403);
+    check('other hitter changed nothing', !!q('SELECT id FROM checkins WHERE id = ?', pitchId));
+    r = await req('GET', `/checkin/${pitchId}/edit`, null, 'coach');
+    check('Bobby cannot edit (GET)', r.status === 403);
+    r = await req('POST', `/checkin/${pitchId}/delete`, P({}), 'coach');
+    check('Bobby cannot delete', r.status === 403);
+    r = await req('GET', `/checkin/${pitchId}/edit`, null, 'cam');
+    check('Cam cannot edit', r.status === 403);
+    r = await req('GET', '/checkin/999999/edit', null, 'edith');
+    check('unknown entry 404s on edit', r.status === 404);
+    r = await req('GET', '/checkin/999999/edit', null, 'coach');
+    check('coach gets 403 even for unknown id', r.status === 403);
+    r = await req('POST', '/checkin/999999/delete', P({}), 'edith');
+    check('unknown entry 404s on delete', r.status === 404);
+
+    // Notebook notes: edit works, self-serve only.
+    const noteId = run(`INSERT INTO learning_notes (user_id, note, category, created_at) VALUES (?,?,?,?)`,
+      edith, 'keep the front shoulder closed', 'Mechanics', '2026-09-14T10:00:00').lastInsertRowid;
+    r = await req('GET', '/notebook', null, 'edith');
+    check('notebook shows note Edit link', r.text.includes(`/learn/note/${noteId}/edit`));
+    r = await req('GET', `/learn/note/${noteId}/edit`, null, 'edith');
+    check('note edit page prefills', r.status === 200 && r.text.includes('keep the front shoulder closed'));
+    r = await req('POST', `/learn/note/${noteId}`, P({ note: 'stay through it longer', category: 'Approach' }), 'edith');
+    check('note update redirects', r.status === 302);
+    const updN = q('SELECT note, category FROM learning_notes WHERE id = ?', noteId);
+    check('note update saved', updN.note === 'stay through it longer' && updN.category === 'Approach');
+    r = await req('GET', `/learn/note/${noteId}/edit`, null, 'otherh');
+    check('other hitter cannot edit note', r.status === 403);
+    r = await req('GET', `/learn/note/${noteId}/edit`, null, 'coach');
+    check('Bobby cannot edit note', r.status === 403);
+    r = await req('POST', `/learn/note/${noteId}/delete`, P({}), 'otherh');
+    check('other hitter cannot delete note (403, not silent)', r.status === 403);
+    check('note still there', !!q('SELECT id FROM learning_notes WHERE id = ?', noteId));
+
+    // Study players: edit works, self-serve only.
+    const plId = run(`INSERT INTO study_players (user_id, player_name, takeaway, created_at) VALUES (?,?,?,?)`,
+      edith, 'Mookie Betts', 'short to it', '2026-09-14T10:00:00').lastInsertRowid;
+    r = await req('GET', `/learn/player/${plId}/edit`, null, 'edith');
+    check('player edit page prefills', r.status === 200 && r.text.includes('Mookie Betts'));
+    r = await req('POST', `/learn/player/${plId}`, P({ player_name: 'Mookie Betts', takeaway: 'stays through it' }), 'edith');
+    check('player update saved', q('SELECT takeaway FROM study_players WHERE id = ?', plId).takeaway === 'stays through it');
+    r = await req('POST', `/learn/player/${plId}`, P({ player_name: 'Mookie Betts', takeaway: 'x' }), 'coach');
+    check('Bobby cannot edit player', r.status === 403);
+
   } finally {
     srv.kill('SIGTERM');
     await new Promise((r) => setTimeout(r, 1000));

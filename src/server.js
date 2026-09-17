@@ -2145,15 +2145,53 @@ app.post('/learn/player', requireLogin, (req, res) => {
   res.redirect('/notebook');
 });
 
+// Hitter self-serve note edit (Bobby, Sep 17 2026). Coaches get 403.
+app.get('/learn/note/:id/edit', requireLogin, (req, res) => {
+  const n = ownedRow(req, res, 'learning_notes');
+  if (!n) return;
+  res.send(views.learnNoteEditPage(req.user, n, null));
+});
+
+app.post('/learn/note/:id', requireLogin, (req, res) => {
+  const n = ownedRow(req, res, 'learning_notes');
+  if (!n) return;
+  const note = String(req.body.note || '').trim().slice(0, 1000);
+  const category = String(req.body.category || '').trim().slice(0, 24);
+  if (!note) return res.send(views.learnNoteEditPage(req.user, n, 'Write the note first.'));
+  db.prepare('UPDATE learning_notes SET note = ?, category = ? WHERE id = ? AND user_id = ?')
+    .run(note, category, n.id, req.user.id);
+  res.redirect('/notebook');
+});
+
 app.post('/learn/note/:id/delete', requireLogin, (req, res) => {
-  if (req.user.role === 'coach') return res.status(403).send('Forbidden');
-  db.prepare('DELETE FROM learning_notes WHERE id = ? AND user_id = ?').run(req.params.id, req.user.id);
+  const n = ownedRow(req, res, 'learning_notes');
+  if (!n) return;
+  db.prepare('DELETE FROM learning_notes WHERE id = ? AND user_id = ?').run(n.id, req.user.id);
+  res.redirect('/notebook');
+});
+
+// Hitter self-serve study-player edit (Bobby, Sep 17 2026). Coaches get 403.
+app.get('/learn/player/:id/edit', requireLogin, (req, res) => {
+  const pl = ownedRow(req, res, 'study_players');
+  if (!pl) return;
+  res.send(views.studyPlayerEditPage(req.user, pl, null));
+});
+
+app.post('/learn/player/:id', requireLogin, (req, res) => {
+  const pl = ownedRow(req, res, 'study_players');
+  if (!pl) return;
+  const playerName = String(req.body.player_name || '').trim().slice(0, 80);
+  const takeaway = String(req.body.takeaway || '').trim().slice(0, 300);
+  if (!playerName) return res.send(views.studyPlayerEditPage(req.user, pl, 'Give the player a name.'));
+  db.prepare('UPDATE study_players SET player_name = ?, takeaway = ? WHERE id = ? AND user_id = ?')
+    .run(playerName, takeaway, pl.id, req.user.id);
   res.redirect('/notebook');
 });
 
 app.post('/learn/player/:id/delete', requireLogin, (req, res) => {
-  if (req.user.role === 'coach') return res.status(403).send('Forbidden');
-  db.prepare('DELETE FROM study_players WHERE id = ? AND user_id = ?').run(req.params.id, req.user.id);
+  const pl = ownedRow(req, res, 'study_players');
+  if (!pl) return;
+  db.prepare('DELETE FROM study_players WHERE id = ? AND user_id = ?').run(pl.id, req.user.id);
   res.redirect('/notebook');
 });
 
@@ -2393,6 +2431,218 @@ app.post('/checkin/combined', requireLogin, (req, res) => {
   );
   notifyMyPlayerCheckin(req.user.id, req.user.displayName, '/coach/user/' + encodeURIComponent(req.user.email)).catch((e) => console.warn('checkin push failed:', e.message));
   res.redirect(`/checkin/score/${info.lastInsertRowid}`);
+});
+
+// ---- Hitter self-serve check-in edit + delete (Bobby, Sep 17 2026) ----
+// A hitter can fix or remove their own entries from the Notebook. Ownership:
+// coaches (Bobby, Cam — even in "view as hitter" mode) always get 403;
+// hitters get 404 for an unknown id and 403 for another athlete's entry.
+// Table is one of three fixed literals — never user input.
+function ownedRow(req, res, table) {
+  if (req.user.role === 'coach' || req.user.viewAs) { res.status(403).send('Forbidden'); return null; }
+  const n = Number(req.params.id);
+  const row = Number.isFinite(n) ? db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(n) : null;
+  if (!row) { res.status(404).send('Not found.'); return null; }
+  if (row.user_id !== req.user.id) { res.status(403).send('Forbidden'); return null; }
+  return row;
+}
+// Which form an entry was created with — the edit uses the same form.
+// A hitting entry never opens the pitching form, and vice versa.
+function checkinEditFormKind(row, playerType) {
+  const kind = row.session_kind || 'hitting';
+  if (kind === 'pitching') return 'pitching';
+  if (kind === 'combined') return 'combined';
+  return (playerType || 'hitter') === 'two_way' ? 'combined' : 'hitting';
+}
+function hittingRowValues(row) {
+  return {
+    environment: row.environment || '',
+    feel: row.feel,
+    confidence: row.confidence,
+    focus: row.focus,
+    difficulty: row.difficulty,
+    session_notes: row.session_notes || '',
+    what_worked: row.what_worked || '',
+    whats_next: row.whats_next || '',
+    sections: splitDrillsBySection(row.drills_done),
+  };
+}
+function throwingPitchesArray(row) {
+  try {
+    const p = JSON.parse(row.pitches_thrown || '[]');
+    if (Array.isArray(p)) return p;
+  } catch (e) {}
+  return [];
+}
+function pitchingRowValues(row) {
+  return { ...row, pitches_thrown: throwingPitchesArray(row) };
+}
+function combinedRowValues(row) {
+  const kind = row.session_kind || 'hitting';
+  return {
+    ...row,
+    pitches_thrown: throwingPitchesArray(row),
+    did_hit: kind === 'pitching' ? '' : 'yes',
+    did_throw: kind === 'hitting' ? '' : 'yes',
+  };
+}
+function renderCheckinEdit(user, row, error, bodyValues) {
+  const formKind = checkinEditFormKind(row, user.playerType || 'hitter');
+  const action = `/checkin/${row.id}`;
+  if (formKind === 'pitching') {
+    return views.pitchingCheckinForm(user, error, bodyValues || pitchingRowValues(row), action);
+  }
+  if (formKind === 'combined') {
+    return views.combinedCheckinForm(user, error, bodyValues || combinedRowValues(row), action);
+  }
+  return views.checkinForm(
+    user, error, bodyValues || hittingRowValues(row),
+    data.drillNames(), getRoutine(user.id), recentDrillGroups(user.id), action
+  );
+}
+
+app.get('/checkin/:id/edit', requireLogin, (req, res) => {
+  const row = ownedRow(req, res, 'checkins');
+  if (!row) return;
+  res.send(renderCheckinEdit(req.user, row, null, null));
+});
+
+app.post('/checkin/:id', requireLogin, (req, res) => {
+  const row = ownedRow(req, res, 'checkins');
+  if (!row) return;
+  const b = req.body;
+  const formKind = checkinEditFormKind(row, req.user.playerType || 'hitter');
+  const fail = (msg) => {
+    const bv = formKind === 'hitting'
+      ? checkinValues(b)
+      : { ...b, pitches_thrown: parsePitchesThrown(b.pitches_thrown) };
+    return res.send(renderCheckinEdit(req.user, row, msg, bv));
+  };
+  // The session date (created_at) never changes; Skip's journal read, if any,
+  // stays untouched. No "Session logged" push on edits — only on new check-ins.
+  if (formKind === 'hitting') {
+    if (!ENVIRONMENTS.includes(b.environment)) return fail('Pick the environment you were in.');
+    const feel = parseRating(b.feel);
+    const confidence = parseRating(b.confidence);
+    const focus = parseRating(b.focus);
+    const difficulty = parseRating(b.difficulty);
+    if (feel === null || confidence === null || focus === null || difficulty === null) {
+      return fail('Rate feel, confidence, focus, and difficulty from 1 to 10.');
+    }
+    if (!(b.session_notes || '').trim()) {
+      return fail('Write a few session notes \u2014 what you felt, what you saw, what was off.');
+    }
+    const drills = parseSectionDrills(b);
+    const sessionScore = scoreBreakdown(
+      feel, confidence, focus, difficulty,
+      `${b.session_notes || ''} ${b.what_worked || ''}`
+    ).total;
+    const tier = scoreTier(sessionScore);
+    db.prepare(
+      `UPDATE checkins SET environment = ?, drills_done = ?, feel = ?, confidence = ?, focus = ?,
+        difficulty = ?, session_score = ?, score_tier = ?, session_notes = ?, what_worked = ?, whats_next = ?
+       WHERE id = ? AND user_id = ?`
+    ).run(
+      b.environment, JSON.stringify(drills), feel, confidence, focus, difficulty, sessionScore, tier,
+      (b.session_notes || '').trim(), (b.what_worked || '').trim(), (b.whats_next || '').trim(),
+      row.id, req.user.id
+    );
+    return res.redirect(`/checkin/score/${row.id}`);
+  }
+  if (formKind === 'pitching') {
+    const th = validateThrowing(b, fail);
+    if (!th) return;
+    const feel = parseRating(b.feel);
+    const focus = parseRating(b.focus);
+    const confidence = parseRating(b.confidence);
+    if (feel === null || focus === null || confidence === null) {
+      return fail('Rate feel, focus, and confidence from 1 to 10.');
+    }
+    const pitchingScore = pitchingScoreOf(feel, focus, confidence, th.command);
+    const tier = scoreTier(pitchingScore);
+    db.prepare(
+      `UPDATE checkins SET feel = ?, confidence = ?, focus = ?, session_score = ?, score_tier = ?,
+        pitch_session_type = ?, intent = ?, command = ?, pitch_count = ?, pitches_thrown = ?,
+        velo_max = ?, catch_distance = ?, recovery_notes = ?, no_throw_note = ?,
+        felt_good = ?, what_was_working = ?, biggest_struggle = ?, pitching_score = ?
+       WHERE id = ? AND user_id = ?`
+    ).run(
+      feel, confidence, focus, pitchingScore, tier,
+      th.t, th.intent, th.command, th.pitchCount, JSON.stringify(th.pitchesThrown),
+      th.veloMax, th.catchDistance, th.recoveryNotes, th.noThrowNote,
+      (b.felt_good || '').trim().slice(0, 2000),
+      (b.what_was_working || '').trim().slice(0, 2000),
+      (b.biggest_struggle || '').trim().slice(0, 2000),
+      pitchingScore, row.id, req.user.id
+    );
+    return res.redirect(`/checkin/score/${row.id}`);
+  }
+  // Combined two-way form.
+  const didHit = b.did_hit === 'yes';
+  const didThrow = b.did_throw === 'yes';
+  if (!didHit && !didThrow) {
+    return fail('Say what you did today \u2014 hitting, throwing, or both.');
+  }
+  const feel = parseRating(b.feel);
+  const focus = parseRating(b.focus);
+  const confidence = parseRating(b.confidence);
+  if (feel === null || focus === null || confidence === null) {
+    return fail('Rate feel, focus, and confidence from 1 to 10.');
+  }
+  const feltGood = (b.felt_good || '').trim().slice(0, 2000);
+  const whatWasWorking = (b.what_was_working || '').trim().slice(0, 2000);
+  const biggestStruggle = (b.biggest_struggle || '').trim().slice(0, 2000);
+  let environment = '', difficulty = null, hittingScore = null;
+  if (didHit) {
+    if (!ENVIRONMENTS.includes(b.environment)) return fail('Pick where you hit.');
+    difficulty = parseRating(b.difficulty);
+    if (difficulty === null) return fail('Rate the difficulty of the hitting from 1 to 10.');
+    environment = b.environment;
+    hittingScore = scoreBreakdown(feel, confidence, focus, difficulty, `${feltGood} ${whatWasWorking}`).total;
+  }
+  let th = { t: '', intent: '', command: null, pitchCount: null, pitchesThrown: [], veloMax: null, catchDistance: '', recoveryNotes: '', noThrowNote: '' };
+  let pitchingScore = null;
+  if (didThrow) {
+    th = validateThrowing(b, fail);
+    if (!th) return;
+    pitchingScore = pitchingScoreOf(feel, focus, confidence, th.command);
+  }
+  const subs = [hittingScore, pitchingScore].filter((s) => s !== null);
+  const sessionScore = round1(subs.reduce((a, s) => a + s, 0) / subs.length);
+  const tier = scoreTier(sessionScore);
+  const sessionKind = didHit && didThrow ? 'combined' : didHit ? 'hitting' : 'pitching';
+  db.prepare(
+    `UPDATE checkins SET environment = ?, feel = ?, confidence = ?, focus = ?, difficulty = ?,
+      session_score = ?, score_tier = ?, session_kind = ?,
+      pitch_session_type = ?, intent = ?, command = ?, pitch_count = ?, pitches_thrown = ?,
+      velo_max = ?, catch_distance = ?, recovery_notes = ?, no_throw_note = ?,
+      felt_good = ?, what_was_working = ?, biggest_struggle = ?,
+      hitting_score = ?, pitching_score = ?
+     WHERE id = ? AND user_id = ?`
+  ).run(
+    environment, feel, confidence, focus, difficulty, sessionScore, tier, sessionKind,
+    th.t, th.intent, th.command, th.pitchCount, JSON.stringify(th.pitchesThrown),
+    th.veloMax, th.catchDistance, th.recoveryNotes, th.noThrowNote,
+    feltGood, whatWasWorking, biggestStruggle, hittingScore, pitchingScore,
+    row.id, req.user.id
+  );
+  return res.redirect(`/checkin/score/${row.id}`);
+});
+
+app.get('/checkin/:id/delete', requireLogin, (req, res) => {
+  const row = ownedRow(req, res, 'checkins');
+  if (!row) return;
+  res.send(views.checkinDeletePage(req.user, row));
+});
+
+app.post('/checkin/:id/delete', requireLogin, (req, res) => {
+  const row = ownedRow(req, res, 'checkins');
+  if (!row) return;
+  // No other table references checkins by id (chat history doesn't) — the
+  // row deletes cleanly. A Skip journal read on the row goes with it; the
+  // chat history itself is untouched.
+  db.prepare('DELETE FROM checkins WHERE id = ? AND user_id = ?').run(row.id, req.user.id);
+  res.redirect('/notebook');
 });
 
 // ---- Optional pre-hit check-in: set the intent BEFORE the session ----

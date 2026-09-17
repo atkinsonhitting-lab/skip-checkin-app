@@ -309,6 +309,11 @@ body.drawer-open #drawer { transform: none; }
 .drill-section-label { font-size: 14px; font-weight: 800; color: var(--red); margin: 6px 0 2px; text-transform: uppercase; letter-spacing: .6px; }
 .drill-section input { padding: 9px 12px; margin-top: 2px; }
 .drill-section .drill-chips { margin: 4px 0 2px; }
+.checkin-actions { display: flex; gap: 18px; margin-top: 10px; font-size: 13px; font-weight: 700; }
+.checkin-actions .danger-link { color: var(--red); }
+/* Hitter self-serve note/player edit pages (Bobby, Sep 17 2026) */
+.edit-row { display: flex; gap: 8px; align-items: center; }
+a.btn-ghost { text-decoration: none; display: inline-block; }
 .req { color: var(--red); font-weight: 800; }
 .drill-chips-scroll { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 6px; }
 .drill-chips-scroll .drill-chip { flex: 0 0 auto; }
