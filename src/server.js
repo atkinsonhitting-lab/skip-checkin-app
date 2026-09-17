@@ -2734,26 +2734,37 @@ app.get('/coach/my-players', requireGlobalCoachAny, (req, res) => {
       title: 'My Players',
       tab: 'my-players',
       empty: 'No players in your programs yet.',
-      messageForm: true,
-      sent: req.query.sent || null,
-      msgError: req.query.error || null,
+      messageButton: true,
     })
   );
 });
 
-// Mass message to Bobby's players (Sep 17 2026). Full-access coaches only:
-// view-only coaches get 403, same as every other coach mutation.
-app.post('/coach/my-players/message', requireCoach, (req, res) => {
+// Coach compose (Sep 17 2026, redesign): clean "New message" screen. The old
+// always-expanded checklist on My Players is gone — broadcasting lives here.
+app.get('/coach/messages/new', requireGlobalCoachAny, (req, res) => {
+  setApprovalCount(req);
+  const players = coachUserStats(orgScope(req), { mineOnly: true });
+  res.send(views.coachComposePage(realUser(req), players, { error: req.query.error || null }));
+});
+
+// Send the broadcast (Sep 17 2026). Full-access coaches only: view-only
+// coaches get 403, same as every other coach mutation.
+app.post('/coach/messages/new', requireCoach, (req, res) => {
   const me = realUser(req);
-  const back = (q) => res.redirect('/coach/my-players' + (q ? '?' + q : ''));
+  const back = (q) => res.redirect('/coach/messages/new' + (q ? '?' + q : ''));
   const body = String(req.body.body || '').trim();
   if (!body) return back('error=' + encodeURIComponent('Write a message first.'));
   if (body.length > 500) return back('error=' + encodeURIComponent('Keep it to 500 characters.'));
-  let ids = req.body.user_ids;
-  if (!Array.isArray(ids)) ids = ids ? [ids] : [];
   // Never trust the form: recipients must actually be Bobby's players.
   const mine = new Set(coachUserStats(orgScope(req), { mineOnly: true }).map((a) => String(a.id)));
-  const targets = [...new Set(ids.map((x) => String(x)))].filter((id) => mine.has(id));
+  let targets;
+  if (req.body.to_mode === 'choose') {
+    let ids = req.body.user_ids;
+    if (!Array.isArray(ids)) ids = ids ? [ids] : [];
+    targets = [...new Set(ids.map((x) => String(x)))].filter((id) => mine.has(id));
+  } else {
+    targets = [...mine];
+  }
   if (!targets.length) return back('error=' + encodeURIComponent('Pick at least one player.'));
   const msg = body.slice(0, 500);
   const now = new Date().toISOString();
@@ -2765,7 +2776,7 @@ app.post('/coach/my-players/message', requireCoach, (req, res) => {
     // Fire-and-forget: a push failure must never break the redirect.
     pushToUser(Number(uid), 'Message from Coach', msg.slice(0, 120), '/messages').catch((e) => console.warn('coach message push failed:', e.message));
   }
-  back('sent=' + targets.length);
+  res.redirect('/coach/messages?sent=' + targets.length);
 });
 
 // Coach inbox (Sep 17 2026): one row per athlete with message traffic with
@@ -2808,7 +2819,7 @@ app.get('/coach/messages', requireGlobalCoachAny, (req, res) => {
     }))
     .filter((t) => t.last)
     .sort((a, b) => (a.last.created_at < b.last.created_at ? 1 : -1));
-  res.send(views.coachMessagesPage(realUser(req), threads));
+  res.send(views.coachMessagesPage(realUser(req), threads, { sent: req.query.sent || null }));
 });
 
 // Coach thread view (Sep 17 2026): full chronological thread with one of
@@ -3243,7 +3254,7 @@ app.get('/coach/user/:email', requireCoachAny, (req, res) => {
     .all(user.id)
     .reverse();
   const pt = user.player_type || 'hitter';
-  res.send(views.coachUser(realUser(req), name, rows, whatWorksData(name, user.id), thread, user.email, brain.listMemory(db, user.id), getRoutine(user.id), pt, pt === 'hitter' ? null : throwingSummary(user.id)));
+  res.send(views.coachUser(realUser(req), name, rows, whatWorksData(name, user.id), thread, user.email, brain.listMemory(db, user.id), getRoutine(user.id), pt, pt === 'hitter' ? null : throwingSummary(user.id), isMyProgramPlayer(user.id) ? user.id : null));
 });
 
 // Throwing summary for a pitcher's or two-way player's coach view: session

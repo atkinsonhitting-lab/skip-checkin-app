@@ -222,27 +222,53 @@ async function main() {
     const bobbyId = q("SELECT id FROM users WHERE email = 'coach@test.com'").id;
     r = await req('GET', '/coach/my-players', null, 'coach');
     html = r.text;
-    check('message form on My Players', html.includes('Message my players') && html.includes('/coach/my-players/message'));
-    check('recipients checked by default', html.includes(`name="user_ids" value="${briggs}" checked`));
+    check('broadcast composer gone from My Players', !html.includes('Message my players') && !html.includes('/coach/my-players/message'));
+    check('per-player Message links on My Players', html.includes(`/coach/messages/${briggs}`) && html.includes(`/coach/messages/${liam}`));
+    // Compose screen: clean picker, not a giant checklist.
+    r = await req('GET', '/coach/messages/new', null, 'coach');
+    html = r.text;
+    check('compose page renders picker', html.includes('All my players') && html.includes('Choose players') && html.includes('id="compose-search"'));
+    check('compose page posts to new endpoint', html.includes('action="/coach/messages/new"'));
+    check('compose page lists players as checkboxes', html.includes(`name="user_ids" value="${briggs}"`));
+    check('compose textarea has live char count', html.includes('id="char-count"') && html.includes('maxlength="500"'));
+    r = await req('GET', '/coach/messages/new', null, 'cam');
+    check('view-only coach can read compose page', r.status === 200);
     const msgCount = () => q('SELECT COUNT(*) AS c FROM messages').c;
     const unreadFor = (uid) => q('SELECT COUNT(*) AS c FROM message_recipients WHERE user_id = ? AND read_at IS NULL', uid).c;
-    // Broadcast to a subset; invalid ids ignored; only my-players get rows.
+    const myOrgCount = () => q('SELECT COUNT(*) AS c FROM users u JOIN organizations o ON o.id = u.organization_id WHERE u.role = ? AND o.is_mine = 1', 'athlete').c;
+    // Broadcast to "All my players".
     const msgBefore = msgCount();
+    const allN = myOrgCount();
+    r = await req('POST', '/coach/messages/new', P({ to_mode: 'all', body: 'Big week — check in daily.' }), 'coach');
+    check('broadcast-all redirects with sent count', r.status === 302 && (r.loc || '').includes('/coach/messages') && (r.loc || '').includes('sent=' + allN));
+    check('broadcast-all: one message row, recipient_id NULL', msgCount() === msgBefore + 1 && q('SELECT recipient_id FROM messages ORDER BY id DESC LIMIT 1').recipient_id === null);
+    check('broadcast-all reaches every my-org player only',
+      q('SELECT COUNT(*) AS c FROM message_recipients').c === allN && unreadFor(briggs) === 1 && unreadFor(solo) === 0 && unreadFor(msuPlayer) === 0);
+    // Broadcast to a subset; invalid ids ignored; only my-players get rows.
     const p2 = new URLSearchParams();
-    p2.append('body', 'Big week — check in daily.');
+    p2.append('to_mode', 'choose');
+    p2.append('body', 'Nice work this week.');
     p2.append('user_ids', String(briggs));
     p2.append('user_ids', '99999'); // not a player — must be ignored
-    r = await req('POST', '/coach/my-players/message', p2, 'coach');
-    check('broadcast redirects with sent count', r.status === 302 && (r.loc || '').includes('sent=1'));
-    check('broadcast: one message row, recipient_id NULL', msgCount() === msgBefore + 1 && q('SELECT recipient_id FROM messages ORDER BY id DESC LIMIT 1').recipient_id === null);
-    check('broadcast: only my-players get recipient rows',
-      q('SELECT COUNT(*) AS c FROM message_recipients').c === 1 && unreadFor(briggs) === 1 && unreadFor(solo) === 0 && unreadFor(msuPlayer) === 0);
-    r = await req('GET', '/coach/my-players?sent=1', null, 'coach');
-    check('sent confirmation renders', r.text.includes('Sent</strong> to 1 player'));
-    r = await req('POST', '/coach/my-players/message', P({ body: '   ', user_ids: String(briggs) }), 'coach');
-    check('empty body rejected', r.status === 302 && (r.loc || '').includes('error=') && msgCount() === msgBefore + 1);
-    r = await req('POST', '/coach/my-players/message', p2, 'cam');
-    check('view-only coach 403 on broadcast', r.status === 403 && msgCount() === msgBefore + 1);
+    r = await req('POST', '/coach/messages/new', p2, 'coach');
+    check('broadcast-subset redirects with sent=1', r.status === 302 && (r.loc || '').includes('sent=1'));
+    check('broadcast-subset: only briggs gets a row', unreadFor(briggs) === 2 && unreadFor(liam) === 1 && unreadFor(dylan) === 1);
+    r = await req('GET', '/coach/messages?sent=2', null, 'coach');
+    check('sent confirmation renders on hub', r.text.includes('Sent</strong> to 2 players'));
+    check('hub has New message button', r.text.includes('href="/coach/messages/new"') && r.text.includes('New message'));
+    r = await req('POST', '/coach/messages/new', P({ to_mode: 'all', body: '   ' }), 'coach');
+    check('empty body rejected', r.status === 302 && (r.loc || '').includes('/coach/messages/new') && (r.loc || '').includes('error=') && msgCount() === msgBefore + 2);
+    r = await req('POST', '/coach/messages/new', P({ to_mode: 'choose', body: 'hi' }), 'coach');
+    check('choose-mode with no players rejected', r.status === 302 && (r.loc || '').includes('error=') && msgCount() === msgBefore + 2);
+    r = await req('POST', '/coach/messages/new', P({ to_mode: 'all', body: 'hi' }), 'cam');
+    check('view-only coach 403 on broadcast', r.status === 403 && msgCount() === msgBefore + 2);
+    r = await req('POST', '/coach/my-players/message', P({ to_mode: 'all', body: 'hi' }), 'coach');
+    check('old broadcast route is gone', r.status === 404);
+    // Per-hitter page has the Message button (my-org player only).
+    r = await req('GET', '/coach/user/briggs@test.com', null, 'coach');
+    check('per-hitter page has Message button', r.text.includes(`/coach/messages/${briggs}`));
+    r = await req('GET', '/coach/user/solo@test.com', null, 'coach');
+    check('per-hitter page hides Message for non-my-org player', !r.text.includes('/coach/messages/' + solo));
     // Player → coach 1:1 (my-org player). Creates a recipient row for Bobby.
     await login('briggs', 'briggs@test.com');
     const m2 = msgCount();
@@ -264,7 +290,7 @@ async function main() {
     // Coach 1:1: reply works for my-org player, 403 for outsiders.
     r = await req('POST', '/coach/messages/to/' + briggs, P({ body: 'Keep it up.' }), 'coach');
     check('coach reply works', r.status === 302 && (r.loc || '').includes('/coach/messages/' + briggs));
-    check('player unread counts both messages', unreadFor(briggs) === 2);
+    check('player unread counts all three messages', unreadFor(briggs) === 3);
     r = await req('POST', '/coach/messages/to/' + solo, P({ body: 'hi' }), 'coach');
     check('coach cannot message non-my-org athlete', r.status === 403);
     r = await req('GET', '/coach/messages/' + solo, null, 'coach');
@@ -288,7 +314,7 @@ async function main() {
     await login('briggs', 'briggs@test.com');
     r = await req('GET', '/', null, 'briggs');
     check('tab bar has Messages tab', r.text.includes('href="/messages"') && r.text.includes('>Messages<'));
-    check('tab bar badge shows unread count', r.text.includes('<span class="tabbar-badge">2</span>'));
+    check('tab bar badge shows unread count', r.text.includes('<span class="tabbar-badge">3</span>'));
     check('sidebar Messages item present', r.text.includes('drawer-link') && r.text.includes('href="/messages"'));
     check('home banner for unread + no push', r.text.includes('You have messages from Coach'));
     // Player inbox: both messages, compose box, nudge; viewing clears unread.

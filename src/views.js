@@ -121,21 +121,27 @@ function userTabs(active, user) {
   const tabs = [
     { href: '/', label: 'Home', active: active === 'home' },
     { href: '/checkin', label: 'Check In', active: active === 'checkin' },
-    { href: '/messages', label: 'Messages', active: active === 'messages', badge: user && user.unreadMessages > 0 ? String(user.unreadMessages) : null },
+  ];
+  // Messaging tab is for organization players only (Bobby's rule) — standalone
+  // athletes don't get the tab at all.
+  if (user && user.organizationId) {
+    tabs.push({ href: '/messages', label: 'Messages', active: active === 'messages', badge: user.unreadMessages > 0 ? String(user.unreadMessages) : null });
+  }
+  // Bobby's remote hitters only — nobody else ever sees these tabs.
+  if (user && user.remoteProgramId) {
+    tabs.push({ href: '/program', label: 'Program', active: active === 'program' });
+    tabs.push({ href: '/program/routine', label: 'Routine', active: active === 'routine' });
+    tabs.push({ href: '/videos', label: 'Videos', active: active === 'videos' });
+  } else {
+    // Personal routine editor for every other hitter — one Routine tab, never two.
+    tabs.push({ href: '/routine', label: 'Routine', active: active === 'routine' });
+  }
+  tabs.push(
     { href: '/notebook', label: 'Notebook', active: active === 'notebook' },
     { href: '/mental-game', label: 'Mental Game', active: active === 'mental' },
     { href: '/chat', label: 'Talk to Skip', sub: 'your personally trained coach', active: active === 'chat' },
     { href: '/settings', label: 'Settings', active: active === 'settings' },
-  ];
-  // Bobby's remote hitters only — nobody else ever sees this tab.
-  if (user && user.remoteProgramId) {
-    tabs.splice(3, 0, { href: '/program', label: 'Program', active: active === 'program' });
-    tabs.splice(4, 0, { href: '/program/routine', label: 'Routine', active: active === 'routine' });
-    tabs.splice(5, 0, { href: '/videos', label: 'Videos', active: active === 'videos' });
-  } else {
-    // Personal routine editor for every other hitter — one Routine tab, never two.
-    tabs.splice(3, 0, { href: '/routine', label: 'Routine', active: active === 'routine' });
-  }
+  );
   // Organizations can turn Talk to Skip off for their players: no tab, no FAB,
   // no bottom-bar icon (all three key off this tab list).
   if (user && user.skipChatDisabled) {
@@ -1721,38 +1727,22 @@ function coachHittersPage(user, userStats, opts) {
           <div class="athlete-card-email">${esc(a.email)}</div>
           <div class="athlete-card-meta">${a.total} check-in${a.total === 1 ? '' : 's'}${a.last ? ` · last ${fmtDate(a.last)}` : ' · none yet'}${a.age != null ? ` · age ${a.age}` : ''}${a.team ? ` · ${esc(a.team)}` : ''}</div>
         </a>
-        <form method="post" action="/coach/view-as" style="margin:8px 0 0">
-          <input type="hidden" name="id" value="${a.id}">
-          <button class="btn-small btn-quiet" type="submit">View as player</button>
-        </form>
+        <div style="display:flex;gap:8px;margin:8px 0 0">
+          ${o.messageButton ? `<a class="btn-small" href="/coach/messages/${a.id}">Message</a>` : ''}
+          <form method="post" action="/coach/view-as" style="margin:0">
+            <input type="hidden" name="id" value="${a.id}">
+            <button class="btn-small btn-quiet" type="submit">View as player</button>
+          </form>
+        </div>
       </div>`
     )
     .join('');
   const emptyText = o.empty || 'Nobody has signed up yet.';
-  // "Message my players" (Sep 17 2026): Bobby's mass-message composer.
-  // Recipient checklist mirrors his SMS blast pattern — all checked, he unchecks.
-  const msgForm = o.messageForm
-    ? `<div class="card" style="margin-bottom:16px">
-        <h2 class="section-head" style="margin-top:0">Message my players</h2>
-        ${o.sent ? `<p class="notice"><strong>Sent</strong> to ${esc(String(o.sent))} player${String(o.sent) === '1' ? '' : 's'}.</p>` : ''}
-        ${o.msgError ? `<p class="error">${esc(o.msgError)}</p>` : ''}
-        <form method="post" action="/coach/my-players/message">
-          <label>Message <span class="hint-inline">(500 characters max)</span>
-            <textarea name="body" maxlength="500" required rows="3" style="width:100%;box-sizing:border-box" placeholder="Write it once — it goes to everyone checked below."></textarea>
-          </label>
-          <div class="recipient-list" style="margin:10px 0;max-height:220px;overflow:auto">
-            ${userStats.map((a) => `<label class="recipient-row" style="display:flex;align-items:center;gap:8px;padding:4px 0"><input type="checkbox" name="user_ids" value="${a.id}" checked> <span>${esc(a.name)}</span> <span class="hint-inline">${esc(a.email)}</span></label>`).join('')}
-          </div>
-          <button class="btn-primary" type="submit">Send message</button>
-        </form>
-      </div>`
-    : '';
   return layout({
     title,
     user,
     tabs: coachTabs(tab, user.approvalCount, user),
     body: `<h1 class="page-title">${esc(title)}</h1>
-    ${msgForm}
     ${userStats.length ? `<input type="search" id="hitter-search" class="searchbar" placeholder="Search players…" autocomplete="off">` : ''}
     ${userStats.length ? `<div class="pill-row" id="role-filter">
       <button type="button" class="pill-link active" data-rolefilter="all">All</button>
@@ -1794,7 +1784,9 @@ function playerMessagesPage(user, msgs, opts) {
 }
 
 // Coach inbox (Sep 17 2026): one row per athlete with message traffic.
-function coachMessagesPage(user, threads) {
+// The messaging hub — "New message" opens the clean compose screen.
+function coachMessagesPage(user, threads, opts) {
+  const o = opts || {};
   const rows = threads
     .map(
       (t) => `<a href="/coach/messages/${t.id}" class="card" style="display:block;color:inherit;text-decoration:none">
@@ -1811,7 +1803,76 @@ function coachMessagesPage(user, threads) {
     user,
     tabs: coachTabs('messages', user.approvalCount, user),
     body: `<h1 class="page-title">Messages</h1>
-    ${rows || '<div class="card empty">No message threads yet. Send one from My Players.</div>'}`,
+    <p style="margin:0 0 14px"><a class="btn-primary" href="/coach/messages/new" style="text-decoration:none;display:inline-block">New message</a></p>
+    ${o.sent ? `<p class="notice"><strong>Sent</strong> to ${esc(String(o.sent))} player${String(o.sent) === '1' ? '' : 's'}.</p>` : ''}
+    ${rows || '<div class="card empty">No message threads yet. Tap New message to start one.</div>'}`,
+  });
+}
+
+// Coach compose (Sep 17 2026, redesign): clean "New message" screen. Bobby
+// picks "All my players" (one tap) or "Choose players" — a compact
+// searchable checkbox list in a scrollable box with Select all / Clear.
+function coachComposePage(user, players, opts) {
+  const o = opts || {};
+  const list = (players || [])
+    .map(
+      (a) => `<label class="compose-row" data-name="${esc(a.name.toLowerCase())}" style="display:block;padding:5px 2px;cursor:pointer"><input type="checkbox" name="user_ids" value="${a.id}"> <span>${esc(a.name)}</span></label>`
+    )
+    .join('');
+  return layout({
+    title: 'New message',
+    user,
+    tabs: coachTabs('messages', user.approvalCount, user),
+    body: `<h1 class="page-title">New message</h1>
+    <p class="hint"><a href="/coach/messages">← All messages</a></p>
+    ${o.error ? `<p class="error">${esc(o.error)}</p>` : ''}
+    <form method="post" action="/coach/messages/new" class="card">
+      <div style="display:grid;gap:8px;margin-bottom:12px">
+        <label style="display:flex;align-items:center;gap:8px"><input type="radio" name="to_mode" value="all" checked> <strong>All my players</strong> <span class="hint-inline">(${(players || []).length})</span></label>
+        <label style="display:flex;align-items:center;gap:8px"><input type="radio" name="to_mode" value="choose"> <strong>Choose players</strong></label>
+      </div>
+      <div id="choose-box" hidden>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+          <input type="search" id="compose-search" class="searchbar" placeholder="Search players…" autocomplete="off" style="margin:0;flex:1">
+          <button type="button" class="btn-small btn-quiet" id="compose-all">All</button>
+          <button type="button" class="btn-small btn-quiet" id="compose-clear">Clear</button>
+        </div>
+        <div style="max-height:220px;overflow:auto;border:1px solid #e3e3e3;border-radius:8px;padding:6px 10px;margin-bottom:12px">
+          ${list || '<p class="hint">No players yet.</p>'}
+        </div>
+      </div>
+      <label>Message <span class="hint-inline">(<span id="char-count">0</span>/500)</span>
+        <textarea name="body" id="compose-body" maxlength="500" required rows="4" style="width:100%;box-sizing:border-box" placeholder="Write your message…"></textarea>
+      </label>
+      <button class="btn-primary" type="submit" style="margin-top:10px">Send message</button>
+    </form>
+    <script>
+    (function () {
+      var modes = document.querySelectorAll('input[name="to_mode"]');
+      var box = document.getElementById('choose-box');
+      var search = document.getElementById('compose-search');
+      var rows = Array.prototype.slice.call(document.querySelectorAll('.compose-row'));
+      function syncMode() {
+        var v = document.querySelector('input[name="to_mode"]:checked').value;
+        box.hidden = v !== 'choose';
+      }
+      modes.forEach(function (r) { r.addEventListener('change', syncMode); });
+      syncMode();
+      search.addEventListener('input', function () {
+        var q = search.value.toLowerCase();
+        rows.forEach(function (r) { r.style.display = r.dataset.name.indexOf(q) === -1 ? 'none' : ''; });
+      });
+      document.getElementById('compose-all').addEventListener('click', function () {
+        rows.forEach(function (r) { if (r.style.display !== 'none') r.querySelector('input').checked = true; });
+      });
+      document.getElementById('compose-clear').addEventListener('click', function () {
+        rows.forEach(function (r) { r.querySelector('input').checked = false; });
+      });
+      var body = document.getElementById('compose-body');
+      var count = document.getElementById('char-count');
+      body.addEventListener('input', function () { count.textContent = body.value.length; });
+    })();
+    </script>`,
   });
 }
 
@@ -2391,7 +2452,7 @@ function throwingSummarySection(sum) {
   </div><p class="hint">Last ${sum.sessions} throwing session${sum.sessions === 1 ? '' : 's'}.</p></div>`;
 }
 
-function coachUser(user, name, checkins, whatWorks, thread, email, memories, routine, playerType, throwSum) {
+function coachUser(user, name, checkins, whatWorks, thread, email, memories, routine, playerType, throwSum, msgUserId) {
   const pt = playerType || 'hitter';
   const skipImg = `<img src="${skipAvatar({ playerType: pt })}" class="skip-avatar" alt="Skip">`;
   const canEdit = user.role === 'coach' && user.canEdit !== false;
@@ -2412,7 +2473,7 @@ function coachUser(user, name, checkins, whatWorks, thread, email, memories, rou
     user,
     tabs: coachTabs('hitters', user.approvalCount, user),
     body: `<h1 class="page-title">${esc(name)} ${rolePill(pt)}</h1>
-    <p><a href="/coach/hitters">← Back to players</a></p>
+    <p><a href="/coach/hitters">← Back to players</a>${msgUserId ? ` · <a class="btn-small" href="/coach/messages/${msgUserId}">Message</a>` : ''}</p>
     ${pt === 'pitcher' ? '' : routineReadonly(routine)}
     ${pt !== 'hitter' ? throwingSummarySection(throwSum) : ''}
     ${memorySection(email, memories, canEdit)}
@@ -2811,6 +2872,7 @@ module.exports = {
   coachHomePage,
   coachHittersPage,
   coachMessagesPage,
+  coachComposePage,
   coachThreadPage,
   playerMessagesPage,
   coachProgramsPage,
