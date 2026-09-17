@@ -341,6 +341,34 @@ function deleteOrgLogoFile(logoPath) {
   } catch (e) { console.warn('BOOT_HEARTLAND_ROSTER failed:', e.message); }
 })();
 
+// Missouri State roster (Sep 17 2026, Bobby): move standalone athletes
+// "Logan Fyffe" and "Harris Magala" into the Missouri State org when their
+// accounts exist. Never moves a player already in another org.
+(function seedMissouriStateRoster() {
+  try {
+    const org = db.prepare('SELECT id, name FROM organizations WHERE name = ?').get('Missouri State');
+    if (!org) return;
+    const findPlayer = db.prepare(
+      `SELECT id, organization_id FROM users WHERE role = 'athlete' AND (
+         LOWER(TRIM(COALESCE(first_name,'') || ' ' || COALESCE(last_name,''))) = ?
+         OR LOWER(TRIM(COALESCE(athlete_name,''))) = ?
+       )`
+    );
+    for (const name of ['Logan Fyffe', 'Harris Magala']) {
+      const key = name.toLowerCase();
+      const p = findPlayer.get(key, key);
+      if (!p) { console.log(`BOOT_MSU_ROSTER: no athlete "${name}" yet — skipped`); continue; }
+      if (p.organization_id) {
+        const cur = db.prepare('SELECT name FROM organizations WHERE id = ?').get(p.organization_id);
+        console.log(`BOOT_MSU_ROSTER: "${name}" already in org "${cur ? cur.name : p.organization_id}" — not moved`);
+        continue;
+      }
+      db.prepare('UPDATE users SET organization_id = ?, team_id = NULL WHERE id = ?').run(org.id, p.id);
+      console.log(`BOOT_MSU_ROSTER: moved "${name}" into "Missouri State"`);
+    }
+  } catch (e) { console.warn('BOOT_MSU_ROSTER failed:', e.message); }
+})();
+
 // Bobby's own programs (Sep 17 2026): "Atkinson Hitting" (in-person guys) and
 // "Atkinson Hitting Remote Development" (remote guys). Idempotent boot setup:
 // find-or-create both orgs (Bobby may have created one via the app already),
