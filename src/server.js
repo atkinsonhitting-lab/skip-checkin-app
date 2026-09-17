@@ -957,8 +957,18 @@ const ENVIRONMENTS = ['Game', 'Cage', 'Live BP', 'Tee Work', 'Other'];
 function scoreTier(score) {
   if (score >= 9.0) return 'Locked In';
   if (score >= 7.0) return 'Solid';
-  if (score >= 5.0) return 'Off';
-  return 'Rough';
+  if (score >= 5.0) return 'Building';
+  return 'Grind Day';
+}
+
+// Median session score — the "typical day". A single off day can't drag it
+// the way a mean lets it (Bobby, Sep 17 2026: averages should reflect the
+// pattern, not let one one-off day bring them down).
+function medianScore(values) {
+  const xs = values.filter((v) => v != null).sort((a, b) => a - b);
+  if (!xs.length) return null;
+  const mid = Math.floor(xs.length / 2);
+  return xs.length % 2 ? xs[mid] : (xs[mid - 1] + xs[mid]) / 2;
 }
 
 function parseRating(v) {
@@ -1403,7 +1413,6 @@ function whatWorksData(athleteName, userId) {
       'SELECT session_score, drills_done FROM checkins WHERE athlete_name = ? AND session_score IS NOT NULL'
     )
     .all(athleteName);
-  const avg = (a) => a.reduce((s, x) => s + x, 0) / a.length;
   const round1 = (n) => Math.round(n * 10) / 10;
   const data = {
     checkinCount: scored.length,
@@ -1416,7 +1425,7 @@ function whatWorksData(athleteName, userId) {
     drillSuggestions: [],
   };
   if (!scored.length) return data;
-  data.overallAvg = round1(avg(scored.map((r) => r.session_score)));
+  data.overallAvg = round1(medianScore(scored.map((r) => r.session_score)));
 
   const groups = thoughtGroups(athleteName);
   data.goodCues = groups.filter((g) => g.avg >= data.overallAvg).slice(0, 4);
@@ -1504,9 +1513,8 @@ function userScoreSummary(userId) {
   const checkins = db
     .prepare('SELECT session_score FROM checkins WHERE user_id = ? AND session_score IS NOT NULL')
     .all(userId);
-  const avgScore = checkins.length
-    ? Math.round((checkins.reduce((s, c) => s + c.session_score, 0) / checkins.length) * 10) / 10
-    : null;
+  const med = medianScore(checkins.map((c) => c.session_score));
+  const avgScore = med != null ? Math.round(med * 10) / 10 : null;
   return { avgScore, checkinCount: checkins.length };
 }
 
@@ -3039,7 +3047,7 @@ function coachAnalytics(scope, stats) {
     .all(...sp, since);
   let todayN = 0;
   let weekN = 0, prevN = 0;
-  let scoreSum = 0, scoreN = 0, prevScoreSum = 0, prevScoreN = 0;
+  const weekScores = [], prevScores = [];
   for (const r of rows) {
     let day;
     try {
@@ -3050,19 +3058,23 @@ function coachAnalytics(scope, stats) {
     if (day === todayUTC) todayN++;
     if (day >= weekStartUTC) {
       weekN++;
-      if (r.session_score != null) { scoreSum += r.session_score; scoreN++; }
+      if (r.session_score != null) weekScores.push(r.session_score);
     } else if (day >= prevStartUTC) {
       prevN++;
-      if (r.session_score != null) { prevScoreSum += r.session_score; prevScoreN++; }
+      if (r.session_score != null) prevScores.push(r.session_score);
     }
   }
+  const med1 = (xs) => {
+    const m = medianScore(xs);
+    return m != null ? Math.round(m * 10) / 10 : null;
+  };
   const out = {
     players: stats.length,
     checkedInToday: todayN,
     checkinsWeek: weekN,
     checkinsPrevWeek: prevN,
-    avgScore: scoreN ? Math.round((scoreSum / scoreN) * 10) / 10 : null,
-    avgScorePrev: prevScoreN ? Math.round((prevScoreSum / prevScoreN) * 10) / 10 : null,
+    avgScore: med1(weekScores),
+    avgScorePrev: med1(prevScores),
     orgs: null,
     orgCount: 0,
     revenueCents: 0,
@@ -4326,16 +4338,14 @@ function hitterSnapshot(userId, role) {
     return '- ' + bits.join(' · ');
   });
   const scored = rows.filter((r) => r.session_score != null);
-  const avg = scored.length
-    ? scored.reduce((s, r) => s + r.session_score, 0) / scored.length
-    : null;
+  const avg = medianScore(scored.map((r) => r.session_score));
   const last3 = scored.slice(0, 3);
   const prev = scored.slice(3);
-  const avgOf = (arr) => arr.reduce((s, r) => s + r.session_score, 0) / arr.length;
+  const medOf = (arr) => medianScore(arr.map((r) => r.session_score));
   let trend = '';
   if (last3.length && prev.length) {
-    const a = avgOf(last3), b = avgOf(prev);
-    trend = `Trend: last ${last3.length} avg level ${scoreTier(a)} vs prior ${scoreTier(b)} — ${
+    const a = medOf(last3), b = medOf(prev);
+    trend = `Trend: last ${last3.length} typical level ${scoreTier(a)} vs prior ${scoreTier(b)} — ${
       a < b - 0.5 ? 'trending DOWN' : a > b + 0.5 ? 'trending UP' : 'holding steady'}.`;
   }
   const total = db.prepare('SELECT COUNT(*) AS n FROM checkins WHERE user_id = ?').get(userId).n;
