@@ -616,7 +616,7 @@ function checkinForm(user, error, values, drillNames, routine) {
     tabs: userTabs('checkin', user),
     body: `<h1 class="page-title">Check In</h1>
     <div class="card"><p class="hint skip-intro">Log your session. Give as much detail as you can — the more detail, the better the reads get.</p>
-    <form method="post" action="/checkin" class="form" onsubmit="var b=this.querySelector('button[type=submit]');if(b){b.disabled=true;b.textContent='Saving…';}">
+    <form method="post" action="/checkin" class="form" data-validate="hitting">
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
       <div class="field-label">Where were you?</div>
       <div class="pills">${envPills}</div>
@@ -663,7 +663,7 @@ function combinedCheckinForm(user, error, values) {
     tabs: userTabs('checkin', user),
     body: `<h1 class="page-title">Check In</h1>
     <div class="card"><p class="hint skip-intro">One check-in for the whole day. Say what you did — hitting, throwing, or both.</p>
-    <form method="post" action="/checkin/combined" class="form" id="combined-form" data-throw-sync onsubmit="var b=this.querySelector('button[type=submit]');if(b){b.disabled=true;b.textContent='Saving…';}">
+    <form method="post" action="/checkin/combined" class="form" id="combined-form" data-throw-sync data-validate="combined">
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
       <div class="field-label">What did you do today?</div>
       <div class="pills">
@@ -752,7 +752,7 @@ function pitchingCheckinForm(user, error, values) {
     tabs: userTabs('checkin', user),
     body: `<h1 class="page-title">Check In</h1>
     <div class="card"><p class="hint skip-intro">Log your throwing today. The more detail, the better the reads get.</p>
-    <form method="post" action="/checkin/pitching" class="form" id="pitching-form" data-throw-sync onsubmit="var b=this.querySelector('button[type=submit]');if(b){b.disabled=true;b.textContent='Saving…';}">
+    <form method="post" action="/checkin/pitching" class="form" id="pitching-form" data-throw-sync data-validate="pitching">
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
       ${throwingFields(v, 'pitching-form', '')}
       ${sliderField('feel', 'Feel', 'How good did your arm/body feel?', v.feel)}
@@ -815,7 +815,7 @@ function preCheckinPage(user, kind, error, v) {
       <a class="pill-link${isGame ? '' : ' active'}" href="/precheckin?kind=cage">Cage</a>
       <a class="pill-link${isGame ? ' active' : ''}" href="/precheckin?kind=game">Pregame / Live ABs</a>
     </div>` : ''}
-    <form method="post" action="/precheckin" class="form">
+    <form method="post" action="/precheckin" class="form" data-validate="pre">
       <input type="hidden" name="kind" value="${k}">
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
       <script src="/checkin.js"></script>

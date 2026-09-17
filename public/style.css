@@ -227,6 +227,11 @@ body.drawer-open #drawer { transform: none; }
 .error { background: rgba(243,18,96,.12); border: 1px solid var(--bad); color: #ff8fab; padding: 12px; border-radius: 8px; margin-bottom: 12px; font-size: 14px; }
 .success { background: rgba(47,191,113,.12); border: 1px solid var(--ok); color: #7ee2a8; padding: 12px; border-radius: 8px; margin-bottom: 12px; font-size: 14px; }
 .notice { background: rgba(88,166,255,.12); border: 1px solid #58a6ff; color: #a9cdfb; padding: 12px; border-radius: 8px; margin-bottom: 12px; font-size: 14px; }
+/* Submit-validation banner: what’s missing and why */
+.validate-banner ul { margin: 10px 0 2px; padding-left: 20px; }
+.validate-banner li { margin: 6px 0; }
+.validate-banner li a { color: #ff8fab; }
+.missing { outline: 2px solid var(--bad); outline-offset: 3px; border-radius: 8px; }
 
 /* Check-ins */
 .checkin-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
