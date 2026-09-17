@@ -569,6 +569,12 @@ function parsePitchesThrown(v) {
 function orgIsRestricted(organizationId, isMine) {
   return organizationId != null && isMine !== 1;
 }
+// The brief-summary view is for college/org coaches only — Bobby and other
+// global coaches (users.organization_id IS NULL) always see full entries.
+function viewerIsOrgCoach(req) {
+  const v = typeof realUser === 'function' ? realUser(req) : req.user;
+  return !!v && (v.organizationId != null || v.organization_id != null);
+}
 
 function attachUser(req, res, next) {
   if (req.session && req.session.userId) {
@@ -588,7 +594,7 @@ function attachUser(req, res, next) {
           const tOrg = t.organization_id
             ? db.prepare('SELECT is_mine FROM organizations WHERE id = ?').get(t.organization_id)
             : null;
-          req.user.viewAsRestricted = orgIsRestricted(t.organization_id, tOrg && tOrg.is_mine);
+          req.user.viewAsRestricted = orgIsRestricted(t.organization_id, tOrg && tOrg.is_mine) && viewerIsOrgCoach(req);
         } else {
           delete req.session.viewAsUserId;
         }
@@ -3270,7 +3276,7 @@ app.get('/coach', requireCoachAny, (req, res) => {
        ORDER BY c.created_at DESC LIMIT 8`
     )
     .all(...sp)
-    .map((r) => ({ ...r, coachRestricted: orgIsRestricted(r.organization_id, r.org_is_mine) }));
+    .map((r) => ({ ...r, coachRestricted: viewerIsOrgCoach(req) && orgIsRestricted(r.organization_id, r.org_is_mine) }));
   const pending = pendingList(scope);
   const me = realUser(req);
   const analytics = coachAnalytics(scope, stats);
@@ -3827,7 +3833,7 @@ app.get('/coach/user/:email', requireCoachAny, (req, res) => {
   const uOrg = user.organization_id
     ? db.prepare('SELECT is_mine FROM organizations WHERE id = ?').get(user.organization_id)
     : null;
-  const restricted = orgIsRestricted(user.organization_id, uOrg && uOrg.is_mine);
+  const restricted = viewerIsOrgCoach(req) && orgIsRestricted(user.organization_id, uOrg && uOrg.is_mine);
   const rows = db
     .prepare('SELECT * FROM checkins WHERE user_id = ? ORDER BY created_at DESC')
     .all(user.id);
@@ -3937,10 +3943,11 @@ app.get('/coach/export', requireCoachAny, (req, res) => {  const sp = scopeParam
     .all(...sp)
     .map((r) => {
       // College-org privacy: the export carries the brief summary only —
-      // journal words and feel sliders stay private.
+      // journal words and feel sliders stay private. Only applies when the
+      // downloading coach is an org-scoped coach; Bobby/global see all.
       const { organization_id, org_is_mine, ...rest } = r;
       const out = { ...rest, drills_done: safeParseDrills(r.drills_done) };
-      if (orgIsRestricted(organization_id, org_is_mine)) {
+      if (viewerIsOrgCoach(req) && orgIsRestricted(organization_id, org_is_mine)) {
         out.feel = null;
         out.confidence = null;
         out.focus = null;
