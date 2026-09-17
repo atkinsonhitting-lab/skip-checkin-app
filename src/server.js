@@ -5,10 +5,12 @@
 // for the AI assistant. No programs, no video library — those live in the
 // private programs portal. Free for now; subscription later (accounts ready).
 require('dotenv').config();
+const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const session = require('express-session');
 const helmet = require('helmet');
+const multer = require('multer');
 const webpush = require('web-push');
 const bcrypt = require('bcryptjs');
 
@@ -31,6 +33,9 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+      // Branded orgs inject a small <style> block overriding --red/--red-dark.
+      // Colors are strict hex-validated server-side, so inline styles are safe.
+      'style-src': ["'self'", "'unsafe-inline'"],
       // Video library embeds Google Drive previews in an iframe.
       'frame-src': ["'self'", 'https://drive.google.com'],
     },
@@ -189,6 +194,100 @@ function getOrganization(id) {
   if (!id) return null;
   return db.prepare('SELECT * FROM organizations WHERE id = ?').get(id) || null;
 }
+
+// ---- Organization branding (Sep 17 2026) ----
+// Logos live under DATA_DIR/org-logos so they survive deploys (the rest of
+// the image is replaced on every Render deploy; only /app/data persists).
+const ORG_LOGO_DIR = path.join(data.DATA_DIR, 'org-logos');
+try { fs.mkdirSync(ORG_LOGO_DIR, { recursive: true }); } catch (e) { console.warn('org-logos dir:', e.message); }
+
+const logoUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, ORG_LOGO_DIR),
+    filename: (req, file, cb) => {
+      const ext = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' }[file.mimetype] || 'png';
+      cb(null, `org-${Number(req.params.id)}-${Date.now()}.${ext}`);
+    },
+  }),
+  fileFilter: (req, file, cb) => {
+    if (/^image\/(png|jpeg|webp|gif)$/.test(file.mimetype)) cb(null, true);
+    else cb(new Error('Logo must be a PNG, JPG, WebP, or GIF image.'));
+  },
+  limits: { fileSize: 2 * 1024 * 1024 },
+});
+
+// Serve uploaded logos. The filename is validated to a flat safe pattern so
+// no path traversal is possible; the row stores only the file name.
+app.get('/org-logos/:file', (req, res) => {
+  const f = String(req.params.file || '');
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*\.(png|jpg|jpeg|webp|gif)$/i.test(f)) return res.status(404).end();
+  const p = path.join(ORG_LOGO_DIR, f);
+  if (!p.startsWith(ORG_LOGO_DIR + path.sep)) return res.status(404).end();
+  res.sendFile(p, (err) => { if (err && !res.headersSent) res.status(404).end(); });
+});
+
+function validHexColor(s) {
+  return /^#[0-9a-fA-F]{6}$/.test(String(s || '').trim());
+}
+function darkenHex(hex, factor = 0.65) {
+  const n = parseInt(hex.slice(1), 16);
+  const c = (v) => Math.max(0, Math.min(255, Math.round(v * factor)));
+  const r = c((n >> 16) & 255), g = c((n >> 8) & 255), b = c(n & 255);
+  return '#' + [r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('');
+}
+// Brand object attached to req.user for org members. Null unless the org set
+// at least a logo or one color.
+function orgBrand(org) {
+  if (!org) return null;
+  const primary = validHexColor(org.primary_color) ? String(org.primary_color).trim() : null;
+  const accent = validHexColor(org.accent_color) ? String(org.accent_color).trim() : null;
+  const logoFile = String(org.logo_path || '').trim();
+  const logoOk = /^[A-Za-z0-9][A-Za-z0-9._-]*\.(png|jpg|jpeg|webp|gif)$/i.test(logoFile);
+  if (!primary && !accent && !logoOk) return null;
+  const base = primary || '#e10600';
+  return {
+    orgName: org.name,
+    logoUrl: logoOk ? `/org-logos/${logoFile}` : null,
+    primary: base,
+    primaryDark: darkenHex(primary || '#e10600'),
+    accent: accent || darkenHex(base),
+  };
+}
+function deleteOrgLogoFile(logoPath) {
+  const f = String(logoPath || '').trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*\.(png|jpg|jpeg|webp|gif)$/i.test(f)) return;
+  try { fs.unlinkSync(path.join(ORG_LOGO_DIR, f)); } catch (e) { /* already gone */ }
+}
+
+// Missouri State sample branding (Sep 17 2026): a demo org so Bobby can show
+// a college exactly what their branded platform looks like — maroon topbar,
+// Bears logo, their colors. Idempotent: creates the org once, backfills the
+// branding if the org somehow exists without it. The sample logo ships with
+// the deploy and is copied into DATA_DIR/org-logos on first boot.
+// Bobby can delete this org from the Organizations page any time.
+(function seedMissouriStateSample() {
+  try {
+    const destFile = 'missouri-state-sample.png';
+    const dest = path.join(ORG_LOGO_DIR, destFile);
+    const sampleSrc = path.join(__dirname, '..', 'public', 'org-logos-sample', 'missouri-state.png');
+    if (!fs.existsSync(dest) && fs.existsSync(sampleSrc)) fs.copyFileSync(sampleSrc, dest);
+    if (!fs.existsSync(dest)) return;
+    const existing = db.prepare('SELECT id, logo_path FROM organizations WHERE name = ?').get('Missouri State');
+    if (!existing) {
+      const code = makeOrganizationCode('Missouri State');
+      db.prepare(
+        `INSERT INTO organizations (name, code, skip_enabled, created_at, logo_path, primary_color, accent_color, deal_status, deal_notes)
+         VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)`
+      ).run('Missouri State', code, new Date().toISOString(), destFile, '#5E0009', '#EB002B', 'prospect',
+        'SAMPLE org — demo branding for sales (Bobby: safe to delete).');
+      console.log('BOOT_BRAND_SAMPLE: created Missouri State sample org');
+    } else if (!existing.logo_path) {
+      db.prepare('UPDATE organizations SET logo_path = ?, primary_color = ?, accent_color = ? WHERE id = ?')
+        .run(destFile, '#5E0009', '#EB002B', existing.id);
+      console.log('BOOT_BRAND_SAMPLE: backfilled branding on Missouri State org');
+    }
+  } catch (e) { console.warn('BOOT_BRAND_SAMPLE failed:', e.message); }
+})();
 // A signup code resolves to an organization, or to a team inside one.
 // Returns { organizationId, teamId } or null.
 function codeLookup(code) {
@@ -225,6 +324,7 @@ function decorateUser(u) {
   if (u && u.organizationId) {
     const c = getOrganization(u.organizationId);
     u.organizationName = c ? c.name : null;
+    u.brand = orgBrand(c);
     if (u.role === 'athlete') u.skipChatDisabled = c ? c.skip_enabled === 0 : false;
   }
   if (u && u.teamId) {
@@ -2588,6 +2688,42 @@ app.post('/coach/organizations/:id/skip', requireCoach, (req, res) => {
   const c = getOrganization(Number(req.params.id));
   if (!c) return res.redirect('/coach/organizations');
   db.prepare('UPDATE organizations SET skip_enabled = ? WHERE id = ?').run(c.skip_enabled ? 0 : 1, c.id);
+  res.redirect('/coach/organizations');
+});
+
+// Organization branding (Sep 17 2026): Bobby or the program's own org-level
+// coaches set the logo + colors their players see. Colors are strict hex;
+// the logo goes through multer's image-only filter (2MB cap).
+app.post('/coach/organizations/:id/brand', requireOrgManager, (req, res) => {
+  logoUpload.single('logo')(req, res, (err) => {
+    const c = getOrganization(Number(req.params.id));
+    if (!c) return res.redirect('/coach/organizations');
+    const fail = (msg) => {
+      if (req.file) deleteOrgLogoFile(req.file.filename);
+      return res.redirect('/coach/organizations?error=' + encodeURIComponent(msg));
+    };
+    if (err) return fail(err.message || 'Logo upload failed.');
+    const primary = String(req.body.primary_color || '').trim();
+    const accent = String(req.body.accent_color || '').trim();
+    if (primary && !validHexColor(primary)) return fail('Primary color must look like #5E0009.');
+    if (accent && !validHexColor(accent)) return fail('Accent color must look like #EB002B.');
+    let logoPath = c.logo_path || '';
+    if (req.file) {
+      deleteOrgLogoFile(logoPath);
+      logoPath = req.file.filename;
+    }
+    db.prepare('UPDATE organizations SET logo_path = ?, primary_color = ?, accent_color = ? WHERE id = ?')
+      .run(logoPath, primary, accent, c.id);
+    res.redirect('/coach/organizations');
+  });
+});
+
+app.post('/coach/organizations/:id/brand/logo/remove', requireOrgManager, (req, res) => {
+  const c = getOrganization(Number(req.params.id));
+  if (c && c.logo_path) {
+    deleteOrgLogoFile(c.logo_path);
+    db.prepare('UPDATE organizations SET logo_path = ? WHERE id = ?').run('', c.id);
+  }
   res.redirect('/coach/organizations');
 });
 

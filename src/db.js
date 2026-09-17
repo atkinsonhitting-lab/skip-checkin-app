@@ -100,6 +100,14 @@ for (const [col, type] of [['deal_status', 'TEXT NOT NULL DEFAULT ""'], ['deal_s
   const cols = db.prepare('PRAGMA table_info(organizations)').all().map((c) => c.name);
   if (!cols.includes(col)) db.exec(`ALTER TABLE organizations ADD COLUMN ${col} ${type};`);
 }
+
+// Organization branding (Sep 17 2026): per-org logo + colors so a college or
+// travel program's players see their own program's look. logo_path is a file
+// name under DATA_DIR/org-logos (never a path — served via /org-logos/:file).
+for (const [col, type] of [['logo_path', 'TEXT NOT NULL DEFAULT ""'], ['primary_color', 'TEXT NOT NULL DEFAULT ""'], ['accent_color', 'TEXT NOT NULL DEFAULT ""']]) {
+  const cols = db.prepare('PRAGMA table_info(organizations)').all().map((c) => c.name);
+  if (!cols.includes(col)) db.exec(`ALTER TABLE organizations ADD COLUMN ${col} ${type};`);
+}
 db.exec(`
 CREATE TABLE IF NOT EXISTS org_payments (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

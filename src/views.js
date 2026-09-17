@@ -63,6 +63,16 @@ function layout({ title, user, tabs, body }) {
   const tabHtml = (tabs || [])
     .map((t) => `<a href="${t.href}" class="drawer-link${t.active ? ' active' : ''}"><span class="drawer-link-text">${esc(t.label)}${t.sub ? `<span class="drawer-sub">${esc(t.sub)}</span>` : ''}</span>${t.badge ? `<span class="tab-badge">${esc(t.badge)}</span>` : ''}</a>`)
     .join('');
+  // Organization branding (Sep 17 2026): a branded org's players see their
+  // program's logo + name + colors instead of the stock Diamond Daily look.
+  // Colors are hex-validated server-side, so the inline style block is safe.
+  const brand = (user && user.brand) || null;
+  const brandCss = brand
+    ? `<style>:root{--red:${brand.primary};--red-dark:${brand.primaryDark};}.topbar{border-bottom-color:${brand.accent};}.brand-powered{font-size:9px;opacity:.55;letter-spacing:1px;margin-left:6px;font-weight:700;}.brand-logo-org{object-fit:contain;background:transparent;border:none;border-radius:0;}</style>`
+    : '';
+  const brandBlock = brand
+    ? `<div class="brand"><img src="${esc(brand.logoUrl || '/diamond-daily-logo.jpg')}" class="brand-logo-icon${brand.logoUrl ? ' brand-logo-org' : ''}" alt=""> ${esc(brand.orgName)} <span class="brand-powered">POWERED BY DIAMOND DAILY</span></div>`
+    : `<div class="brand"><img src="/diamond-daily-logo.jpg" class="brand-logo-icon" alt=""> DIAMOND DAILY</div>`;
   const drawer = tabHtml
     ? `<div id="drawer-overlay" hidden></div>
        <aside id="drawer" aria-label="Navigation" hidden>
@@ -77,6 +87,7 @@ function layout({ title, user, tabs, body }) {
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <title>${esc(title)} · Diamond Daily</title>
 <link rel="stylesheet" href="/style.css?v=2">
+${brandCss}
 <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-180.png?v=2">
 <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152.png?v=2">
 <link rel="apple-touch-icon" sizes="167x167" href="/icons/icon-167.png?v=2">
@@ -86,11 +97,11 @@ function layout({ title, user, tabs, body }) {
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Diamond Daily">
-<meta name="theme-color" content="#0a0a0a">
+<meta name="theme-color" content="${brand ? brand.primary : '#0a0a0a'}">
 </head>
 <body${tabbarHtml ? ' class="has-tabbar"' : ''}>
 <header class="topbar">
-  <div class="topbar-left">${tabHtml ? `<button type="button" id="drawer-btn" aria-label="Open menu">\u2630</button>` : ''}<div class="brand"><img src="/diamond-daily-logo.jpg" class="brand-logo-icon" alt=""> DIAMOND DAILY</div></div>
+  <div class="topbar-left">${tabHtml ? `<button type="button" id="drawer-btn" aria-label="Open menu">\u2630</button>` : ''}${brandBlock}</div>
   ${user ? `<div class="userbox">${esc(user.displayName)} · <a href="/logout">Log out</a></div>` : ''}
 </header>
 ${drawer}
@@ -1473,6 +1484,43 @@ function coachOrganizationsPage(user, organizations, error, addedId) {
                 <button class="btn-small" type="submit">Save</button>
               </form>
             </details>` : ''}
+            ${managesTeams ? (() => {
+              // Organization branding (Sep 17 2026): logo + colors the org's
+              // players see. Colors were hex-validated on save; re-check here
+              // before injecting into style attributes.
+              const hx = (s) => (/^#[0-9a-fA-F]{6}$/.test(String(s || '')) ? String(s) : null);
+              const primary = hx(c.primary_color) || '#e10600';
+              const accent = hx(c.accent_color) || '#a80400';
+              const logoImg = c.logo_path
+                ? `<img src="/org-logos/${esc(c.logo_path)}" alt="" style="height:40px;object-fit:contain">`
+                : `<span class="hint-inline">No logo yet</span>`;
+              const preview = `<div style="background:#000;border-bottom:3px solid ${accent};border-radius:10px;padding:10px 12px;display:flex;align-items:center;gap:10px">
+                  ${c.logo_path ? `<img src="/org-logos/${esc(c.logo_path)}" alt="" style="width:34px;height:34px;object-fit:contain">` : ''}
+                  <span style="font-weight:800;letter-spacing:1px;font-size:13px;color:#fff">${esc(c.name)}</span>
+                  <span style="font-size:8px;opacity:.5;letter-spacing:1px;color:#fff;font-weight:700">POWERED BY DIAMOND DAILY</span>
+                </div>
+                <div style="display:flex;gap:14px;align-items:center;margin-top:10px">
+                  <span style="background:${primary};color:#fff;font-size:12px;font-weight:700;padding:8px 16px;border-radius:8px">Check In</span>
+                  <span style="color:${primary};font-size:12px;font-weight:700">View notebook</span>
+                </div>
+                <p class="hint" style="margin:8px 0 0">Player preview &mdash; this is what ${esc(c.name)}&rsquo;s players see.</p>`;
+              return `<details style="margin-top:6px">
+                <summary class="hint" style="cursor:pointer">Branding &mdash; logo &amp; colors</summary>
+                <div style="margin-top:8px">${preview}</div>
+                <form method="post" action="/coach/organizations/${c.id}/brand" enctype="multipart/form-data" class="form" style="margin-top:10px">
+                  <div style="margin-bottom:8px">${logoImg}</div>
+                  <label>Logo <span class="hint-inline">(PNG, JPG, WebP, or GIF &mdash; 2MB max)</span><input type="file" name="logo" accept="image/png,image/jpeg,image/webp,image/gif"></label>
+                  <div style="display:flex;gap:12px">
+                    <label>Primary color<input type="color" name="primary_color" value="${primary}" style="width:60px;height:36px;padding:2px"></label>
+                    <label>Accent color<input type="color" name="accent_color" value="${accent}" style="width:60px;height:36px;padding:2px"></label>
+                  </div>
+                  <button class="btn-primary" type="submit">Save branding</button>
+                </form>
+                ${c.logo_path ? `<form method="post" action="/coach/organizations/${c.id}/brand/logo/remove" style="margin-top:8px">
+                  <button class="btn-small btn-quiet" type="submit">Remove logo</button>
+                </form>` : ''}
+              </details>`;
+            })() : ''}
           </div>
           ${isBobby ? `<div style="display:flex;gap:8px;align-items:center">
           <form method="post" action="/coach/organizations/${c.id}/skip" style="margin:0">
