@@ -55,6 +55,12 @@ async function main() {
   check('all 7 section inputs render', ['sec_prep', 'sec_tee', 'sec_sidetoss', 'sec_fronttoss', 'sec_bp', 'sec_machine', 'sec_other']
     .every((f) => cf2.includes(`name="${f}"`)));
   check('Other section renders', cf2.includes('>Other<'));
+  // Bobby Sep 17 2026: section labels must be bright red and easy to see,
+  // and the block compact so the form doesn't feel long.
+  const css = fs.readFileSync(path.join(CWD, 'public/style.css'), 'utf8');
+  const labelRule = (css.match(/\.drill-section-label\s*\{[^}]*\}/) || [''])[0];
+  check('section labels are bright red', /color:\s*var\(--red\)/.test(labelRule));
+  check('section block is compact', /\.drill-section\s*\{\s*margin:\s*6px 0 0/.test(css));
   check('history chip toggles the bare name into its section',
     cf2.includes('data-drill="Fence Drill"') && !cf2.includes('data-drill="Fence Drill (Tee)"') &&
     cf2.includes('data-target="sec_tee"'));

@@ -305,8 +305,10 @@ body.drawer-open #drawer { transform: none; }
 .drill-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 /* "What did you do today?" sections (Bobby, Sep 17 2026): each delivery-method
    group is a horizontally scrollable chip row so players can scroll and tap repeats. */
-.drill-section { margin: 10px 0 2px; }
-.drill-section-label { font-size: 13px; font-weight: 700; color: var(--ink-soft, #5b5b5b); margin: 8px 0 2px; }
+.drill-section { margin: 6px 0 0; }
+.drill-section-label { font-size: 14px; font-weight: 800; color: var(--red); margin: 6px 0 2px; text-transform: uppercase; letter-spacing: .6px; }
+.drill-section input { padding: 9px 12px; margin-top: 2px; }
+.drill-section .drill-chips { margin: 4px 0 2px; }
 .drill-chips-scroll { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 6px; }
 .drill-chips-scroll .drill-chip { flex: 0 0 auto; }
 .chip {
