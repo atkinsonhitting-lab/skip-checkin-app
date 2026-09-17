@@ -3024,7 +3024,7 @@ function coachUserStats(scope, opts) {
   const users = db
     .prepare(
       `SELECT u.id, u.email, u.athlete_name, u.first_name, u.last_name, u.created_at, u.date_of_birth, u.player_type,
-              u.notify_on_checkin, o.is_mine AS org_is_mine, t.name AS team_name
+              u.notify_on_checkin, u.organization_id, o.is_mine AS org_is_mine, o.name AS org_name, t.name AS team_name
        FROM users u LEFT JOIN teams t ON t.id = u.team_id LEFT JOIN organizations o ON o.id = u.organization_id
        WHERE u.role != 'coach' AND u.status = 'approved'
          AND (? IS NULL OR u.organization_id = ?) AND (? IS NULL OR u.team_id = ?)
@@ -3032,6 +3032,11 @@ function coachUserStats(scope, opts) {
        ORDER BY u.created_at ASC`
     )
     .all(...sp);
+  // Bobby's in-person program pins to the top of his player lists, always.
+  if (opts && opts.inPersonFirst) {
+    const rank = (u) => (u.org_name === 'Atkinson Hitting' ? 0 : u.org_is_mine === 1 ? 1 : 2);
+    users.sort((a, b) => rank(a) - rank(b)); // stable: signup order kept within groups
+  }
   const weekCutoff = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 19).replace('T', ' ');
   return users.map((u) => {
     const row = db
@@ -3048,7 +3053,8 @@ function coachUserStats(scope, opts) {
       for (const r of wrows) { try { wdays.add(chiDay(r.created_at)); } catch (e) {} }
       weekCount = wdays.size;
     } catch (e) {}
-    return { id: u.id, email: u.email, name, total: row.total, last: row.last, age: ageOn(u.date_of_birth), team: u.team_name || null, playerType: u.player_type || 'hitter',
+    return { id: u.id, email: u.email, name, total: row.total, last: row.last, age: ageOn(u.date_of_birth), team: u.team_name || null,
+      organizationId: u.organization_id || null, orgName: u.org_name || null, playerType: u.player_type || 'hitter',
       notifyOn: flag === 1 || (flag == null && u.org_is_mine === 1), streak, weekCount };
   });
 }
@@ -3291,8 +3297,25 @@ app.get('/coach', requireCoachAny, (req, res) => {
 app.get('/coach/hitters', requireCoachAny, (req, res) => {
   setApprovalCount(req);
   const me = realUser(req);
-  const title = me.organizationId ? 'Players' : 'All Players';
-  res.send(views.coachHittersPage(me, coachUserStats(orgScope(req)), { title, tab: 'hitters', notifyButton: !me.organizationId }));
+  const qorg = String(req.query.org || '');
+  let players = coachUserStats(orgScope(req), { inPersonFirst: !me.organizationId });
+  let title = me.organizationId ? 'Players' : 'All Players';
+  let filterOrg = null;
+  // Drill in from the Coach Dashboard's organization breakdown.
+  if (!me.organizationId && qorg) {
+    if (qorg === 'none') {
+      players = players.filter((p) => p.organizationId == null);
+      title = 'Standalone players';
+      filterOrg = { id: 'none', name: 'Standalone players' };
+    } else if (/^\d+$/.test(qorg)) {
+      const o = db.prepare('SELECT id, name FROM organizations WHERE id = ?').get(Number(qorg));
+      if (!o) return res.redirect('/coach/hitters');
+      players = players.filter((p) => p.organizationId === o.id);
+      title = o.name;
+      filterOrg = { id: o.id, name: o.name };
+    }
+  }
+  res.send(views.coachHittersPage(me, players, { title, tab: 'hitters', notifyButton: !me.organizationId, filterOrg }));
 });
 
 // Per-player log-alert toggle (Sep 17 2026, Bobby): full-access global coach
@@ -3314,7 +3337,7 @@ app.post('/coach/player/:id/notify-checkin', requireGlobalCoachAny, requireCoach
 app.get('/coach/my-players', requireGlobalCoachAny, (req, res) => {
   setApprovalCount(req);
   res.send(
-    views.coachHittersPage(realUser(req), coachUserStats(orgScope(req), { mineOnly: true }), {
+    views.coachHittersPage(realUser(req), coachUserStats(orgScope(req), { mineOnly: true, inPersonFirst: true }), {
       title: 'My Players',
       tab: 'my-players',
       empty: 'No players in your programs yet.',

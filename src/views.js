@@ -1791,12 +1791,15 @@ function coachHomePage(user, quiet, latest, pending, pushOn, analytics) {
     ? `<h2 class="section-head">Players by organization</h2>
     <div class="card org-breakdown">${a.orgs
       .map(
-        (o) => `<div class="org-row">
+        (o) => `<a class="org-row" href="/coach/hitters?org=${o.id == null ? 'none' : o.id}">
           <div><strong>${esc(o.name)}</strong>
             <div class="hint-inline">${o.players} player${o.players === 1 ? '' : 's'} \u00b7 ${o.weekCheckins} check-in${o.weekCheckins === 1 ? '' : 's'} \u00b7 7d</div>
           </div>
-          <div class="org-money">${o.paidCents ? `<span class="badge ok">${fmtMoney(o.paidCents)} paid</span>` : o.dealCents ? `<span class="badge warn">${fmtMoney(o.dealCents)} deal \u00b7 unpaid</span>` : '<span class="hint-inline">no deal set</span>'}</div>
-        </div>`
+          <div class="org-row-right">
+            <div class="org-money">${o.paidCents ? `<span class="badge ok">${fmtMoney(o.paidCents)} paid</span>` : o.dealCents ? `<span class="badge warn">${fmtMoney(o.dealCents)} deal \u00b7 unpaid</span>` : '<span class="hint-inline">no deal set</span>'}</div>
+            <span class="org-chev" aria-hidden="true">\u203a</span>
+          </div>
+        </a>`
       )
       .join('')}</div>`
     : '';
@@ -1859,7 +1862,7 @@ function coachHittersPage(user, userStats, opts) {
         <a href="/coach/user/${encodeURIComponent(a.email)}" style="display:block;color:inherit;text-decoration:none">
           <div class="athlete-card-name">${esc(a.name)} ${rolePill(a.playerType)}</div>
           <div class="athlete-card-email">${esc(a.email)}</div>
-          <div class="athlete-card-meta">${a.total} check-in${a.total === 1 ? '' : 's'}${a.streak ? ` · 🔥 ${a.streak}-day streak` : ''}${a.weekCount != null ? ` · ${a.weekCount}/7 days` : ''}${a.last ? ` · last ${fmtDate(a.last)}` : ' · none yet'}${a.age != null ? ` · age ${a.age}` : ''}${a.team ? ` · ${esc(a.team)}` : ''}</div>
+          <div class="athlete-card-meta">${a.total} check-in${a.total === 1 ? '' : 's'}${a.streak ? ` · 🔥 ${a.streak}-day streak` : ''}${a.weekCount != null ? ` · ${a.weekCount}/7 days` : ''}${a.last ? ` · last ${fmtDate(a.last)}` : ' · none yet'}${a.age != null ? ` · age ${a.age}` : ''}${a.team ? ` · ${esc(a.team)}` : ''}${!o.filterOrg && a.orgName ? ` · ${esc(a.orgName)}` : ''}</div>
         </a>
         <div style="display:flex;gap:8px;margin:8px 0 0;flex-wrap:wrap">
           ${o.messageButton ? `<a class="btn-small" href="/coach/messages/${a.id}">Message</a>` : ''}
@@ -1881,6 +1884,7 @@ function coachHittersPage(user, userStats, opts) {
     user,
     tabs: coachTabs(tab, user.approvalCount, user),
     body: `<h1 class="page-title">${esc(title)}</h1>
+    ${o.filterOrg ? `<p style="margin:0 0 12px"><a href="/coach/hitters" class="btn-small btn-quiet">\u2190 All players</a></p>` : ''}
     ${userStats.length ? `<input type="search" id="hitter-search" class="searchbar" placeholder="Search players…" autocomplete="off">` : ''}
     ${userStats.length ? `<div class="pill-row" id="role-filter">
       <button type="button" class="pill-link active" data-rolefilter="all">All</button>
