@@ -3499,8 +3499,11 @@ async function askSkip(user, userMessage, opts = {}) {
   const dataBlock = coachMode ? '' : skipDataBlock(userId, role);
   // Brain v2: short core prompt + only the playbook entries relevant to this message.
   // Pitcher-only coaching is mirror mode — the hitting Brain library is never
-  // injected there.
-  const playbook = role === 'pitcher' ? '' : brain.libraryBlock(db, userMessage);
+  // injected there. Two-way athletes talking THROWING get the same mirror mode:
+  // without this gate, keyword retrieval matches generic words ("timing",
+  // "feel") and smuggles hitting entries into a pitching conversation.
+  const throwingMsg = role === 'two_way' && brain.messageAboutThrowing(userMessage);
+  const playbook = role === 'pitcher' || throwingMsg ? '' : brain.libraryBlock(db, userMessage);
   const playbookBlock = playbook ? `\n\n${playbook}` : '';
   const saveBlock = !coachMode && opts.saveNote ? `\n\n${opts.saveNote}` : '';
   const system = coachMode ? COACH_SYSTEM + playbookBlock : `${skipCoreFor(role)}\n\n${nameLine}${dataBlock}${playbookBlock}${saveBlock}`;

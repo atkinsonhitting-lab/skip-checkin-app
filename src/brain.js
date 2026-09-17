@@ -475,9 +475,28 @@ function rulesEntries(db) {
     .all();
 }
 
+// ---------------------------------------------------------------------------
+// Two-way leak guard: when a two-way athlete's message is about THROWING,
+// the hitting Brain library must not be injected at all (mirror mode, like a
+// pure pitcher). Keyword retrieval would otherwise match generic words
+// ("timing", "feel") and smuggle hitting entries into a pitching conversation.
+// Deliberately conservative: over-suppressing just means Skip coaches from the
+// athlete's throwing data and words, which is correct mirror mode anyway.
+// ---------------------------------------------------------------------------
+const THROWING_HINTS = [
+  'mound', 'bullpen', ' the pen', 'velo', 'fastball', 'curveball', 'slider',
+  'changeup', 'change-up', 'cutter', 'sinker', 'splitter', 'knuckleball',
+  'pitch count', 'pitching', 'my pitch', 'command', 'throw', 'threw',
+  'long toss', 'catch play', 'arm slot', 'arm action', 'my arm',
+  'batters faced', 'live ab', 'no-throw', 'no throw',
+];
+function messageAboutThrowing(msg) {
+  const t = ` ${String(msg || '').toLowerCase()} `;
+  return THROWING_HINTS.some((k) => t.includes(k));
+}
+
 // The block injected into Skip's system prompt for a hitter chat.
-function libraryBlock(db, message) {
-  const rules = rulesEntries(db);
+function libraryBlock(db, message) {  const rules = rulesEntries(db);
   const rel = relevantEntries(db, message, 5);
   if (!rules.length && !rel.length) return '';
   const fmt = (e) => `- [${e.type.toUpperCase()}] ${e.title}: ${e.body}`;
@@ -635,6 +654,7 @@ module.exports = {
   SEED_ENTRIES,
   ensureBrain,
   libraryBlock,
+  messageAboutThrowing,
   relevantEntries,
   rulesEntries,
   listEntries,

@@ -36,7 +36,7 @@ async function main() {
     q(`SELECT id FROM users WHERE email='legacy@test.com'`).id, 'Legacy', now, 'Cage', '[]', 8, 7, 8, 7.5, 'Locked In', 'good swings', 'staying through it', '');
   check('legacy hitter defaults to hitter role', (q(`SELECT player_type FROM users WHERE email='legacy@test.com'`).player_type || 'hitter') === 'hitter');
 
-  const srv = spawn('node', ['src/server.js'], { cwd: CWD, env: { ...process.env, DB_PATH: DB, PORT: String(PORT), SESSION_SECRET: 't', SKIP_API_KEY: 't' }, stdio: 'inherit' });
+  const srv = spawn('node', ['src/server.js'], { cwd: CWD, env: { ...process.env, DB_PATH: DB, PORT: String(PORT), SESSION_SECRET: 't', SKIP_API_KEY: 't', LLM_API_KEY: 't' }, stdio: 'inherit' });
   const jar = {};
   const req = async (method, path, body, who) => {
     const headers = {};
@@ -58,7 +58,7 @@ async function main() {
     // ---- Signup roles ----
     const dob = '2008-04-12';
     const reg = async (email, pt) => {
-      const body = { email, password: 'password123', confirm_password: 'password123', first_name: 'Test', last_name: 'Kid', date_of_birth: dob };
+      const body = { email, password: 'password123', confirm_password: 'password123', first_name: 'Test', last_name: 'Kid', date_of_birth: dob, agree_terms: '1' };
       if (pt !== undefined) body.player_type = pt;
       return req('POST', '/register', P(body), 'anon');
     };
@@ -164,7 +164,7 @@ async function main() {
     check('both has hitting+throwing scores', c.hitting_score != null && c.pitching_score != null);
     check('both keeps environment', c.environment === 'Live BP');
     r = await req('POST', '/checkin/combined', P({ feel: '7', focus: '7', confidence: '7' }), 'tw');
-    check('combined neither rejected', r.status === 200 && r.text.includes('Tell Skip what you did today'));
+    check('combined neither rejected', r.status === 200 && r.text.includes('Say what you did today'));
 
     // ---- Notebook: badges + kind filter ----
     r = await req('GET', '/notebook', null, 'tw');
@@ -228,9 +228,20 @@ async function main() {
 
     // ---- Skip pitcher isolation (static prompt checks) ----
     const src = fs.readFileSync(CWD + '/src/server.js', 'utf8');
-    check('hitting library never injected for pitchers', src.includes("role === 'pitcher' ? '' : brain.libraryBlock"));
+    check('hitting library never injected for pitchers', /role === 'pitcher' \|\| throwingMsg \? '' : brain\.libraryBlock/.test(src));
+    check('two-way throwing gate exists', src.includes('brain.messageAboutThrowing(userMessage)'));
     check('pitcher core prompt is mirror mode', /skipCoreFor\(role\)/.test(src) && /mirror/i.test(src));
     check('throwing history labeled [Throwing]', src.includes('[Throwing]'));
+
+    // ---- Two-way leak guard: throwing messages suppress the hitting library ----
+    const brain = require(CWD + '/src/brain.js');
+    check('throwing detected: bullpen/velo', brain.messageAboutThrowing('bullpen today, velo was down'));
+    check('throwing detected: command', brain.messageAboutThrowing("couldn't find my command in the pen"));
+    check('throwing detected: threw', brain.messageAboutThrowing('threw 40 pitches, arm felt heavy'));
+    check('throwing detected: mound', brain.messageAboutThrowing('felt rushed on the mound'));
+    check('hitting not flagged: timing', !brain.messageAboutThrowing('my timing was off at the plate today'));
+    check('hitting not flagged: pitch recognition', !brain.messageAboutThrowing('saw the pitch really well tonight'));
+    check('hitting not flagged: feel', !brain.messageAboutThrowing('my swing felt smooth'));
 
     // ---- Existing hitter regression ----
     r = await req('GET', '/notebook', null, 'hit');
