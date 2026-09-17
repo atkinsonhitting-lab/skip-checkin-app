@@ -637,6 +637,21 @@ function sliderField(name, label, question, value, ends, ids) {
   </div>`;
 }
 
+// "What did you do today?" sections (Bobby, Sep 17 2026: separated sections,
+// not one text box). Each section is its own comma-separated input + its own
+// history chips. `field` is the form input name/id; `key` indexes sectioned
+// value objects server-side; `quick` is the per-section quick-pick chip
+// (null = none).
+const DRILL_SECTIONS = [
+  { key: 'prep', field: 'sec_prep', label: 'Prep', quick: 'Prep' },
+  { key: 'tee', field: 'sec_tee', label: 'Off the tee', quick: 'Tee' },
+  { key: 'sideToss', field: 'sec_sidetoss', label: 'Side toss', quick: 'Side Toss' },
+  { key: 'frontToss', field: 'sec_fronttoss', label: 'Front toss', quick: 'Front Toss' },
+  { key: 'bp', field: 'sec_bp', label: 'BP', quick: 'BP' },
+  { key: 'machine', field: 'sec_machine', label: 'Machine', quick: 'Machine' },
+  { key: 'other', field: 'sec_other', label: 'Other', quick: null },
+];
+
 function checkinForm(user, error, values, drillNames, routine, recentGroups) {
   const v = values || {};
   const rt = routine || [];
@@ -660,44 +675,31 @@ function checkinForm(user, error, values, drillNames, routine, recentGroups) {
       <div class="field-label">What did you do today?</div>
       <p class="hint" id="drills-subtitle" data-default="Everything you did \u2014 tee work, flips, BP, machine. Blank is fine.">Everything you did \u2014 tee work, flips, BP, machine. Blank is fine.</p>
       <p class="hint">Tap to add — or just type. Blank is fine.</p>
-      <label>What you did <span class="hint-inline">(separate with commas)</span>
-        <input id="drills-input" name="drills_done" list="drill-list" placeholder="e.g. Fence drill (tee), Walk In Drill" value="${esc(v.drills_done || '')}">
-      </label>
+      ${DRILL_SECTIONS.map((s) => {
+        // "What did you do today?" sections (Bobby, Sep 17 2026): one input
+        // per section, each with its own history chips. Chips toggle the bare
+        // name into their own section's input (the section implies the tag).
+        // Inputs always render; chips rows are omitted when empty.
+        const secVal = v[s.field] || (v.sections && v.sections[s.key]) || '';
+        const groups = recentGroups && typeof recentGroups === 'object' ? recentGroups : {};
+        const names = Array.isArray(groups[s.key]) ? groups[s.key] : [];
+        const bare = (n) => String(n).replace(/\s*\([^()]*\)\s*$/, '').trim() || String(n).trim();
+        const seenNames = new Set(names.map((n) => String(n).toLowerCase()));
+        let chips = names.map((d) => {
+          const b = bare(d);
+          return `<button type="button" class="pill-link drill-chip" data-drill="${esc(b)}" data-target="${s.field}">${esc(b)}</button>`;
+        });
+        if (s.quick && !seenNames.has(s.quick.toLowerCase())) {
+          chips.push(`<button type="button" class="pill-link drill-chip" data-drill="${esc(s.quick)}" data-target="${s.field}">${esc(s.quick)}</button>`);
+        }
+        const chipsRow = chips.length
+          ? `<div class="drill-chips drill-chips-scroll">${chips.join('')}</div>` : '';
+        return `<div class="drill-section"><div class="drill-section-label">${s.label}</div>` +
+          `<input id="${s.field}" name="${s.field}" list="drill-list" placeholder="e.g. Fence drill, Walk In Drill" value="${esc(secVal)}">` +
+          `${chipsRow}</div>`;
+      }).join('')}
       ${rt.length ? `<button type="button" id="use-routine" class="btn-ghost" data-routine="${routineJson}">Use my daily routine</button>` : ''}
       <p class="hint"><a href="/routine">Edit daily routine →</a></p>
-      ${(() => {
-        // "What did you do today?" picker (Bobby, Sep 17 2026): the player's
-        // own history grouped by delivery method — scroll each section and tap
-        // repeats. Then quick picks, minus dupes of history drills.
-        const groups = recentGroups && typeof recentGroups === 'object' ? recentGroups : {};
-        const order = [
-          ['prep', 'Prep'],
-          ['tee', 'Off the tee'],
-          ['sideToss', 'Side toss'],
-          ['frontToss', 'Front toss'],
-          ['bp', 'BP'],
-          ['machine', 'Machine'],
-          ['other', 'Other'],
-        ];
-        const historyKeys = new Set();
-        let html = '';
-        for (const [key, label] of order) {
-          const names = Array.isArray(groups[key]) ? groups[key] : [];
-          if (!names.length) continue;
-          names.forEach((n) => historyKeys.add(String(n).toLowerCase()));
-          html += `<div class="drill-section"><div class="drill-section-label">${label}</div><div class="drill-chips drill-chips-scroll">` +
-            names.map((d) => `<button type="button" class="pill-link drill-chip" data-drill="${esc(d)}">${esc(d)}</button>`).join('') +
-            `</div></div>`;
-        }
-        const presets = ['Prep', 'Tee', 'Side Toss', 'Front Toss', 'BP', 'Machine']
-          .filter((p) => !historyKeys.has(p.toLowerCase()));
-        if (presets.length) {
-          html += `<div class="drill-section"><div class="drill-section-label">Quick picks</div><div class="drill-chips">` +
-            presets.map((d) => `<button type="button" class="pill-link drill-chip" data-drill="${esc(d)}">${esc(d)}</button>`).join('') +
-            `</div></div>`;
-        }
-        return html;
-      })()}
       <p class="hint">Tip: add (prep), (tee), (side toss), (front toss), (BP), or (machine) after what you did &mdash; e.g. &quot;Fence drill (tee)&quot;.</p>
       ${sliderField('feel', 'Feel', 'How good did you feel?', v.feel)}
       ${sliderField('confidence', 'Confidence', 'How confident did you feel?', v.confidence)}
@@ -2916,4 +2918,5 @@ module.exports = {
   coachLibraryPage,
   esc,
   settingsPage,
+  DRILL_SECTIONS,
 };

@@ -110,41 +110,62 @@
     return parts.join(', ');
   }
   function syncDrillChips() {
-    const input = document.getElementById('drills-input');
-    const chips = Array.from(document.querySelectorAll('.drill-chip'));
-    if (!input || !chips.length) return;
-    const present = new Set(input.value.split(',').map((s) => s.trim().toLowerCase()));
+    // Each section chip tracks its own section input (data-target); a chip is
+    // active when its drill is present in that input's comma-separated value.
+    const chips = Array.from(document.querySelectorAll('.drill-chip[data-target]'));
+    if (!chips.length) return;
     chips.forEach((chip) => {
+      const input = document.getElementById(chip.getAttribute('data-target'));
+      if (!input) return;
+      const present = new Set(input.value.split(',').map((s) => s.trim().toLowerCase()));
       chip.classList.toggle('active', present.has(String(chip.dataset.drill || '').toLowerCase()));
     });
   }
 
-  // ---- Check-in: add the hitter's daily routine into the drills field ----
-  // Merges with whatever is already there (Bobby: "use their routine and add
-  // to it") — never wipes chips the player already tapped.
+  // Map a routine drill station to its "What did you do today?" section input
+  // id. Unknown/blank stations land in Other (no tag is attached there).
+  function drillSectionFor(station) {
+    const s = String(station || '').trim().toLowerCase();
+    if (s === 'prep') return 'sec_prep';
+    if (s === 'tee') return 'sec_tee';
+    if (s === 'side toss') return 'sec_sidetoss';
+    if (s === 'front toss') return 'sec_fronttoss';
+    if (s === 'bp' || s === 'batting practice') return 'sec_bp';
+    if (s === 'machine') return 'sec_machine';
+    return 'sec_other';
+  }
+
+  // ---- Check-in: "What did you do today?" sections (Bobby, Sep 17 2026) ----
+  // 7 section inputs, not one text box. Chips toggle the bare drill name into
+  // their own section's input (data-target = the input id); "Use my daily
+  // routine" merges each routine item into its station's section — never wipes
+  // what the player already typed or tapped.
   (function useRoutine() {
     const btn = document.getElementById('use-routine');
     if (!btn) return;
     btn.addEventListener('click', () => {
       let drills = [];
       try { drills = JSON.parse(btn.dataset.routine || '[]'); } catch (e) { drills = []; }
-      const input = document.getElementById('drills-input');
-      if (!input || !drills.length) return;
-      input.value = mergeDrillNames(
-        input.value,
-        drills.map((d) => (d.station ? `${d.name} (${d.station})` : d.name))
-      );
+      if (!drills.length) return;
+      const bySection = {};
+      for (const d of drills) {
+        const id = drillSectionFor(d.station);
+        (bySection[id] = bySection[id] || []).push(String(d.name || '').trim());
+      }
+      for (const [id, names] of Object.entries(bySection)) {
+        const input = document.getElementById(id);
+        if (input) input.value = mergeDrillNames(input.value, names);
+      }
       syncDrillChips();
-      input.focus();
     });
   })();
 
-  // ---- Check-in: quick-tap drill chips toggle entries in the drills input ----
+  // ---- Check-in: quick-tap drill chips toggle entries in their section ----
   (function drillChips() {
-    const chips = Array.from(document.querySelectorAll('.drill-chip'));
+    const chips = Array.from(document.querySelectorAll('.drill-chip[data-target]'));
     if (!chips.length) return;
-    const input = document.getElementById('drills-input');
     chips.forEach((chip) => {
+      const input = document.getElementById(chip.getAttribute('data-target'));
       chip.addEventListener('click', () => {
         if (!input) return;
         input.value = toggleDrillName(input.value, chip.dataset.drill);
@@ -152,7 +173,7 @@
         input.focus();
       });
     });
-    // Mark chips already present when the form loads (e.g. editing a draft).
+    // Mark chips already present when the form loads (e.g. after a failed POST).
     syncDrillChips();
   })();
 

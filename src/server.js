@@ -1227,6 +1227,56 @@ function sessionDrills(drillsDoneJson) {
   return out;
 }
 
+// "What did you do today?" sections (Bobby, Sep 17 2026: separated sections,
+// not one text box). Storage stays IDENTICAL: drills_done JSON with trailing
+// environment tags; sections only change how the form collects the input.
+const DRILL_SECTIONS = views.DRILL_SECTIONS;
+const SECTION_STATION = {
+  prep: 'Prep', tee: 'Tee', sideToss: 'Side toss', frontToss: 'Front toss',
+  bp: 'BP', machine: 'Machine', other: null,
+};
+
+// Canonical section key for a drill station (object station or trailing tag).
+function drillSectionKey(st) {
+  const s = String(st || '').trim().toLowerCase();
+  if (s === 'prep') return 'prep';
+  if (s === 'tee') return 'tee';
+  if (s === 'side toss') return 'sideToss';
+  if (s === 'front toss') return 'frontToss';
+  if (s === 'bp' || s === 'batting practice') return 'bp';
+  if (s === 'machine') return 'machine';
+  return null;
+}
+
+// Split a stored drills_done JSON array back into the 7 section inputs.
+// Untagged/unknown items land in Other. Names come back bare (the section
+// implies the tag); section order is preserved by the caller.
+function splitDrillsBySection(drillsDoneJson) {
+  const out = {};
+  for (const s of DRILL_SECTIONS) out[s.key] = [];
+  for (const d of sessionDrills(drillsDoneJson)) {
+    out[drillSectionKey(d.station) || 'other'].push(d.name);
+  }
+  const joined = {};
+  for (const s of DRILL_SECTIONS) joined[s.key] = out[s.key].join(', ');
+  return joined;
+}
+
+// Parse the 7 section inputs from a POST body into one drills_done array
+// (section order). Each input is comma-separated; items keep an explicit
+// trailing (tag) when present, otherwise they take their section's tag.
+// Other-section items keep no tag. All-blank submits as [].
+function parseSectionDrills(b) {
+  const out = [];
+  for (const s of DRILL_SECTIONS) {
+    const station = SECTION_STATION[s.key];
+    for (const e of parseDrillsDone(b[s.field])) {
+      out.push(e.station ? e : { name: e.name, station: station ? canonicalStation(station) : null, known: e.known });
+    }
+  }
+  return out;
+}
+
 // Recent drills grouped by delivery method for the "What did you do today?"
 // picker (Bobby, Sep 17 2026: "they could kind of scroll through it and pick
 // if they repeated shit"). The player's own history from the last 25 check-ins:
@@ -1239,24 +1289,14 @@ function recentDrillGroups(userId) {
     .prepare('SELECT drills_done FROM checkins WHERE user_id = ? ORDER BY created_at DESC LIMIT 25')
     .all(userId);
   const groups = { prep: [], tee: [], sideToss: [], frontToss: [], bp: [], machine: [], other: [] };
-  const stationKey = (st) => {
-    const s = String(st || '').trim().toLowerCase();
-    if (s === 'prep') return 'prep';
-    if (s === 'tee') return 'tee';
-    if (s === 'side toss') return 'sideToss';
-    if (s === 'front toss') return 'frontToss';
-    if (s === 'bp' || s === 'batting practice') return 'bp';
-    if (s === 'machine') return 'machine';
-    return null;
-  };
   const seen = new Set();
   for (const r of rows) {
     for (const d of sessionDrills(r.drills_done)) {
-      let key = stationKey(d.station);
+      let key = drillSectionKey(d.station);
       let base = String(d.name);
       if (!key) {
         const m = String(d.name).match(/^(.*?)\s*\(([^()]*)\)\s*$/);
-        if (m && m[1].trim()) { key = stationKey(m[2]); base = m[1].trim(); }
+        if (m && m[1].trim()) { key = drillSectionKey(m[2]); base = m[1].trim(); }
       }
       // A drill literally named "prep" is prep work, even untagged.
       if (!key && base.trim().toLowerCase() === 'prep') key = 'prep';
@@ -1411,17 +1451,37 @@ app.get('/', requireLogin, (req, res) => {
 });
 
 // Remote-program players (Bobby's remote hitters) already have a plan, so
-// "What did you do today?" is pre-filled with today's scheduled work. The
-// pre-filled text is just the input's value — chips toggle and manual edits
-// work exactly as usual. Returns '' when there's nothing to pre-fill.
+// "What did you do today?" is pre-filled with today's scheduled work, mapped
+// into the 7 sections by category keyword ("Day 1 — Tee" -> tee section;
+// "Daily Routine" -> prep). The pre-filled text is just each section input's
+// value — chips toggle and manual edits work exactly as usual. Returns a
+// sections object ({prep, tee, sideToss, frontToss, bp, machine, other}) of
+// comma-joined strings, all blank when there's nothing to pre-fill.
 function todayProgramPrefill(userId, now) {
+  const blank = {};
+  for (const s of DRILL_SECTIONS) blank[s.key] = [];
+  const joinSecs = (o) => {
+    const j = {};
+    for (const s of DRILL_SECTIONS) j[s.key] = o[s.key].join(', ');
+    return j;
+  };
   const u = db.prepare('SELECT remote_program_id FROM users WHERE id = ?').get(userId) || {};
-  if (!u.remote_program_id) return '';
+  if (!u.remote_program_id) return joinSecs(blank);
   const row = db.prepare('SELECT program_json FROM remote_programs WHERE id = ?').get(u.remote_program_id);
-  if (!row) return '';
+  if (!row) return joinSecs(blank);
   let prog = {};
-  try { prog = JSON.parse(row.program_json || '{}'); } catch (e) { return ''; }
-  if (!prog || typeof prog !== 'object') return '';
+  try { prog = JSON.parse(row.program_json || '{}'); } catch (e) { return joinSecs(blank); }
+  if (!prog || typeof prog !== 'object') return joinSecs(blank);
+  const sectionForCategory = (name) => {
+    const n = String(name || '').toLowerCase();
+    if (n.includes('tee')) return 'tee';
+    if (n.includes('side')) return 'sideToss';
+    if (n.includes('front')) return 'frontToss';
+    if (n.includes('bp')) return 'bp';
+    if (n.includes('machine')) return 'machine';
+    if (n.includes('routine') || n.includes('prep') || n.includes('warm')) return 'prep';
+    return 'other';
+  };
   const cats = Array.isArray(prog.routine) ? prog.routine : [];
   const daily = [];
   const dayCats = []; // [categoryName, drills[]], excluding Daily Routine
@@ -1436,19 +1496,39 @@ function todayProgramPrefill(userId, now) {
   const sched = Array.isArray(prog.schedule) ? prog.schedule : [];
   const weekday = chiWeekdayFmt.format(now || new Date());
   const entry = sched.find((e) => Array.isArray(e) && String(e[0]).toLowerCase() === weekday.toLowerCase());
-  if (entry && /^(off|rest)$/i.test(String(entry[1] || '').trim())) return ''; // rest day
-  let extra = [];
+  if (entry && /^(off|rest)$/i.test(String(entry[1] || '').trim())) return joinSecs(blank); // rest day
+  const extra = []; // [sectionKey, drill]
   if (entry && String(entry[1] || '').trim()) {
     const label = String(entry[1]).trim().toLowerCase();
     for (const [name, drills] of dayCats) {
-      if (name.toLowerCase().startsWith(label)) extra.push(...drills);
+      if (name.toLowerCase().startsWith(label)) {
+        const key = sectionForCategory(name);
+        for (const d of drills) extra.push([key, d]);
+      }
     }
   }
-  // No schedule or no match: just the daily routine (or blank).
+  // No schedule or no match: just the daily routine (in prep) — or blank.
   const seen = new Set();
-  return [...daily, ...extra]
-    .filter((d) => { const k = d.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; })
-    .join(', ');
+  const add = (key, d) => {
+    const k = d.toLowerCase();
+    if (seen.has(k)) return;
+    seen.add(k);
+    blank[key].push(d);
+  };
+  for (const d of daily) add('prep', d);
+  for (const [key, d] of extra) add(key, d);
+  return joinSecs(blank);
+}
+
+// Normalize values for the hitting check-in form: the 7 section inputs read
+// from sec_* fields, a `sections` object (remote pre-fill), or — as a
+// fallback — a legacy drills_done array/string split back into sections.
+function checkinValues(v) {
+  const out = Object.assign({}, v);
+  if (out.drills_done && !DRILL_SECTIONS.some((s) => out[s.field])) {
+    out.sections = splitDrillsBySection(out.drills_done);
+  }
+  return out;
 }
 
 app.get('/checkin', requireLogin, (req, res) => {
@@ -1458,7 +1538,7 @@ app.get('/checkin', requireLogin, (req, res) => {
   const pt = req.user.playerType || 'hitter';
   if (pt === 'pitcher') return res.send(views.pitchingCheckinForm(req.user, null, {}));
   if (pt === 'two_way') return res.send(views.combinedCheckinForm(req.user, null, {}));
-  res.send(views.checkinForm(req.user, null, { drills_done: todayProgramPrefill(req.user.id) }, data.drillNames(), getRoutine(req.user.id), recentDrillGroups(req.user.id)));
+  res.send(views.checkinForm(req.user, null, checkinValues({ sections: todayProgramPrefill(req.user.id) }), data.drillNames(), getRoutine(req.user.id), recentDrillGroups(req.user.id)));
 });
 
 // ---- Daily routine ----
@@ -2098,7 +2178,7 @@ app.post('/checkin', requireLogin, (req, res) => {
   // The hitting form is for hitters; pitchers and two-ways have their own.
   if ((req.user.playerType || 'hitter') !== 'hitter') return res.redirect('/checkin');
   const b = req.body;
-  const fail = (msg) => res.send(views.checkinForm(req.user, msg, b, data.drillNames(), getRoutine(req.user.id), recentDrillGroups(req.user.id)));
+  const fail = (msg) => res.send(views.checkinForm(req.user, msg, checkinValues(b), data.drillNames(), getRoutine(req.user.id), recentDrillGroups(req.user.id)));
   if (!ENVIRONMENTS.includes(b.environment)) {
     return fail('Pick the environment you were in.');
   }
@@ -2110,8 +2190,9 @@ app.post('/checkin', requireLogin, (req, res) => {
     return fail('Rate feel, confidence, focus, and difficulty from 1 to 10.');
   }
   // Drills are optional (Bobby, Sep 17 2026): "What did you do today?" with
-  // blank fine — no Yes/No gate anymore.
-  const drills = parseDrillsDone(b.drills_done);
+  // blank fine — no Yes/No gate anymore. The 7 section inputs are parsed
+  // into one drills_done array (section order); explicit (tag)s are kept.
+  const drills = parseSectionDrills(b);
   const sessionScore = scoreBreakdown(
     feel,
     confidence,

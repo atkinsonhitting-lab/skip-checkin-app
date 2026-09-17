@@ -40,18 +40,30 @@ async function main() {
   for (const d of ['Prep', 'Tee', 'Side Toss', 'Front Toss', 'BP', 'Machine'])
     check(`drill chip "${d}" in check-in form`, cf.includes(`data-drill="${d}"`));
   check('tip text about (prep)/(tee)/etc. present', cf.includes('add (prep), (tee), (side toss), (front toss), (BP), or (machine) after what you did'));
-  check('field framed as what you did, not drills', cf.includes('What you did <span class="hint-inline">(separate with commas)</span>') && !cf.includes('<label>Drills <span'));
+  check('no drills_done field; sectioned inputs instead', cf.includes('name="sec_tee"') && !cf.includes('name="drills_done"'));
   check('"What did you do today?" heading present', cf.includes('What did you do today?'));
   check('"Did you do any drills?" gate gone', !cf.includes('Did you do any drills?') && !cf.includes('name="did_drills"'));
   check('drills block sits before the Feel slider',
     cf.indexOf('What did you do today?') < cf.indexOf('name="feel"'));
-  // Grouped sections render from the grouped shape; empty sections omitted.
+  // Sectioned inputs render from the grouped shape; every section's input
+  // always renders, chips rows are omitted when the section is empty.
   const cf2 = views.checkinForm({ role: 'athlete' }, null, {}, [], [],
     { tee: ['Fence Drill (Tee)'], sideToss: [], frontToss: [], bp: [], machine: [], other: ['Walk In'] });
   check('Off the tee section renders', cf2.includes('>Off the tee<'));
-  check('empty sections omitted', !cf2.includes('drill-section-label">Side toss</div>') && !cf2.includes('drill-section-label">Front toss</div>') && !cf2.includes('drill-section-label">Machine</div>'));
+  check('all 7 section labels render', ['Prep', 'Off the tee', 'Side toss', 'Front toss', 'BP', 'Machine', 'Other']
+    .every((l) => cf2.includes(`drill-section-label">${l}</div>`)));
+  check('all 7 section inputs render', ['sec_prep', 'sec_tee', 'sec_sidetoss', 'sec_fronttoss', 'sec_bp', 'sec_machine', 'sec_other']
+    .every((f) => cf2.includes(`name="${f}"`)));
   check('Other section renders', cf2.includes('>Other<'));
-  check('history drill chip keeps its tag', cf2.includes('data-drill="Fence Drill (Tee)"'));
+  check('history chip toggles the bare name into its section',
+    cf2.includes('data-drill="Fence Drill"') && !cf2.includes('data-drill="Fence Drill (Tee)"') &&
+    cf2.includes('data-target="sec_tee"'));
+  const cfEmpty = views.checkinForm({ role: 'athlete' }, null, {}, [], [],
+    { prep: [], tee: [], sideToss: [], frontToss: [], bp: [], machine: [], other: [] });
+  check('section with no history and no quick pick renders no chips row',
+    !cfEmpty.slice(cfEmpty.indexOf('drill-section-label">Other</div>')).includes('drill-chip"'));
+  check('quick picks render per section when history is empty',
+    ['Prep', 'Tee', 'Side Toss', 'Front Toss', 'BP', 'Machine'].every((d) => cfEmpty.includes(`data-drill="${d}"`)));
   // Pregame subtitle (Bobby, Sep 17 2026): hitter form only.
   const cfSub = views.checkinForm({ role: 'athlete' }, null, {}, [], [], {});
   check('drills subtitle element present with default text',
@@ -67,7 +79,9 @@ async function main() {
   check('Prep section renders before Off the tee',
     cfP.indexOf('drill-section-label">Prep</div>') !== -1 &&
     cfP.indexOf('drill-section-label">Prep</div>') < cfP.indexOf('drill-section-label">Off the tee</div>'));
-  check('prep-tagged drill lands in Prep section', cfP.includes('data-drill="Arm Circles (Prep)"'));
+  check('prep-tagged drill lands in Prep section as a bare chip',
+    cfP.includes('data-drill="Arm Circles"') && cfP.includes('data-target="sec_prep"') &&
+    !cfP.includes('data-drill="Arm Circles (Prep)"'));
   const cf3 = views.checkinForm({ role: 'athlete' }, null, {}, [], [{ name: 'Fence Drill', station: 'Tee' }], {});
   check('routine button renders when routine set', cf3.includes('id="use-routine"') && cf3.includes('Edit daily routine'));
 
@@ -85,6 +99,7 @@ async function main() {
   }
   const mergeDrillNames = new Function(extractFn(appSrc, 'mergeDrillNames') + '; return mergeDrillNames;')();
   const toggleDrillName = new Function(extractFn(appSrc, 'toggleDrillName') + '; return toggleDrillName;')();
+  const drillSectionFor = new Function(extractFn(appSrc, 'drillSectionFor') + '; return drillSectionFor;')();
   check('routine merge appends without dupes',
     mergeDrillNames('Fence Drill (Tee)', ['Walk In Drill', 'Fence Drill (tee)']) === 'Fence Drill (Tee), Walk In Drill');
   check('routine merge on empty field', mergeDrillNames('', ['A (Tee)', 'B']) === 'A (Tee), B');
@@ -93,6 +108,13 @@ async function main() {
   check('chip toggle adds', toggleDrillName('', 'Fence Drill (Tee)') === 'Fence Drill (Tee)');
   check('chip toggle removes (case-insensitive)', toggleDrillName('A, FENCE DRILL (TEE)', 'Fence Drill (tee)') === 'A');
   check('chip toggle no stray commas', toggleDrillName('A, B', 'B') === 'A');
+  // Routine station -> section input mapping (per-section "What did you do today?").
+  check('station maps to its section input',
+    drillSectionFor('Prep') === 'sec_prep' && drillSectionFor('Tee') === 'sec_tee' &&
+    drillSectionFor('Side toss') === 'sec_sidetoss' && drillSectionFor('Front toss') === 'sec_fronttoss' &&
+    drillSectionFor('BP') === 'sec_bp' && drillSectionFor('Batting Practice') === 'sec_bp' &&
+    drillSectionFor('Machine') === 'sec_machine');
+  check('unknown/blank station maps to Other', drillSectionFor('') === 'sec_other' && drillSectionFor('Cage') === 'sec_other');
 
   // ---- Boot 1: migration + seed ----
   fs.rmSync(DB, { force: true });
@@ -219,44 +241,60 @@ async function main() {
     check('org card shows My program toggle', html.includes('My program:'));
     check('toggle posts to /mine', html.includes(`/coach/organizations/${otherOrg}/mine`));
 
-    // ---- "What did you do today?" — grouped history sections ----
+    // ---- "What did you do today?" — 7 separated section inputs (Bobby, Sep 17 2026) ----
     const chipAthlete = run(`INSERT INTO users (email,password_hash,role,athlete_name,first_name,last_name,created_at,status) VALUES (?,?,?,?,?,?,?,?)`,
       'chips@test.com', h, 'athlete', 'Chip', 'Chip', 'Hitter', now, 'approved').lastInsertRowid;
     const addCheckin = (uid, drills, created) => run(`INSERT INTO checkins (user_id, athlete_name, created_at, drills_done) VALUES (?,?,?,?)`,
       uid, 'Chip Hitter', created, JSON.stringify(drills));
     addCheckin(chipAthlete, ['Old Drill One', 'Walk In Drill (side toss)'], '2026-09-10T10:00:00');
     addCheckin(chipAthlete, [{ name: 'Fence Drill', station: 'Tee' }, 'Tee', 'New Drill Two'], '2026-09-12T10:00:00');
+    addCheckin(chipAthlete, ['prep'], '2026-09-11T10:00:00'); // literal "prep" -> prep section
     await login('chips', 'chips@test.com');
     r = await req('GET', '/checkin', null, 'chips');
     html = r.text;
     check('check-in 200 for hitter', r.status === 200);
     check('"What did you do today?" heading in form', html.includes('What did you do today?'));
     check('no did_drills gate in form', !html.includes('name="did_drills"') && !html.includes('Did you do any drills?'));
+    check('no single drills_done input anymore', !html.includes('name="drills_done"') && !html.includes('id="drills-input"'));
     check('drills block before Feel slider', html.indexOf('What did you do today?') < html.indexOf('name="feel"'));
+    // All 7 section inputs render, in order, every time.
+    const secNames = ['sec_prep', 'sec_tee', 'sec_sidetoss', 'sec_fronttoss', 'sec_bp', 'sec_machine', 'sec_other'];
+    check('7 section inputs render in order',
+      secNames.every((n) => html.includes(`name="${n}"`)) &&
+      secNames.every((n, i, a) => i === 0 || html.indexOf(`name="${a[i - 1]}"`) < html.indexOf(`name="${n}"`)));
+    check('section labels in order',
+      ['Prep', 'Off the tee', 'Side toss', 'Front toss', 'BP', 'Machine', 'Other']
+        .every((l, i, a) => i === 0 || html.indexOf(`drill-section-label">${a[i - 1]}</div>`) < html.indexOf(`drill-section-label">${l}</div>`)));
+    check('every section input has autocomplete', secNames.every((n) => new RegExp(`id="${n}"[^>]*list="drill-list"`).test(html)));
     const chipCount = (name) => html.split(`data-drill="${name}"`).length - 1;
     const secIdx = (label) => html.indexOf(`drill-section-label">${label}</div>`);
+    const chipTarget = (name) => (html.match(new RegExp(`data-drill="${name}"[^>]*data-target="([^"]+)"`)) || [])[1];
     const inSection = (chip, label, nextLabel) => {
       const c = html.indexOf(`data-drill="${chip}"`);
       const s = secIdx(label);
       const n = nextLabel ? secIdx(nextLabel) : Infinity;
       return c > s && c < n;
     };
-    check('tagged drill chip keeps its tag', chipCount('Fence Drill (Tee)') === 1);
-    check('tee drill sits in Off the tee only', inSection('Fence Drill (Tee)', 'Off the tee', 'Side toss'));
-    check('side toss drill sits in Side toss only', inSection('Walk In Drill (side toss)', 'Side toss', 'Other'));
-    check('untagged drills sit in Other only', inSection('Old Drill One', 'Other', 'Quick picks') && inSection('New Drill Two', 'Other', 'Quick picks'));
-    check('empty sections omitted', secIdx('Front toss') === -1 && secIdx('BP') === -1 && secIdx('Machine') === -1);
-    check('preset matching literal history drill excluded', chipCount('Tee') === 1);
-    check('other presets still render', ['Prep', 'Side Toss', 'Front Toss', 'BP', 'Machine'].every((d) => chipCount(d) === 1));
-    check('sections in method order',
-      secIdx('Off the tee') < secIdx('Side toss') && secIdx('Side toss') < secIdx('Other') && secIdx('Other') < secIdx('Quick picks'));
+    // Chips toggle the BARE name into their own section's input.
+    check('tee history chip is bare and targets the tee section',
+      chipCount('Fence Drill') === 1 && chipTarget('Fence Drill') === 'sec_tee' && inSection('Fence Drill', 'Off the tee', 'Side toss'));
+    check('side toss chip targets the side toss section',
+      chipTarget('Walk In Drill') === 'sec_sidetoss' && inSection('Walk In Drill', 'Side toss', 'Front toss'));
+    check('untagged history chips land in Other', inSection('Old Drill One', 'Other', undefined) && inSection('New Drill Two', 'Other', undefined));
+    const prepChips = (html.match(/data-drill="[Pp][Rr][Ee][Pp]"/g) || []).length;
+    check('literal "prep" drill is a prep-section chip (quick pick excluded)', prepChips === 1 && inSection('prep', 'Prep', 'Off the tee'));
+    check('sections with no history still show their input, plus a quick pick',
+      html.includes('name="sec_fronttoss"') && html.includes('data-drill="Front Toss"') && chipTarget('Front Toss') === 'sec_fronttoss');
+    // Per-section quick picks: section name as a chip when not in history.
+    check('quick pick chip per section (Tee in tee section)',
+      html.includes('data-drill="Tee"') && chipTarget('Tee') === 'sec_tee');
     // Case-insensitive dedupe across forms (string tag vs object station).
     addCheckin(chipAthlete, ['fence drill (TEE)'], '2026-09-13T10:00:00');
     r = await req('GET', '/checkin', null, 'chips');
     html = r.text;
     const fenceChips = (html.match(/data-drill="[^"]*fence drill[^"]*"/gi) || []).length;
     check('case-insensitive dedupe across sections', fenceChips === 1);
-    // Cap at 8 per section (all untagged → Other).
+    // Cap at 8 per section (all untagged → Other): 8 history + 0 quick picks in Other.
     const capAthlete = run(`INSERT INTO users (email,password_hash,role,athlete_name,first_name,last_name,created_at,status) VALUES (?,?,?,?,?,?,?,?)`,
       'cap@test.com', h, 'athlete', 'Cap', 'Cap', 'Tester', now, 'approved').lastInsertRowid;
     addCheckin(capAthlete, ['D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9', 'D10'], '2026-09-12T10:00:00');
@@ -264,12 +302,13 @@ async function main() {
     r = await req('GET', '/checkin', null, 'cap');
     html = r.text;
     const totalChips = html.split('drill-chip"').length - 1;
-    check('recent chips capped at 8 (+6 presets)', totalChips === 14 && chipCount('D9') === 0 && chipCount('D10') === 0);
-    // No history: presets only.
+    check('recent chips capped at 8 per section (+6 quick picks)', totalChips === 14 && chipCount('D9') === 0 && chipCount('D10') === 0);
+    // No history: inputs still render, quick picks only.
     await login('briggs', 'briggs@test.com');
     r = await req('GET', '/checkin', null, 'briggs');
     html = r.text;
-    check('presets render for player with no history', ['Prep', 'Tee', 'Side Toss', 'Front Toss', 'BP', 'Machine'].every((d) => html.includes(`data-drill="${d}"`)));
+    check('inputs render for player with no history', secNames.every((n) => html.includes(`name="${n}"`)));
+    check('quick picks render for player with no history', ['Prep', 'Tee', 'Side Toss', 'Front Toss', 'BP', 'Machine'].every((d) => html.includes(`data-drill="${d}"`)));
 
     // ---- C: check-in push gating ----
     // Gate SQL mirrors isMyProgramPlayer() in src/server.js exactly.
@@ -286,19 +325,30 @@ async function main() {
     r = await req('POST', '/checkin', P({ environment: 'Cage', feel: '7', confidence: '7', focus: '7', difficulty: '5', session_notes: '', what_worked: '' }), 'briggs');
     check('POST /checkin with blank drills succeeds', r.status === 302 && (r.loc || '').startsWith('/checkin/score/'));
     check('blank drills stored as empty array', q(`SELECT drills_done FROM checkins WHERE user_id = ? ORDER BY id DESC LIMIT 1`, briggs).drills_done === '[]');
-    r = await req('POST', '/checkin', P({ environment: 'Cage', feel: '7', confidence: '7', focus: '7', difficulty: '5', drills_done: 'Fence Drill (tee), Walk In Drill', session_notes: '', what_worked: '' }), 'briggs');
-    check('POST /checkin with drills succeeds', r.status === 302 && (r.loc || '').startsWith('/checkin/score/'));
+    // Sectioned submit: each section's input gets its section tag; Other keeps no tag.
+    r = await req('POST', '/checkin', P({ environment: 'Cage', feel: '7', confidence: '7', focus: '7', difficulty: '5', sec_tee: 'Fence Drill, Walk In Drill', sec_bp: 'BP Rounds', sec_other: 'Random Work', session_notes: '', what_worked: '' }), 'briggs');
+    check('POST /checkin with sectioned drills succeeds', r.status === 302 && (r.loc || '').startsWith('/checkin/score/'));
     const stored = q(`SELECT drills_done FROM checkins WHERE user_id = ? ORDER BY id DESC LIMIT 1`, briggs).drills_done;
-    check('drill station tags parsed on save', stored.includes('"station":"Tee"') && stored.includes('"name":"Walk In Drill"'));
-    // Skip keeps learning from the optional drills field: three scored
+    const storedArr = JSON.parse(stored);
+    check('section tags attached on save',
+      storedArr.some((d) => d.name === 'Fence Drill' && d.station === 'Tee') &&
+      storedArr.some((d) => d.name === 'BP Rounds' && d.station === 'BP') &&
+      storedArr.some((d) => d.name === 'Random Work' && !d.station));
+    check('sections stored in section order',
+      storedArr.map((d) => d.name).join('|') === 'Fence Drill|Walk In Drill|BP Rounds|Random Work');
+    // Explicit (tag) in a section input wins over the section tag.
+    r = await req('POST', '/checkin', P({ environment: 'Cage', feel: '7', confidence: '7', focus: '7', difficulty: '5', sec_tee: 'Fence Drill (machine)', session_notes: '', what_worked: '' }), 'briggs');
+    const stored2 = JSON.parse(q(`SELECT drills_done FROM checkins WHERE user_id = ? ORDER BY id DESC LIMIT 1`, briggs).drills_done);
+    check('explicit tag kept over section tag', stored2.some((d) => d.name === 'Fence Drill' && d.station === 'Machine'));
+    // Skip keeps learning from the sectioned drills field: three scored
     // check-ins with a registry drill, then confirm it shows up in the
     // hitter's history picker AND in Skip's drill-derived what-works data.
     for (let i = 0; i < 3; i++) {
-      r = await req('POST', '/checkin', P({ environment: 'Cage', feel: '8', confidence: '8', focus: '8', difficulty: '5', drills_done: 'Deep Tee Drill (Tee)', session_notes: '', what_worked: '' }), 'briggs');
+      r = await req('POST', '/checkin', P({ environment: 'Cage', feel: '8', confidence: '8', focus: '8', difficulty: '5', sec_tee: 'Deep Tee Drill', session_notes: '', what_worked: '' }), 'briggs');
       check(`check-in ${i + 1} with Deep Tee Drill posts clean`, r.status === 302);
     }
     r = await req('GET', '/checkin', null, 'briggs');
-    check('submitted drill appears in the history picker (Off the tee)', r.text.includes('data-drill="Deep Tee Drill (Tee)"') && r.text.includes('drill-section-label">Off the tee</div>'));
+    check('submitted drill appears in the history picker (Off the tee)', r.text.includes('data-drill="Deep Tee Drill"') && r.text.includes('drill-section-label">Off the tee</div>'));
     r = await req('GET', '/', null, 'briggs');
     check("Skip's what-works learned the drill", r.text.includes('What you did on good days') && r.text.includes('Deep Tee Drill'));
 
@@ -320,23 +370,34 @@ async function main() {
     const remy = addAthlete('remy@test.com', 'Remy', 'Remote');
     run('UPDATE users SET remote_program_id = ?, organization_id = ? WHERE id = ?', progId, orgIdOf('Atkinson Hitting'), remy);
     await login('remy', 'remy@test.com');
-    const drillsVal = (html) => (html.match(/id="drills-input"[^>]*value="([^"]*)"/) || [])[1];
+    const secVal = (html, field) => (html.match(new RegExp(`id="${field}"[^>]*value="([^"]*)"`)) || [])[1];
     r = await req('GET', '/checkin', null, 'remy');
-    check('remote player pre-fills today\u2019s scheduled work',
-      drillsVal(r.text) === 'No Stride Launch, Open 45 w Stride, Deep Tee Drill, High Tee, Side Flip Work');
-    // OFF day -> blank.
+    check('remote pre-fill: Daily Routine lands in prep',
+      secVal(r.text, 'sec_prep') === 'No Stride Launch, Open 45 w Stride');
+    check('remote pre-fill: "Day 1 \\u2014 Tee" lands in the tee section',
+      secVal(r.text, 'sec_tee') === 'Deep Tee Drill, High Tee');
+    check('remote pre-fill: "Day 1 \\u2014 Side Flips" lands in side toss',
+      secVal(r.text, 'sec_sidetoss') === 'Side Flip Work');
+    check('remote pre-fill: unmatched day stays blank', secVal(r.text, 'sec_bp') === '');
+    // OFF day -> all sections blank.
     progJson.schedule = [[chiWeekday, 'OFF']];
     run('UPDATE remote_programs SET program_json = ? WHERE id = ?', JSON.stringify(progJson), progId);
     r = await req('GET', '/checkin', null, 'remy');
-    check('OFF day leaves the field blank', drillsVal(r.text) === '');
-    // POST fail path preserves the submitted value, never re-prefills.
+    check('OFF day leaves every section blank',
+      ['sec_prep', 'sec_tee', 'sec_sidetoss', 'sec_fronttoss', 'sec_bp', 'sec_machine', 'sec_other']
+        .every((f) => secVal(r.text, f) === ''));
+    // POST fail path preserves the submitted section values, never re-prefills.
     progJson.schedule = [[chiWeekday, 'Day 1']];
     run('UPDATE remote_programs SET program_json = ? WHERE id = ?', JSON.stringify(progJson), progId);
-    r = await req('POST', '/checkin', P({ environment: 'Bogus', feel: '8', confidence: '8', focus: '8', difficulty: '5', drills_done: 'My Custom Work', session_notes: '', what_worked: '' }), 'remy');
-    check('POST fail preserves submitted drills', r.status === 200 && r.text.includes('value="My Custom Work"') && !r.text.includes('value="No Stride Launch'));
-    // Non-remote player: no pre-fill.
+    r = await req('POST', '/checkin', P({ environment: 'Bogus', feel: '8', confidence: '8', focus: '8', difficulty: '5', sec_tee: 'My Custom Work', sec_bp: 'BP Stuff', session_notes: '', what_worked: '' }), 'remy');
+    check('POST fail preserves submitted section values',
+      r.status === 200 && secVal(r.text, 'sec_tee') === 'My Custom Work' && secVal(r.text, 'sec_bp') === 'BP Stuff' &&
+      !r.text.includes('value="No Stride Launch'));
+    // Non-remote player: no pre-fill (section inputs blank even with history).
     r = await req('GET', '/checkin', null, 'briggs');
-    check('non-remote player gets no pre-fill', drillsVal(r.text) === '');
+    check('non-remote player gets no pre-fill',
+      ['sec_prep', 'sec_tee', 'sec_sidetoss', 'sec_fronttoss', 'sec_bp', 'sec_machine', 'sec_other']
+        .every((f) => secVal(r.text, f) === ''));
 
     // ---- Tab bar: Program INSTEAD of Messages for remote players ----
     r = await req('GET', '/', null, 'remy');
@@ -363,7 +424,7 @@ async function main() {
     const pg = addAthlete('pregame@test.com', 'Pregame', 'Pete');
     await login('pg', 'pregame@test.com');
     const postG = (env, drills) => req('POST', '/checkin',
-      P({ environment: env, feel: '8', confidence: '8', focus: '8', difficulty: '5', drills_done: drills, session_notes: '', what_worked: '' }), 'pg');
+      P({ environment: env, feel: '8', confidence: '8', focus: '8', difficulty: '5', sec_tee: drills, session_notes: '', what_worked: '' }), 'pg');
     for (let i = 0; i < 3; i++) await postG('Game', 'Deep Tee Drill');
     for (let i = 0; i < 2; i++) await postG('Live BP', 'Ball Drop Drill');
     for (let i = 0; i < 5; i++) await postG('Cage', 'Flat Bat High Tee');
