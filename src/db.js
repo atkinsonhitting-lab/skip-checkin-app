@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS users (
   athlete_name TEXT,
   first_name TEXT,
   last_name TEXT,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  notify_on_checkin INTEGER
 );
 `;
 db.exec(USERS_SCHEMA);
@@ -61,6 +62,16 @@ for (const col of ['first_name', 'last_name']) {
   const cols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
   if (!cols.includes('can_edit')) {
     db.exec('ALTER TABLE users ADD COLUMN can_edit INTEGER NOT NULL DEFAULT 1;');
+  }
+}
+
+// Per-player check-in log alerts (Sep 17 2026, Bobby): tri-state.
+// 1 = always notify, 0 = never notify, NULL = default rule (notify only for
+// his program players). Nullable on purpose — NULL means "not chosen".
+{
+  const cols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+  if (!cols.includes('notify_on_checkin')) {
+    db.exec('ALTER TABLE users ADD COLUMN notify_on_checkin INTEGER;');
   }
 }
 

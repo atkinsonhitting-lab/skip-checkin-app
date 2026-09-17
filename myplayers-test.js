@@ -325,6 +325,9 @@ async function main() {
     // ---- C: check-in push gating ----
     // Gate SQL mirrors isMyProgramPlayer() in src/server.js exactly.
     const gate = (uid) => !!q('SELECT 1 FROM users u JOIN organizations o ON o.id = u.organization_id WHERE u.id = ? AND o.is_mine = 1', uid);
+    // Tri-state alert pref mirrors wantsCheckinNotify(): 1 = always, 0 = never,
+    // NULL = default rule (notify only for his program players).
+    const effOn = (uid) => { const f = q('SELECT notify_on_checkin AS f FROM users WHERE id = ?', uid).f; return f === 1 || (f == null && gate(uid)); };
     const solo = run(`INSERT INTO users (email,password_hash,role,athlete_name,first_name,last_name,created_at,status) VALUES (?,?,?,?,?,?,?,?)`,
       'solo@test.com', h, 'athlete', 'Solo', 'Solo', 'Player', now, 'approved').lastInsertRowid;
     const msuPlayer = run(`INSERT INTO users (email,password_hash,role,athlete_name,first_name,last_name,created_at,status,organization_id) VALUES (?,?,?,?,?,?,?,?,?)`,
@@ -332,6 +335,25 @@ async function main() {
     check('gate: is_mine-org player would notify', gate(briggs) === true);
     check('gate: standalone player stays silent', gate(solo) === false);
     check('gate: non-mine-org player stays silent', gate(msuPlayer) === false);
+    // Per-player log alerts (Bobby, Sep 17 2026): tri-state, any athlete.
+    check('program player defaults to alerts on', effOn(briggs) === true);
+    check('standalone player defaults to alerts off', effOn(solo) === false);
+    check('other-org player defaults to alerts off', effOn(msuPlayer) === false);
+    r = await req('POST', `/coach/player/${solo}/notify-checkin`, P({ back: '/coach/hitters' }), 'coach');
+    check('toggle turns alerts ON for non-program player', r.status === 302 && r.loc === '/coach/hitters' && effOn(solo) === true);
+    r = await req('POST', `/coach/player/${briggs}/notify-checkin`, P({ back: '/coach/my-players' }), 'coach');
+    check('toggle turns alerts OFF for program player', r.status === 302 && effOn(briggs) === false);
+    r = await req('POST', `/coach/player/${briggs}/notify-checkin`, P({}), 'cam');
+    check('view-only coach 403 on alert toggle', r.status === 403 && effOn(briggs) === false);
+    r = await req('POST', '/coach/player/99999/notify-checkin', P({}), 'coach');
+    check('alert toggle 404 for unknown athlete', r.status === 404);
+    r = await req('GET', '/coach/my-players', null, 'coach');
+    check('My Players shows alert toggle', r.text.includes(`/coach/player/${briggs}/notify-checkin`) && r.text.includes('Alerts off'));
+    r = await req('GET', '/coach/hitters', null, 'coach');
+    check('All Players shows alert toggle', r.text.includes(`/coach/player/${solo}/notify-checkin`));
+    // Restore briggs to default so later tests see the standard gate behavior.
+    await req('POST', `/coach/player/${briggs}/notify-checkin`, P({}), 'coach');
+    check('toggle back on restores default-on', effOn(briggs) === true);
     // The notify hook never breaks the check-in redirect (push off in tests).
     // Drills are optional now — no did_drills gate, blank is fine.
     r = await req('POST', '/checkin', P({ environment: 'Cage', feel: '7', confidence: '7', focus: '7', difficulty: '5', session_notes: 'Felt locked in today.', what_worked: '' }), 'briggs');

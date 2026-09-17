@@ -1847,8 +1847,12 @@ function coachHittersPage(user, userStats, opts) {
           <div class="athlete-card-email">${esc(a.email)}</div>
           <div class="athlete-card-meta">${a.total} check-in${a.total === 1 ? '' : 's'}${a.last ? ` · last ${fmtDate(a.last)}` : ' · none yet'}${a.age != null ? ` · age ${a.age}` : ''}${a.team ? ` · ${esc(a.team)}` : ''}</div>
         </a>
-        <div style="display:flex;gap:8px;margin:8px 0 0">
+        <div style="display:flex;gap:8px;margin:8px 0 0;flex-wrap:wrap">
           ${o.messageButton ? `<a class="btn-small" href="/coach/messages/${a.id}">Message</a>` : ''}
+          ${o.notifyButton ? `<form method="post" action="/coach/player/${a.id}/notify-checkin" style="margin:0">
+            <input type="hidden" name="back" value="${esc(o.tab === 'my-players' ? '/coach/my-players' : '/coach/hitters')}">
+            <button class="btn-small btn-quiet" type="submit" title="${a.notifyOn ? 'Log alerts ON — tap to mute' : 'Log alerts OFF — tap to unmute'}">${a.notifyOn ? '🔔 Alerts on' : '🔕 Alerts off'}</button>
+          </form>` : ''}
           <form method="post" action="/coach/view-as" style="margin:0">
             <input type="hidden" name="id" value="${a.id}">
             <button class="btn-small btn-quiet" type="submit">View as player</button>

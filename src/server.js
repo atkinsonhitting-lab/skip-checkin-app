@@ -1707,11 +1707,20 @@ function isMyProgramPlayer(userId) {
 }
 async function notifyMyPlayerCheckin(userId, athleteName, coachUrl) {
   if (!pushEnabled) return;
-  if (!isMyProgramPlayer(userId)) return; // not one of Bobby's program players — stay silent
+  if (!wantsCheckinNotify(userId)) return; // tri-state per-player alert pref
   // Full-access global coaches only: view-only Cam doesn't get Bobby's
   // clients' daily logs.
   const coaches = db.prepare("SELECT id FROM users WHERE role = 'coach' AND organization_id IS NULL AND can_edit != 0").all();
   for (const c of coaches) await pushToUser(c.id, 'Session logged', `${athleteName} just logged a session — tap to view.`, coachUrl);
+}
+// Per-player log alerts (Sep 17 2026, Bobby): 1 = always notify, 0 = never,
+// NULL = default rule (notify only for his program players).
+function wantsCheckinNotify(athleteId) {
+  const u = db.prepare('SELECT notify_on_checkin FROM users WHERE id = ?').get(athleteId);
+  if (!u) return false;
+  if (u.notify_on_checkin === 1) return true;
+  if (u.notify_on_checkin === 0) return false;
+  return isMyProgramPlayer(athleteId);
 }
 // Coach/player messaging (Sep 17 2026, revised): 1:1 + broadcasts with a
 // player inbox. One cheap COUNT per request powers the nav/tab-bar badges.
@@ -2903,8 +2912,8 @@ function coachUserStats(scope, opts) {
   const users = db
     .prepare(
       `SELECT u.id, u.email, u.athlete_name, u.first_name, u.last_name, u.created_at, u.date_of_birth, u.player_type,
-              t.name AS team_name
-       FROM users u LEFT JOIN teams t ON t.id = u.team_id
+              u.notify_on_checkin, o.is_mine AS org_is_mine, t.name AS team_name
+       FROM users u LEFT JOIN teams t ON t.id = u.team_id LEFT JOIN organizations o ON o.id = u.organization_id
        WHERE u.role != 'coach' AND u.status = 'approved'
          AND (? IS NULL OR u.organization_id = ?) AND (? IS NULL OR u.team_id = ?)
          ${mineOnly ? 'AND u.organization_id IN (SELECT id FROM organizations WHERE is_mine = 1)' : ''}
@@ -2916,7 +2925,9 @@ function coachUserStats(scope, opts) {
       .prepare('SELECT COUNT(*) AS total, MAX(created_at) AS last FROM checkins WHERE user_id = ?')
       .get(u.id);
     const name = [u.first_name, u.last_name].filter(Boolean).join(' ') || u.athlete_name || u.email;
-    return { id: u.id, email: u.email, name, total: row.total, last: row.last, age: ageOn(u.date_of_birth), team: u.team_name || null, playerType: u.player_type || 'hitter' };
+    const flag = u.notify_on_checkin;
+    return { id: u.id, email: u.email, name, total: row.total, last: row.last, age: ageOn(u.date_of_birth), team: u.team_name || null, playerType: u.player_type || 'hitter',
+      notifyOn: flag === 1 || (flag == null && u.org_is_mine === 1) };
   });
 }
 
@@ -3153,7 +3164,21 @@ app.get('/coach/hitters', requireCoachAny, (req, res) => {
   setApprovalCount(req);
   const me = realUser(req);
   const title = me.organizationId ? 'Players' : 'All Players';
-  res.send(views.coachHittersPage(me, coachUserStats(orgScope(req)), { title, tab: 'hitters' }));
+  res.send(views.coachHittersPage(me, coachUserStats(orgScope(req)), { title, tab: 'hitters', notifyButton: !me.organizationId }));
+});
+
+// Per-player log-alert toggle (Sep 17 2026, Bobby): full-access global coach
+// only (Cam 403s). Flips the athlete's explicit preference: effectively-on
+// becomes 0 (never), effectively-off becomes 1 (always). Works for any
+// athlete, not just his program guys.
+app.post('/coach/player/:id/notify-checkin', requireGlobalCoachAny, requireCoach, (req, res) => {
+  const id = Number(req.params.id);
+  const row = db.prepare("SELECT notify_on_checkin FROM users WHERE id = ? AND role = 'athlete'").get(id);
+  if (!row) return res.status(404).send('Not found');
+  const effectiveOn = row.notify_on_checkin === 1 || (row.notify_on_checkin == null && isMyProgramPlayer(id));
+  db.prepare('UPDATE users SET notify_on_checkin = ? WHERE id = ?').run(effectiveOn ? 0 : 1, id);
+  const back = typeof req.body.back === 'string' && req.body.back.startsWith('/coach/') ? req.body.back : '/coach/my-players';
+  res.redirect(back);
 });
 
 // My Players tab (Sep 17 2026): Bobby's own programs (is_mine orgs) up front.
@@ -3166,6 +3191,7 @@ app.get('/coach/my-players', requireGlobalCoachAny, (req, res) => {
       tab: 'my-players',
       empty: 'No players in your programs yet.',
       messageButton: true,
+      notifyButton: true,
     })
   );
 });
