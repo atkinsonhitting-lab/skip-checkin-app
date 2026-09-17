@@ -46,6 +46,11 @@ async function main() {
   check('drills block sits before the Feel slider',
     cf.indexOf('What did you do today?') < cf.indexOf('name="feel"'));
   check('session notes marked required in the form', cf.includes('Session notes <span class="req"'));
+  // Links in messages are tappable (Bobby, Sep 17 2026).
+  check('linkify makes URLs clickable', views.linkify('Book here https://calendly.com/atkinsonhitting for next week.')
+    .includes('<a href="https://calendly.com/atkinsonhitting" target="_blank" rel="noopener noreferrer">'));
+  check('linkify escapes HTML first', !views.linkify('<script>alert(1)</script> https://x.com').includes('<script>')
+    && views.linkify('<script>alert(1)</script>').includes('&lt;script&gt;'));
   // Sectioned inputs render from the grouped shape; every section's input
   // always renders, chips rows are omitted when the section is empty.
   const cf2 = views.checkinForm({ role: 'athlete' }, null, {}, [], [],
@@ -510,8 +515,17 @@ async function main() {
     check('empty body rejected', r.status === 302 && (r.loc || '').includes('/coach/messages/new') && (r.loc || '').includes('error=') && msgCount() === msgBefore + 2);
     r = await req('POST', '/coach/messages/new', P({ to_mode: 'choose', body: 'hi' }), 'coach');
     check('choose-mode with no players rejected', r.status === 302 && (r.loc || '').includes('error=') && msgCount() === msgBefore + 2);
+    // Booking links in messages must be tappable (Bobby, Sep 17 2026).
+    const p3 = new URLSearchParams();
+    p3.append('to_mode', 'choose');
+    p3.append('body', 'Schedule is live for next week! https://calendly.com/atkinsonhitting');
+    p3.append('user_ids', String(briggs));
+    r = await req('POST', '/coach/messages/new', p3, 'coach');
+    check('message with booking link sends', r.status === 302 && (r.loc || '').includes('sent=1'));
+    r = await req('GET', `/coach/messages/${briggs}`, null, 'coach');
+    check('coach thread renders the link as a clickable anchor', r.status === 200 && r.text.includes('<a href="https://calendly.com/atkinsonhitting" target="_blank"'));
     r = await req('POST', '/coach/messages/new', P({ to_mode: 'all', body: 'hi' }), 'cam');
-    check('view-only coach 403 on broadcast', r.status === 403 && msgCount() === msgBefore + 2);
+    check('view-only coach 403 on broadcast', r.status === 403 && msgCount() === msgBefore + 3);
     r = await req('POST', '/coach/my-players/message', P({ to_mode: 'all', body: 'hi' }), 'coach');
     check('old broadcast route is gone', r.status === 404);
     // Per-hitter page has the Message button (my-org player only).
@@ -540,7 +554,7 @@ async function main() {
     // Coach 1:1: reply works for my-org player, 403 for outsiders.
     r = await req('POST', '/coach/messages/to/' + briggs, P({ body: 'Keep it up.' }), 'coach');
     check('coach reply works', r.status === 302 && (r.loc || '').includes('/coach/messages/' + briggs));
-    check('player unread counts all three messages', unreadFor(briggs) === 3);
+    check('player unread counts all four messages', unreadFor(briggs) === 4);
     r = await req('POST', '/coach/messages/to/' + solo, P({ body: 'hi' }), 'coach');
     check('coach cannot message non-my-org athlete', r.status === 403);
     r = await req('GET', '/coach/messages/' + solo, null, 'coach');
@@ -557,6 +571,11 @@ async function main() {
     // Coach nav badge before reading, gone after thread view.
     r = await req('GET', '/coach', null, 'coach');
     check('coach nav Messages badge', r.text.includes('/coach/messages') && r.text.includes('<span class="tab-badge">1</span>'));
+    // Coach tab bar: Messages instead of Train Skip (Bobby, Sep 17 2026).
+    const ctab = (r.text.match(/<nav id="tabbar"[\s\S]*?<\/nav>/) || [''])[0];
+    check('coach tab bar has Messages', ctab.includes('href="/coach/messages"'));
+    check('coach tab bar no longer has Train Skip', !ctab.includes('href="/coach/skip"'));
+    check('drawer still has Train Skip', r.text.includes('class="drawer-link') && r.text.includes('href="/coach/skip"'));
     r = await req('GET', '/coach/messages/' + briggs, null, 'coach');
     check('thread shows both directions', r.text.includes('Thanks coach!') && r.text.includes('Keep it up.'));
     check('thread view marks coach rows read', unreadFor(bobbyId) === 0);
@@ -564,7 +583,7 @@ async function main() {
     await login('briggs', 'briggs@test.com');
     r = await req('GET', '/', null, 'briggs');
     check('tab bar has Messages tab', r.text.includes('href="/messages"') && r.text.includes('>Messages<'));
-    check('tab bar badge shows unread count', r.text.includes('<span class="tabbar-badge">3</span>'));
+    check('tab bar badge shows unread count', r.text.includes('<span class="tabbar-badge">4</span>'));
     check('sidebar Messages item present', r.text.includes('drawer-link') && r.text.includes('href="/messages"'));
     check('home banner for unread + no push', r.text.includes('You have messages from Coach'));
     // Player inbox: both messages, compose box, nudge; viewing clears unread.

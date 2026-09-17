@@ -8,6 +8,16 @@ function esc(s) {
     .replace(/"/g, '&quot;');
 }
 
+// Message bodies: escape HTML, then make http(s) URLs tappable links
+// (Bobby, Sep 17 2026 — booking links in messages must be clickable).
+function linkify(text) {
+  return esc(text).replace(/https?:\/\/[^\s<>"')\]]+/g, (u) => {
+    const trail = (u.match(/[.,!?;:]+$/) || [''])[0];
+    const url = trail ? u.slice(0, -trail.length) : u;
+    return `<a href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>${trail}`;
+  });
+}
+
 // Coach views: link an athlete's name to their coach profile page, styled
 // like the existing homepage athlete-card links (invisible, inherits color).
 function athleteLink(email, inner) {
@@ -29,16 +39,18 @@ const TABBAR_HREFS = ['/', '/checkin', '/messages', '/notebook', '/chat'];
 // Remote-program players already work from their program: the tab bar shows
 // Program in the Messages slot. Messages stays in their sidebar drawer.
 const REMOTE_TABBAR_HREFS = ['/', '/checkin', '/program', '/notebook', '/chat'];
-// Coach tab bar (Sep 2026): Bobby's coaching loop — Home (attention),
-// Hitters, Approvals (badge), Train Skip. Programs, Videos, and Settings
-// stay in the drawer. Same bar for every coach, including view-only Cam.
-const COACH_TABBAR_HREFS = ['/coach', '/coach/my-players', '/coach/approvals', '/coach/skip'];
+// Coach tab bar (Sep 2026, Bobby: Messages in the tab bar instead of Train
+// Skip): Bobby's coaching loop — Home (attention), My Players, Approvals
+// (badge), Messages (badge). Train Skip, Programs, Videos, Finances, and
+// Settings stay in the drawer. Same bar for every coach, including view-only Cam.
+const COACH_TABBAR_HREFS = ['/coach', '/coach/my-players', '/coach/approvals', '/coach/messages'];
 const COACH_TABBAR_ICONS = {
   '/coach': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>',
   '/coach/my-players': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
   '/coach/hitters': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
   '/coach/approvals': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><polyline points="17 11 19 13 23 9"/></svg>',
   '/coach/skip': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>',
+  '/coach/messages': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 6l-10 7L2 6"/></svg>',
 };
 const TABBAR_ICONS = {
   '/': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>',
@@ -1871,7 +1883,7 @@ function playerMessagesPage(user, msgs, opts) {
   const cards = msgs
     .map((m) => {
       const mine = m.sender_id === user.id;
-      return `<div class="card"><p style="margin:0 0 6px"><strong>${mine ? 'You' : 'Coach'}</strong> <span class="hint-inline">${fmtDate(m.created_at)}</span></p><p style="margin:0">${esc(m.body)}</p></div>`;
+      return `<div class="card"><p style="margin:0 0 6px"><strong>${mine ? 'You' : 'Coach'}</strong> <span class="hint-inline">${fmtDate(m.created_at)}</span></p><p style="margin:0">${linkify(m.body)}</p></div>`;
     })
     .join('');
   return layout({
@@ -1992,7 +2004,7 @@ function coachThreadPage(user, other, msgs, opts) {
   const cards = msgs
     .map((m) => {
       const mine = m.sender_id === user.id;
-      return `<div class="card"><p style="margin:0 0 6px"><strong>${mine ? 'You' : esc(other.name)}</strong> <span class="hint-inline">${fmtDate(m.created_at)}</span></p><p style="margin:0">${esc(m.body)}</p></div>`;
+      return `<div class="card"><p style="margin:0 0 6px"><strong>${mine ? 'You' : esc(other.name)}</strong> <span class="hint-inline">${fmtDate(m.created_at)}</span></p><p style="margin:0">${linkify(m.body)}</p></div>`;
     })
     .join('');
   return layout({
@@ -3005,6 +3017,7 @@ module.exports = {
   videoWatchPage,
   coachLibraryPage,
   esc,
+  linkify,
   settingsPage,
   DRILL_SECTIONS,
 };
