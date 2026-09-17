@@ -116,6 +116,37 @@
     });
   })();
 
+  // ---- Check-in: quick-tap drill chips toggle entries in the drills input ----
+  (function drillChips() {
+    const chips = Array.from(document.querySelectorAll('.drill-chip'));
+    if (!chips.length) return;
+    const input = document.getElementById('drills-input');
+    chips.forEach((chip) => {
+      chip.addEventListener('click', () => {
+        if (!input) return;
+        const name = chip.dataset.drill;
+        const parts = input.value.split(',').map((s) => s.trim()).filter(Boolean);
+        const idx = parts.findIndex((p) => p.toLowerCase() === name.toLowerCase());
+        if (idx >= 0) {
+          parts.splice(idx, 1);
+          chip.classList.remove('active');
+        } else {
+          parts.push(name);
+          chip.classList.add('active');
+        }
+        input.value = parts.join(', ');
+        input.focus();
+      });
+    });
+    // Mark chips already present when the form loads (e.g. editing a draft).
+    if (input) {
+      const present = input.value.split(',').map((s) => s.trim().toLowerCase());
+      chips.forEach((chip) => {
+        if (present.includes(chip.dataset.drill.toLowerCase())) chip.classList.add('active');
+      });
+    }
+  })();
+
   // ---- Coach dashboard: filter hitters as you type + by role ----
   (function hitterSearch() {
     const input = document.getElementById('hitter-search');

@@ -25,13 +25,14 @@ function fmtDate(iso) {
 // Talk to Skip — one thumb-tap away for hitters. The hamburger drawer keeps
 // every tab (Mental Game, Program, Routine, Videos, Settings); the bar is
 // additive, hitter-only, hidden on desktop where the drawer is the nav.
-const TABBAR_HREFS = ['/', '/checkin', '/notebook', '/chat'];
+const TABBAR_HREFS = ['/', '/checkin', '/messages', '/notebook', '/chat'];
 // Coach tab bar (Sep 2026): Bobby's coaching loop — Home (attention),
 // Hitters, Approvals (badge), Train Skip. Programs, Videos, and Settings
 // stay in the drawer. Same bar for every coach, including view-only Cam.
-const COACH_TABBAR_HREFS = ['/coach', '/coach/hitters', '/coach/approvals', '/coach/skip'];
+const COACH_TABBAR_HREFS = ['/coach', '/coach/my-players', '/coach/approvals', '/coach/skip'];
 const COACH_TABBAR_ICONS = {
   '/coach': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>',
+  '/coach/my-players': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
   '/coach/hitters': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
   '/coach/approvals': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><polyline points="17 11 19 13 23 9"/></svg>',
   '/coach/skip': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>',
@@ -39,7 +40,9 @@ const COACH_TABBAR_ICONS = {
 const TABBAR_ICONS = {
   '/': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>',
   '/checkin': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
+  '/messages': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 6l-10 7L2 6"/></svg>',
   '/notebook': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>',
+  '/routine': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>',
   '/chat': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>',
 };
 function bottomTabbar(user, tabs) {
@@ -118,6 +121,7 @@ function userTabs(active, user) {
   const tabs = [
     { href: '/', label: 'Home', active: active === 'home' },
     { href: '/checkin', label: 'Check In', active: active === 'checkin' },
+    { href: '/messages', label: 'Messages', active: active === 'messages', badge: user && user.unreadMessages > 0 ? String(user.unreadMessages) : null },
     { href: '/notebook', label: 'Notebook', active: active === 'notebook' },
     { href: '/mental-game', label: 'Mental Game', active: active === 'mental' },
     { href: '/chat', label: 'Talk to Skip', sub: 'your personally trained coach', active: active === 'chat' },
@@ -128,6 +132,9 @@ function userTabs(active, user) {
     tabs.splice(3, 0, { href: '/program', label: 'Program', active: active === 'program' });
     tabs.splice(4, 0, { href: '/program/routine', label: 'Routine', active: active === 'routine' });
     tabs.splice(5, 0, { href: '/videos', label: 'Videos', active: active === 'videos' });
+  } else {
+    // Personal routine editor for every other hitter — one Routine tab, never two.
+    tabs.splice(3, 0, { href: '/routine', label: 'Routine', active: active === 'routine' });
   }
   // Organizations can turn Talk to Skip off for their players: no tab, no FAB,
   // no bottom-bar icon (all three key off this tab list).
@@ -154,7 +161,9 @@ function coachTabs(active, approvalCount, user) {
   }
   const tabs = [
     { href: '/coach', label: 'Home', active: active === 'home' },
-    { href: '/coach/hitters', label: 'Players', active: active === 'hitters' },
+    { href: '/coach/my-players', label: 'My Players', active: active === 'my-players' },
+    { href: '/coach/hitters', label: 'All Players', active: active === 'hitters' },
+    { href: '/coach/messages', label: 'Messages', active: active === 'messages', badge: user && user.unreadMessages > 0 ? String(user.unreadMessages) : null },
     { href: '/coach/videos', label: 'Videos', active: active === 'videos' },
     { href: '/coach/organizations', label: 'Organizations', active: active === 'organizations' },
     { href: '/coach/skip', label: 'Train Skip', active: active === 'skip' },
@@ -164,7 +173,7 @@ function coachTabs(active, approvalCount, user) {
   // Finances is Bobby's page: full-access global coaches only. Cam (view-only)
   // and organization coaches never see it.
   if (user && user.role === 'coach' && !user.organizationId && user.canEdit !== false) {
-    tabs.splice(5, 0, { href: '/coach/finances', label: 'Finances', active: active === 'finances' });
+    tabs.splice(6, 0, { href: '/coach/finances', label: 'Finances', active: active === 'finances' });
   }
   return tabs;
 }
@@ -422,6 +431,12 @@ function privacyPage() {
 
 function userHome(user, extras) {
   const { whatWorks = {}, avgScore = null, checkinCount = 0, recent = [], streak = null, pushOn = false, pushEnabled = false, precheckin = null } = extras || {};
+  // Unread coach messages + no push: point them at the inbox (the Messages
+  // page itself carries the turn-on-notifications nudge).
+  const msgBanner =
+    user.unreadMessages > 0 && !pushOn
+      ? `<div class="card push-card"><p style="margin:0 0 10px"><strong>You have messages from Coach.</strong> <span class="hint">Turn on notifications so you never miss one.</span></p><p style="margin:0"><a href="/messages" class="btn-primary">Read messages</a></p></div>`
+      : '';
   let streakCard = '';
   if (streak) {
     const n = streak.streak || 0;
@@ -457,6 +472,7 @@ function userHome(user, extras) {
     user,
     tabs: userTabs('home', user),
     body: `<h1 class="page-title">What's up, ${esc(user.displayName)}</h1>
+    ${msgBanner}
     <div class="card cta-card">
       <p class="skip-intro">Check in daily. Every session gets a read, and the app learns what your best days look like.</p>
       <a href="/checkin" class="btn-primary">Check in today's session</a>
@@ -611,7 +627,7 @@ function sliderField(name, label, question, value, ends, ids) {
   </div>`;
 }
 
-function checkinForm(user, error, values, drillNames, routine) {
+function checkinForm(user, error, values, drillNames, routine, recentDrills) {
   const v = values || {};
   const rt = routine || [];
   const routineJson = esc(JSON.stringify(rt.map((d) => ({ name: d.name, station: d.station }))));
@@ -647,6 +663,18 @@ function checkinForm(user, error, values, drillNames, routine) {
         <label>What ones? <span class="hint-inline">(separate with commas)</span>
           <input id="drills-input" name="drills_done" list="drill-list" placeholder="e.g. Deep Tee Drill, Walk In Drill" value="${esc(v.drills_done || '')}">
         </label>
+        <div class="drill-chips" style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 4px">
+          ${(() => {
+            // Quick-tap chips (Sep 17 2026, Bobby): the player's own recent
+            // drills first so they can just tap them in, then the preset
+            // delivery methods — minus any that duplicate a recent drill.
+            const presets = ['Prep', 'Tee', 'Side Toss', 'Front Toss', 'BP', 'Machine'];
+            const recent = Array.isArray(recentDrills) ? recentDrills : [];
+            const recentKeys = new Set(recent.map((d) => String(d).toLowerCase()));
+            const names = [...recent, ...presets.filter((p) => !recentKeys.has(p.toLowerCase()))];
+            return names.map((d) => `<button type="button" class="pill-link drill-chip" data-drill="${esc(d)}">${esc(d)}</button>`).join('');
+          })()}
+        </div>
         ${rt.length ? `<button type="button" id="use-routine" class="btn-ghost" data-routine="${routineJson}">Use my daily routine</button>` : ''}
         <p class="hint"><a href="/routine">Edit daily routine →</a></p>
         <p class="hint">Tip: add (tee), (side toss), (front toss), (BP), or (machine) after a drill — e.g. "Fence drill (tee)".</p>
@@ -1476,6 +1504,10 @@ function coachOrganizationsPage(user, organizations, error, addedId) {
             <div class="athlete-card-name">${esc(c.name)}</div>
             <div class="athlete-card-meta">signup code: <strong style="font-size:18px;letter-spacing:1px">${esc(c.code)}</strong> \u00b7 ${c.playerCount} player${c.playerCount === 1 ? '' : 's'}</div>
             <div class="hint-inline" style="margin-top:4px">Deal: <strong>${fmtMoney(c.deal_cents)}</strong> \u00b7 Collected: <strong>${fmtMoney(c.paid_cents)}</strong></div>
+            ${isBobby ? `<form method="post" action="/coach/organizations/${c.id}/mine" style="margin-top:6px;display:flex;align-items:center;gap:8px">
+              <span class="hint-inline">My program: <strong>${c.is_mine ? 'ON' : 'OFF'}</strong></span>
+              <button class="btn-small${c.is_mine ? '' : ' btn-quiet'}" type="submit">${c.is_mine ? 'Unmark' : 'Mark'}</button>
+            </form>` : ''}
             ${isBobby ? `<details style="margin-top:6px">
               <summary class="hint" style="cursor:pointer">Set deal / collected</summary>
               <form method="post" action="/coach/organizations/${c.id}/deal" class="deal-form" style="margin-top:8px">
@@ -1677,7 +1709,10 @@ function skipAvatar(user) {
   const pt = user && (user.playerType || user.player_type);
   return pt === 'pitcher' ? '/skip-avatar-pitching.webp' : '/skip-avatar.webp';
 }
-function coachHittersPage(user, userStats) {
+function coachHittersPage(user, userStats, opts) {
+  const o = opts || {};
+  const title = o.title || 'Players';
+  const tab = o.tab || 'hitters';
   const cards = userStats
     .map(
       (a) => `<div class="card athlete-card" data-search="${esc(`${a.name} ${a.email}`.toLowerCase())}" data-role="${esc(a.playerType || 'hitter')}">
@@ -1693,11 +1728,31 @@ function coachHittersPage(user, userStats) {
       </div>`
     )
     .join('');
+  const emptyText = o.empty || 'Nobody has signed up yet.';
+  // "Message my players" (Sep 17 2026): Bobby's mass-message composer.
+  // Recipient checklist mirrors his SMS blast pattern — all checked, he unchecks.
+  const msgForm = o.messageForm
+    ? `<div class="card" style="margin-bottom:16px">
+        <h2 class="section-head" style="margin-top:0">Message my players</h2>
+        ${o.sent ? `<p class="notice"><strong>Sent</strong> to ${esc(String(o.sent))} player${String(o.sent) === '1' ? '' : 's'}.</p>` : ''}
+        ${o.msgError ? `<p class="error">${esc(o.msgError)}</p>` : ''}
+        <form method="post" action="/coach/my-players/message">
+          <label>Message <span class="hint-inline">(500 characters max)</span>
+            <textarea name="body" maxlength="500" required rows="3" style="width:100%;box-sizing:border-box" placeholder="Write it once — it goes to everyone checked below."></textarea>
+          </label>
+          <div class="recipient-list" style="margin:10px 0;max-height:220px;overflow:auto">
+            ${userStats.map((a) => `<label class="recipient-row" style="display:flex;align-items:center;gap:8px;padding:4px 0"><input type="checkbox" name="user_ids" value="${a.id}" checked> <span>${esc(a.name)}</span> <span class="hint-inline">${esc(a.email)}</span></label>`).join('')}
+          </div>
+          <button class="btn-primary" type="submit">Send message</button>
+        </form>
+      </div>`
+    : '';
   return layout({
-    title: 'Players',
+    title,
     user,
-    tabs: coachTabs('hitters', user.approvalCount, user),
-    body: `<h1 class="page-title">Players</h1>
+    tabs: coachTabs(tab, user.approvalCount, user),
+    body: `<h1 class="page-title">${esc(title)}</h1>
+    ${msgForm}
     ${userStats.length ? `<input type="search" id="hitter-search" class="searchbar" placeholder="Search players…" autocomplete="off">` : ''}
     ${userStats.length ? `<div class="pill-row" id="role-filter">
       <button type="button" class="pill-link active" data-rolefilter="all">All</button>
@@ -1705,8 +1760,86 @@ function coachHittersPage(user, userStats) {
       <button type="button" class="pill-link" data-rolefilter="pitcher">Pitchers</button>
       <button type="button" class="pill-link" data-rolefilter="two_way">Two-way</button>
     </div>` : ''}
-    <div class="athlete-grid">${cards || '<div class="card empty">Nobody has signed up yet.</div>'}</div>
+    <div class="athlete-grid">${cards || `<div class="card empty">${esc(emptyText)}</div>`}</div>
     <div class="card empty" id="hitter-no-match" hidden>No players match that search.</div>`,
+  });
+}
+
+// Player inbox (Sep 17 2026): broadcasts + 1:1 with the coach, chronological.
+// The "Message Coach" box only renders for Bobby's own players; everyone else
+// just sees their (empty) inbox.
+function playerMessagesPage(user, msgs, opts) {
+  const o = opts || {};
+  const cards = msgs
+    .map((m) => {
+      const mine = m.sender_id === user.id;
+      return `<div class="card"><p style="margin:0 0 6px"><strong>${mine ? 'You' : 'Coach'}</strong> <span class="hint-inline">${fmtDate(m.created_at)}</span></p><p style="margin:0">${esc(m.body)}</p></div>`;
+    })
+    .join('');
+  return layout({
+    title: 'Messages',
+    user,
+    tabs: userTabs('messages', user),
+    body: `<h1 class="page-title">Messages</h1>
+    ${o.nudge ? `<div class="card push-card"><p style="margin:0 0 10px"><strong>Turn on notifications</strong> <span class="hint">so you never miss a message from Coach.</span></p><p style="margin:0"><button type="button" class="btn-primary" id="push-enable-btn" style="margin-top:0">Turn on notifications</button></p></div>` : ''}
+    ${o.error ? `<p class="error">${esc(o.error)}</p>` : ''}
+    ${o.canMessage ? `<div class="card"><form method="post" action="/messages/to-coach">
+      <label>Message Coach <span class="hint-inline">(500 characters max)</span>
+        <textarea name="body" maxlength="500" required rows="3" style="width:100%;box-sizing:border-box" placeholder="Ask Bobby anything…"></textarea>
+      </label>
+      <button class="btn-primary" type="submit" style="margin-top:8px">Send</button>
+    </form></div>` : ''}
+    ${cards || '<div class="card empty">No messages yet.</div>'}`,
+  });
+}
+
+// Coach inbox (Sep 17 2026): one row per athlete with message traffic.
+function coachMessagesPage(user, threads) {
+  const rows = threads
+    .map(
+      (t) => `<a href="/coach/messages/${t.id}" class="card" style="display:block;color:inherit;text-decoration:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+          <strong>${esc(t.name)}</strong>
+          ${t.unread ? `<span class="tab-badge">${t.unread}</span>` : ''}
+        </div>
+        <p class="hint" style="margin:6px 0 0">${esc(t.last.body.slice(0, 80))}${t.last.body.length > 80 ? '…' : ''} <span class="hint-inline">· ${fmtDate(t.last.created_at)}</span></p>
+      </a>`
+    )
+    .join('');
+  return layout({
+    title: 'Messages',
+    user,
+    tabs: coachTabs('messages', user.approvalCount, user),
+    body: `<h1 class="page-title">Messages</h1>
+    ${rows || '<div class="card empty">No message threads yet. Send one from My Players.</div>'}`,
+  });
+}
+
+// Coach 1:1 thread (Sep 17 2026): full history with one player, both
+// directions. The reply box only renders for full-access coaches.
+function coachThreadPage(user, other, msgs, opts) {
+  const o = opts || {};
+  const canReply = user.canEdit !== false;
+  const cards = msgs
+    .map((m) => {
+      const mine = m.sender_id === user.id;
+      return `<div class="card"><p style="margin:0 0 6px"><strong>${mine ? 'You' : esc(other.name)}</strong> <span class="hint-inline">${fmtDate(m.created_at)}</span></p><p style="margin:0">${esc(m.body)}</p></div>`;
+    })
+    .join('');
+  return layout({
+    title: 'Messages',
+    user,
+    tabs: coachTabs('messages', user.approvalCount, user),
+    body: `<h1 class="page-title">${esc(other.name)}</h1>
+    <p class="hint"><a href="/coach/messages">← All messages</a></p>
+    ${o.error ? `<p class="error">${esc(o.error)}</p>` : ''}
+    ${cards || '<div class="card empty">No messages yet.</div>'}
+    ${canReply ? `<div class="card"><form method="post" action="/coach/messages/to/${other.id}">
+      <label>Reply <span class="hint-inline">(500 characters max)</span>
+        <textarea name="body" maxlength="500" required rows="3" style="width:100%;box-sizing:border-box"></textarea>
+      </label>
+      <button class="btn-primary" type="submit" style="margin-top:8px">Send</button>
+    </form></div>` : ''}`,
   });
 }
 
@@ -2677,6 +2810,9 @@ module.exports = {
   chatPage,
   coachHomePage,
   coachHittersPage,
+  coachMessagesPage,
+  coachThreadPage,
+  playerMessagesPage,
   coachProgramsPage,
   coachApprovalsPage,
   coachFinancesPage,

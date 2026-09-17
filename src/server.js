@@ -288,6 +288,85 @@ function deleteOrgLogoFile(logoPath) {
     }
   } catch (e) { console.warn('BOOT_BRAND_SAMPLE failed:', e.message); }
 })();
+
+// Bobby's own programs (Sep 17 2026): "Atkinson Hitting" (in-person guys) and
+// "Atkinson Hitting Remote Development" (remote guys). Idempotent boot setup:
+// find-or-create both orgs (Bobby may have created one via the app already),
+// mark is_mine=1 so they power the My Players tab, mirror branding between
+// them when only one has a logo, and move his named players in. Standalone
+// athletes only — a player already in another org is never moved.
+// Bobby's coach row is untouched: as a global coach he already coaches both.
+(function seedBobbysPrograms() {
+  try {
+    const INPERSON = 'Atkinson Hitting';
+    const REMOTE = 'Atkinson Hitting Remote Development';
+    const now = new Date().toISOString();
+    const findOrg = (name) => db.prepare('SELECT * FROM organizations WHERE LOWER(name) = LOWER(?)').get(name);
+    const ensureOrg = (name, notes) => {
+      let org = findOrg(name);
+      if (!org) {
+        const code = makeOrganizationCode(name);
+        const info = db
+          .prepare('INSERT INTO organizations (name, code, skip_enabled, created_at, deal_notes) VALUES (?, ?, 1, ?, ?)')
+          .run(name, code, now, notes);
+        org = db.prepare('SELECT * FROM organizations WHERE id = ?').get(info.lastInsertRowid);
+        console.log(`BOOT_PROGRAMS: created org "${name}" code=${code}`);
+      }
+      return org;
+    };
+    const inPerson = ensureOrg(INPERSON, "Bobby's org — in-person guys");
+    const remote = ensureOrg(REMOTE, 'Founder org — free forever, exempt from billing');
+    db.prepare('UPDATE organizations SET is_mine = 1 WHERE id IN (?, ?)').run(inPerson.id, remote.id);
+
+    // Branding mirror: same logo + colors on both programs. Whichever org has
+    // a logo wins; fill blanks only, never overwrite existing branding.
+    const brandOf = (name) =>
+      db.prepare('SELECT id, logo_path, primary_color, accent_color FROM organizations WHERE LOWER(name) = LOWER(?)').get(name);
+    const a = brandOf(INPERSON), b = brandOf(REMOTE);
+    const hasBrand = (o) => String((o && o.logo_path) || '').trim() !== '';
+    if (hasBrand(a) && !hasBrand(b)) {
+      db.prepare('UPDATE organizations SET logo_path = ?, primary_color = ?, accent_color = ? WHERE id = ?')
+        .run(a.logo_path, a.primary_color, a.accent_color, b.id);
+      console.log(`BOOT_PROGRAMS: mirrored branding from "${INPERSON}" to "${REMOTE}"`);
+    } else if (hasBrand(b) && !hasBrand(a)) {
+      db.prepare('UPDATE organizations SET logo_path = ?, primary_color = ?, accent_color = ? WHERE id = ?')
+        .run(b.logo_path, b.primary_color, b.accent_color, a.id);
+      console.log(`BOOT_PROGRAMS: mirrored branding from "${REMOTE}" to "${INPERSON}"`);
+    } else if (!hasBrand(a) && !hasBrand(b)) {
+      console.log('BOOT_PROGRAMS: no branding on either org yet — upload from the Organizations page');
+    } else {
+      console.log('BOOT_PROGRAMS: both orgs already branded — leaving both alone');
+    }
+
+    // Move Bobby's named players into their orgs — standalone athletes only.
+    const movePlayers = (orgId, orgName, names) => {
+      const findPlayer = db.prepare(
+        `SELECT id, organization_id FROM users WHERE role = 'athlete' AND (
+           LOWER(TRIM(COALESCE(first_name,'') || ' ' || COALESCE(last_name,''))) = ?
+           OR LOWER(TRIM(COALESCE(athlete_name,''))) = ?
+         )`
+      );
+      for (const name of names) {
+        const key = name.toLowerCase();
+        const p = findPlayer.get(key, key);
+        if (!p) { console.log(`BOOT_PROGRAMS: no athlete found for "${name}" — skipped`); continue; }
+        if (p.organization_id) {
+          const cur = db.prepare('SELECT name FROM organizations WHERE id = ?').get(p.organization_id);
+          console.log(`BOOT_PROGRAMS: "${name}" already in org "${cur ? cur.name : p.organization_id}" — not moved`);
+          continue;
+        }
+        db.prepare('UPDATE users SET organization_id = ?, team_id = NULL WHERE id = ?').run(orgId, p.id);
+        console.log(`BOOT_PROGRAMS: moved "${name}" into "${orgName}"`);
+      }
+    };
+    movePlayers(inPerson.id, INPERSON, [
+      'Briggs McNabb', 'Ethan Gonzalez', 'Luke Malfas', 'Paul Feret', 'Vince Imhof',
+      'Mickey Krishel', 'Julian Rodriguez', 'Matthew Oros', 'Dylan Short',
+      'Josh Ramos', 'Brandon Beasley', 'Michael Vasquez',
+    ]);
+    movePlayers(remote.id, REMOTE, ['Liam Stoffel', 'Dylan Kakuda', 'Ryan Seddon', 'Sam Chapman']);
+  } catch (e) { console.warn('BOOT_PROGRAMS failed:', e.message); }
+})();
 // A signup code resolves to an organization, or to a team inside one.
 // Returns { organizationId, teamId } or null.
 function codeLookup(code) {
@@ -422,6 +501,8 @@ function attachUser(req, res, next) {
           delete req.session.viewAsUserId;
         }
       }
+      // Unread message count for the nav/tab-bar badges (one cheap COUNT).
+      req.user.unreadMessages = unreadMessageCount(req.user.id);
     }
   }
   next();
@@ -1112,6 +1193,27 @@ function sessionDrills(drillsDoneJson) {
   return out;
 }
 
+// Recent drill names for the check-in quick-tap chips (Bobby: "a list of
+// drills they've already done so they can just click them in there").
+// Most-recent-first, deduped case-insensitively, capped at 8.
+function recentDrillNames(userId) {
+  const rows = db
+    .prepare('SELECT drills_done FROM checkins WHERE user_id = ? ORDER BY created_at DESC LIMIT 25')
+    .all(userId);
+  const seen = new Set();
+  const out = [];
+  for (const r of rows) {
+    for (const d of sessionDrills(r.drills_done)) {
+      const key = d.name.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(d.name);
+      if (out.length >= 8) return out;
+    }
+  }
+  return out;
+}
+
 // Everything the "What works for you" section needs: good-day vs trash cues,
 // whether routine days beat other days, a suggested routine when none is set,
 // and drills worth adding when one is.
@@ -1255,7 +1357,7 @@ app.get('/checkin', requireLogin, (req, res) => {
   const pt = req.user.playerType || 'hitter';
   if (pt === 'pitcher') return res.send(views.pitchingCheckinForm(req.user, null, {}));
   if (pt === 'two_way') return res.send(views.combinedCheckinForm(req.user, null, {}));
-  res.send(views.checkinForm(req.user, null, {}, data.drillNames(), getRoutine(req.user.id)));
+  res.send(views.checkinForm(req.user, null, {}, data.drillNames(), getRoutine(req.user.id), recentDrillNames(req.user.id)));
 });
 
 // ---- Daily routine ----
@@ -1413,6 +1515,47 @@ async function pushToCoachesExcept(exceptId, title, body, url) {
   if (!pushEnabled) return;
   const coaches = db.prepare("SELECT id FROM users WHERE role = 'coach' AND organization_id IS NULL AND id != ?").all(exceptId);
   for (const c of coaches) await pushToUser(c.id, title, body, url);
+}
+// Check-in notifications (Sep 17 2026, Bobby: "Log not login" — notify when
+// his guys LOG a session). Pure gate, unit-tested: is this athlete in one of
+// Bobby's own programs (organizations.is_mine = 1)?
+function isMyProgramPlayer(userId) {
+  return !!db
+    .prepare('SELECT 1 FROM users u JOIN organizations o ON o.id = u.organization_id WHERE u.id = ? AND o.is_mine = 1')
+    .get(userId);
+}
+async function notifyMyPlayerCheckin(userId, athleteName, coachUrl) {
+  if (!pushEnabled) return;
+  if (!isMyProgramPlayer(userId)) return; // not one of Bobby's program players — stay silent
+  // Full-access global coaches only: view-only Cam doesn't get Bobby's
+  // clients' daily logs.
+  const coaches = db.prepare("SELECT id FROM users WHERE role = 'coach' AND organization_id IS NULL AND can_edit != 0").all();
+  for (const c of coaches) await pushToUser(c.id, 'Session logged', `${athleteName} just logged a session — tap to view.`, coachUrl);
+}
+// Coach/player messaging (Sep 17 2026, revised): 1:1 + broadcasts with a
+// player inbox. One cheap COUNT per request powers the nav/tab-bar badges.
+function unreadMessageCount(userId) {
+  return db.prepare('SELECT COUNT(*) AS c FROM message_recipients WHERE user_id = ? AND read_at IS NULL').get(userId).c;
+}
+function markMessagesRead(userId) {
+  db.prepare('UPDATE message_recipients SET read_at = ? WHERE user_id = ? AND read_at IS NULL').run(new Date().toISOString(), userId);
+}
+// Which full-access global coach a player's "Message Coach" goes to: the one
+// who most recently messaged them, else the lowest-id full-access global
+// coach. Never a hardcoded email.
+function coachForPlayer(playerId) {
+  const recent = db
+    .prepare(
+      `SELECT m.sender_id AS id FROM messages m
+       JOIN message_recipients r ON r.message_id = m.id
+       JOIN users u ON u.id = m.sender_id
+       WHERE r.user_id = ? AND m.sender_id != ? AND u.role = 'coach' AND u.organization_id IS NULL AND u.can_edit != 0
+       ORDER BY m.created_at DESC LIMIT 1`
+    )
+    .get(playerId, playerId);
+  if (recent) return recent.id;
+  const first = db.prepare("SELECT id FROM users WHERE role = 'coach' AND organization_id IS NULL AND can_edit != 0 ORDER BY id ASC LIMIT 1").get();
+  return first ? first.id : null;
 }
 app.get('/api/push/vapid-key', (req, res) => res.json({ publicKey: VAPID_PUBLIC_KEY || null }));
 app.get('/api/push/status', requireLogin, (req, res) => {
@@ -1854,7 +1997,7 @@ app.post('/checkin', requireLogin, (req, res) => {
   // The hitting form is for hitters; pitchers and two-ways have their own.
   if ((req.user.playerType || 'hitter') !== 'hitter') return res.redirect('/checkin');
   const b = req.body;
-  const fail = (msg) => res.send(views.checkinForm(req.user, msg, b, data.drillNames(), getRoutine(req.user.id)));
+  const fail = (msg) => res.send(views.checkinForm(req.user, msg, b, data.drillNames(), getRoutine(req.user.id), recentDrillNames(req.user.id)));
   if (!ENVIRONMENTS.includes(b.environment)) {
     return fail('Pick the environment you were in.');
   }
@@ -1904,6 +2047,7 @@ app.post('/checkin', requireLogin, (req, res) => {
       (b.what_worked || '').trim(),
       (b.whats_next || '').trim()
     );
+  notifyMyPlayerCheckin(req.user.id, req.user.displayName, '/coach/user/' + encodeURIComponent(req.user.email)).catch((e) => console.warn('checkin push failed:', e.message));
   res.redirect(`/checkin/score/${info.lastInsertRowid}`);
 });
 
@@ -2012,6 +2156,7 @@ app.post('/checkin/pitching', requireLogin, (req, res) => {
     (b.biggest_struggle || '').trim().slice(0, 2000),
     null, pitchingScore
   );
+  notifyMyPlayerCheckin(req.user.id, req.user.displayName, '/coach/user/' + encodeURIComponent(req.user.email)).catch((e) => console.warn('checkin push failed:', e.message));
   res.redirect(`/checkin/score/${info.lastInsertRowid}`);
 });
 
@@ -2065,6 +2210,7 @@ app.post('/checkin/combined', requireLogin, (req, res) => {
     feltGood, whatWasWorking, biggestStruggle,
     hittingScore, pitchingScore
   );
+  notifyMyPlayerCheckin(req.user.id, req.user.displayName, '/coach/user/' + encodeURIComponent(req.user.email)).catch((e) => console.warn('checkin push failed:', e.message));
   res.redirect(`/checkin/score/${info.lastInsertRowid}`);
 });
 
@@ -2320,8 +2466,9 @@ function setApprovalCount(req) {
 // Per-hitter check-in stats for the coach views: total + last check-in.
 // Organization coaches only ever see their own program's players; team
 // coaches only their team.
-function coachUserStats(scope) {
+function coachUserStats(scope, opts) {
   const sp = scopeParams(scope);
+  const mineOnly = !!(opts && opts.mineOnly);
   const users = db
     .prepare(
       `SELECT u.id, u.email, u.athlete_name, u.first_name, u.last_name, u.created_at, u.date_of_birth, u.player_type,
@@ -2329,6 +2476,7 @@ function coachUserStats(scope) {
        FROM users u LEFT JOIN teams t ON t.id = u.team_id
        WHERE u.role != 'coach' AND u.status = 'approved'
          AND (? IS NULL OR u.organization_id = ?) AND (? IS NULL OR u.team_id = ?)
+         ${mineOnly ? 'AND u.organization_id IN (SELECT id FROM organizations WHERE is_mine = 1)' : ''}
        ORDER BY u.created_at ASC`
     )
     .all(...sp);
@@ -2567,10 +2715,194 @@ app.get('/coach', requireCoachAny, (req, res) => {
   );
 });
 
-// Coach Hitters tab: search + athlete cards.
+// Coach Hitters tab: search + athlete cards. Global coaches see "All Players"
+// (Bobby's programs live under the My Players tab); org coaches see their own
+// program's players under the same "Players" label as before.
 app.get('/coach/hitters', requireCoachAny, (req, res) => {
   setApprovalCount(req);
-  res.send(views.coachHittersPage(realUser(req), coachUserStats(orgScope(req))));
+  const me = realUser(req);
+  const title = me.organizationId ? 'Players' : 'All Players';
+  res.send(views.coachHittersPage(me, coachUserStats(orgScope(req)), { title, tab: 'hitters' }));
+});
+
+// My Players tab (Sep 17 2026): Bobby's own programs (is_mine orgs) up front.
+// Global coaches only — org coaches already have a scoped Players tab.
+app.get('/coach/my-players', requireGlobalCoachAny, (req, res) => {
+  setApprovalCount(req);
+  res.send(
+    views.coachHittersPage(realUser(req), coachUserStats(orgScope(req), { mineOnly: true }), {
+      title: 'My Players',
+      tab: 'my-players',
+      empty: 'No players in your programs yet.',
+      messageForm: true,
+      sent: req.query.sent || null,
+      msgError: req.query.error || null,
+    })
+  );
+});
+
+// Mass message to Bobby's players (Sep 17 2026). Full-access coaches only:
+// view-only coaches get 403, same as every other coach mutation.
+app.post('/coach/my-players/message', requireCoach, (req, res) => {
+  const me = realUser(req);
+  const back = (q) => res.redirect('/coach/my-players' + (q ? '?' + q : ''));
+  const body = String(req.body.body || '').trim();
+  if (!body) return back('error=' + encodeURIComponent('Write a message first.'));
+  if (body.length > 500) return back('error=' + encodeURIComponent('Keep it to 500 characters.'));
+  let ids = req.body.user_ids;
+  if (!Array.isArray(ids)) ids = ids ? [ids] : [];
+  // Never trust the form: recipients must actually be Bobby's players.
+  const mine = new Set(coachUserStats(orgScope(req), { mineOnly: true }).map((a) => String(a.id)));
+  const targets = [...new Set(ids.map((x) => String(x)))].filter((id) => mine.has(id));
+  if (!targets.length) return back('error=' + encodeURIComponent('Pick at least one player.'));
+  const msg = body.slice(0, 500);
+  const now = new Date().toISOString();
+  // Broadcast: recipient_id NULL, one recipient row per targeted player.
+  const info = db.prepare('INSERT INTO messages (sender_id, recipient_id, body, created_at) VALUES (?, NULL, ?, ?)').run(me.id, msg, now);
+  const addTarget = db.prepare('INSERT OR IGNORE INTO message_recipients (message_id, user_id) VALUES (?, ?)');
+  for (const uid of targets) {
+    addTarget.run(info.lastInsertRowid, Number(uid));
+    // Fire-and-forget: a push failure must never break the redirect.
+    pushToUser(Number(uid), 'Message from Coach', msg.slice(0, 120), '/messages').catch((e) => console.warn('coach message push failed:', e.message));
+  }
+  back('sent=' + targets.length);
+});
+
+// Coach inbox (Sep 17 2026): one row per athlete with message traffic with
+// Bobby. Global coaches only (Cam can read); the 1:1 restrictions below mean
+// this list only ever contains Bobby's own players.
+app.get('/coach/messages', requireGlobalCoachAny, (req, res) => {
+  setApprovalCount(req);
+  const me = realUser(req);
+  const athletes = db
+    .prepare(
+      `SELECT DISTINCT u.id, u.first_name, u.last_name, u.athlete_name, u.email FROM users u
+       WHERE u.role = 'athlete'
+         AND u.organization_id IN (SELECT id FROM organizations WHERE is_mine = 1)
+         AND (u.id IN (SELECT r.user_id FROM message_recipients r JOIN messages m ON m.id = r.message_id WHERE m.sender_id = ?)
+           OR u.id IN (SELECT m.sender_id FROM messages m JOIN message_recipients r ON r.message_id = m.id WHERE r.user_id = ?))`
+    )
+    .all(me.id, me.id);
+  const threadLast = (aid) =>
+    db
+      .prepare(
+        `SELECT m.body, m.created_at FROM messages m
+         WHERE (m.sender_id = ? AND EXISTS (SELECT 1 FROM message_recipients r WHERE r.message_id = m.id AND r.user_id = ?))
+            OR (m.sender_id = ? AND EXISTS (SELECT 1 FROM message_recipients r WHERE r.message_id = m.id AND r.user_id = ?))
+         ORDER BY m.created_at DESC LIMIT 1`
+      )
+      .get(me.id, aid, aid, me.id);
+  const threadUnread = (aid) =>
+    db
+      .prepare(
+        `SELECT COUNT(*) AS c FROM message_recipients r JOIN messages m ON m.id = r.message_id
+         WHERE r.user_id = ? AND r.read_at IS NULL AND m.sender_id = ?`
+      )
+      .get(me.id, aid).c;
+  const threads = athletes
+    .map((a) => ({
+      id: a.id,
+      name: [a.first_name, a.last_name].filter(Boolean).join(' ') || a.athlete_name || a.email,
+      last: threadLast(a.id),
+      unread: threadUnread(a.id),
+    }))
+    .filter((t) => t.last)
+    .sort((a, b) => (a.last.created_at < b.last.created_at ? 1 : -1));
+  res.send(views.coachMessagesPage(realUser(req), threads));
+});
+
+// Coach thread view (Sep 17 2026): full chronological thread with one of
+// Bobby's players, both directions. Viewing marks Bobby's rows read.
+// Only Bobby's own players — anyone else gets 403.
+app.get('/coach/messages/:userId', requireGlobalCoachAny, (req, res) => {
+  setApprovalCount(req);
+  const me = realUser(req);
+  const other = db.prepare("SELECT id, first_name, last_name, athlete_name, email FROM users WHERE id = ? AND role = 'athlete'").get(req.params.userId);
+  if (!other || !isMyProgramPlayer(other.id)) return res.status(403).send('Forbidden');
+  db.prepare(
+    'UPDATE message_recipients SET read_at = ? WHERE user_id = ? AND read_at IS NULL AND message_id IN (SELECT id FROM messages WHERE sender_id = ?)'
+  ).run(new Date().toISOString(), me.id, other.id);
+  const msgs = db
+    .prepare(
+      `SELECT m.id, m.sender_id, m.body, m.created_at FROM messages m
+       WHERE (m.sender_id = ? AND EXISTS (SELECT 1 FROM message_recipients r WHERE r.message_id = m.id AND r.user_id = ?))
+          OR (m.sender_id = ? AND EXISTS (SELECT 1 FROM message_recipients r WHERE r.message_id = m.id AND r.user_id = ?))
+       ORDER BY m.created_at ASC`
+    )
+    .all(me.id, other.id, other.id, me.id);
+  const name = [other.first_name, other.last_name].filter(Boolean).join(' ') || other.athlete_name || other.email;
+  res.send(views.coachThreadPage(me, { id: other.id, name }, msgs, { error: req.query.error || null }));
+});
+
+// Coach 1:1 reply (Sep 17 2026). Full-access coaches only; the recipient must
+// be an athlete in one of Bobby's own orgs — 403 otherwise.
+app.post('/coach/messages/to/:userId', requireCoach, (req, res) => {
+  const me = realUser(req);
+  const other = db.prepare("SELECT id FROM users WHERE id = ? AND role = 'athlete'").get(req.params.userId);
+  if (!other || !isMyProgramPlayer(other.id)) return res.status(403).send('Forbidden');
+  const body = String(req.body.body || '').trim();
+  if (!body || body.length > 500) {
+    return res.redirect('/coach/messages/' + other.id + '?error=' + encodeURIComponent('Write a message first (500 characters max).'));
+  }
+  const msg = body.slice(0, 500);
+  const info = db.prepare('INSERT INTO messages (sender_id, recipient_id, body, created_at) VALUES (?, ?, ?, ?)').run(me.id, other.id, msg, new Date().toISOString());
+  db.prepare('INSERT OR IGNORE INTO message_recipients (message_id, user_id) VALUES (?, ?)').run(info.lastInsertRowid, other.id);
+  pushToUser(other.id, 'Message from Coach', msg.slice(0, 120), '/messages').catch((e) => console.warn('coach reply push failed:', e.message));
+  res.redirect('/coach/messages/' + other.id);
+});
+
+// Player inbox (Sep 17 2026): broadcasts + 1:1 with the coach, chronological.
+// Viewing marks the player's rows read. Coaches use /coach/messages.
+app.get('/messages', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.redirect('/coach/messages');
+  const me = req.user;
+  markMessagesRead(me.id);
+  const msgs = db
+    .prepare(
+      `SELECT m.id, m.sender_id, m.body, m.created_at FROM messages m
+       WHERE EXISTS (SELECT 1 FROM message_recipients r WHERE r.message_id = m.id AND r.user_id = ?)
+          OR m.sender_id = ?
+       ORDER BY m.created_at ASC`
+    )
+    .all(me.id, me.id);
+  res.send(
+    views.playerMessagesPage(me, msgs, {
+      error: req.query.error || null,
+      canMessage: isMyProgramPlayer(me.id),
+      nudge: userPushSubscriptions(me.id).length === 0,
+    })
+  );
+});
+
+// Player → coach (Sep 17 2026). Only players in Bobby's own orgs can message
+// (Bobby: "Only players in my org can message me, no one outside of my orgs
+// can") — everyone else gets 403. There is no other player messaging route,
+// so players can never message each other or arbitrary coaches.
+app.post('/messages/to-coach', requireLogin, (req, res) => {
+  const me = req.user;
+  if (me.role !== 'athlete' || !isMyProgramPlayer(me.id)) return res.status(403).send('Forbidden');
+  const body = String(req.body.body || '').trim();
+  if (!body || body.length > 500) {
+    return res.redirect('/messages?error=' + encodeURIComponent('Write a message first (500 characters max).'));
+  }
+  const coachId = coachForPlayer(me.id);
+  if (!coachId) return res.redirect('/messages?error=' + encodeURIComponent('No coach available right now.'));
+  const msg = body.slice(0, 500);
+  const info = db.prepare('INSERT INTO messages (sender_id, recipient_id, body, created_at) VALUES (?, ?, ?, ?)').run(me.id, coachId, msg, new Date().toISOString());
+  db.prepare('INSERT OR IGNORE INTO message_recipients (message_id, user_id) VALUES (?, ?)').run(info.lastInsertRowid, coachId);
+  pushToUser(coachId, `New message from ${me.displayName}`, msg.slice(0, 120), '/coach/messages/' + me.id).catch((e) =>
+    console.warn('player message push failed:', e.message)
+  );
+  res.redirect('/messages');
+});
+
+// Flip "My program" on an org (Bobby-only, same guard as the deal route):
+// powers the My Players tab. Colleges and travel programs stay off.
+app.post('/coach/organizations/:id/mine', requireCoach, requireFinances, (req, res) => {
+  const c = db.prepare('SELECT id, is_mine FROM organizations WHERE id = ?').get(Number(req.params.id));
+  if (!c) return res.redirect('/coach/organizations');
+  db.prepare('UPDATE organizations SET is_mine = ? WHERE id = ?').run(c.is_mine ? 0 : 1, c.id);
+  res.redirect('/coach/organizations');
 });
 
 // Coach Programs tab: remote programs.

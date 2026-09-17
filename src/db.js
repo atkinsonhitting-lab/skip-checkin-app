@@ -108,6 +108,32 @@ for (const [col, type] of [['logo_path', 'TEXT NOT NULL DEFAULT ""'], ['primary_
   const cols = db.prepare('PRAGMA table_info(organizations)').all().map((c) => c.name);
   if (!cols.includes(col)) db.exec(`ALTER TABLE organizations ADD COLUMN ${col} ${type};`);
 }
+
+// "My Players" (Sep 17 2026): is_mine=1 marks Bobby's own programs. The
+// My Players tab lists athletes in is_mine orgs; colleges/travel programs
+// Bobby sells to stay is_mine=0 and only show under All Players.
+{
+  const cols = db.prepare('PRAGMA table_info(organizations)').all().map((c) => c.name);
+  if (!cols.includes('is_mine')) db.exec('ALTER TABLE organizations ADD COLUMN is_mine INTEGER NOT NULL DEFAULT 0;');
+}
+
+// Coach/player messaging (Sep 17 2026, revised): 1:1 + broadcasts with a
+// player inbox. recipient_id NULL = broadcast to Bobby's players;
+// message_recipients materializes the audience at send time so read state
+// is per-recipient.
+db.exec(`CREATE TABLE IF NOT EXISTS messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sender_id INTEGER NOT NULL,
+  recipient_id INTEGER,
+  body TEXT NOT NULL,
+  created_at TEXT NOT NULL
+)`);
+db.exec(`CREATE TABLE IF NOT EXISTS message_recipients (
+  message_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  read_at TEXT,
+  PRIMARY KEY(message_id, user_id)
+)`);
 db.exec(`
 CREATE TABLE IF NOT EXISTS org_payments (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
