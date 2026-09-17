@@ -289,6 +289,58 @@ function deleteOrgLogoFile(logoPath) {
   } catch (e) { console.warn('BOOT_BRAND_SAMPLE failed:', e.message); }
 })();
 
+// Heartland Community College sample branding (Sep 17 2026): same demo-org
+// pattern as Missouri State — navy topbar, white H logo, navy colors.
+// Idempotent; Bobby can delete it from the Organizations page any time.
+(function seedHeartlandSample() {
+  try {
+    const destFile = 'heartland-h.png';
+    const dest = path.join(ORG_LOGO_DIR, destFile);
+    const sampleSrc = path.join(__dirname, '..', 'public', 'org-logos-sample', 'heartland-h.png');
+    if (!fs.existsSync(dest) && fs.existsSync(sampleSrc)) fs.copyFileSync(sampleSrc, dest);
+    if (!fs.existsSync(dest)) return;
+    const existing = db.prepare('SELECT id, logo_path FROM organizations WHERE name = ?').get('Heartland Community College');
+    if (!existing) {
+      const code = makeOrganizationCode('Heartland Community College');
+      db.prepare(
+        `INSERT INTO organizations (name, code, skip_enabled, created_at, logo_path, primary_color, accent_color, deal_status, deal_notes)
+         VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)`
+      ).run('Heartland Community College', code, new Date().toISOString(), destFile, '#0A1E46', '#3E6FB0', 'prospect',
+        'SAMPLE org — demo branding for sales (Bobby: safe to delete).');
+      console.log('BOOT_BRAND_SAMPLE: created Heartland Community College sample org');
+    } else if (!existing.logo_path) {
+      db.prepare('UPDATE organizations SET logo_path = ?, primary_color = ?, accent_color = ? WHERE id = ?')
+        .run(destFile, '#0A1E46', '#3E6FB0', existing.id);
+      console.log('BOOT_BRAND_SAMPLE: backfilled branding on Heartland org');
+    }
+  } catch (e) { console.warn('BOOT_BRAND_SAMPLE(heartland) failed:', e.message); }
+})();
+
+// Heartland roster (Sep 17 2026, Bobby): move standalone athlete "Sammy Atkinson"
+// into Heartland Community College if his account exists. Never moves a player
+// who is already in another org. Runs on every boot, so it picks him up as
+// soon as he signs up.
+(function seedHeartlandRoster() {
+  try {
+    const org = db.prepare('SELECT id, name FROM organizations WHERE name = ?').get('Heartland Community College');
+    if (!org) return;
+    const p = db.prepare(
+      `SELECT id, organization_id FROM users WHERE role = 'athlete' AND (
+         LOWER(TRIM(COALESCE(first_name,'') || ' ' || COALESCE(last_name,''))) = 'sammy atkinson'
+         OR LOWER(TRIM(COALESCE(athlete_name,''))) = 'sammy atkinson'
+       )`
+    ).get();
+    if (!p) { console.log('BOOT_HEARTLAND_ROSTER: no athlete "Sammy Atkinson" yet — skipped'); return; }
+    if (p.organization_id) {
+      const cur = db.prepare('SELECT name FROM organizations WHERE id = ?').get(p.organization_id);
+      console.log(`BOOT_HEARTLAND_ROSTER: "Sammy Atkinson" already in org "${cur ? cur.name : p.organization_id}" — not moved`);
+      return;
+    }
+    db.prepare('UPDATE users SET organization_id = ?, team_id = NULL WHERE id = ?').run(org.id, p.id);
+    console.log('BOOT_HEARTLAND_ROSTER: moved "Sammy Atkinson" into "Heartland Community College"');
+  } catch (e) { console.warn('BOOT_HEARTLAND_ROSTER failed:', e.message); }
+})();
+
 // Bobby's own programs (Sep 17 2026): "Atkinson Hitting" (in-person guys) and
 // "Atkinson Hitting Remote Development" (remote guys). Idempotent boot setup:
 // find-or-create both orgs (Bobby may have created one via the app already),
