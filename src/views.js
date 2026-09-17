@@ -1807,7 +1807,7 @@ function coachHomePage(user, quiet, latest, pending, pushOn, analytics) {
     body: `<h1 class="page-title">Coach Dashboard</h1>
     ${orgBanner}
     ${analyticsStrip}
-    ${canEdit && !pushOn ? '<p><button type="button" class="btn-small" id="push-enable-btn">Turn on notifications</button> <span class="hint-inline">get a push when a player needs approval</span></p>' : ''}
+    ${canEdit && !pushOn ? '<div class="card push-card"><p style="margin:0 0 10px"><strong>Turn on notifications</strong> <span class="hint">so you never miss an approval, a check-in, or a message.</span></p><p style="margin:0"><button type="button" class="btn-primary" id="push-enable-btn" style="margin-top:0">Turn on notifications</button></p></div>' : ''}
     ${approvalNudge}
     ${orgBreakdown}
     <h2 class="section-head" id="gone-quiet">Gone quiet</h2>
@@ -2940,6 +2940,19 @@ function settingsPage(user, opts) {
            </form>
            <p class="hint">Heads up: if your organization turned off Talk to Skip, joining removes your access to it.</p>`}
     </div>`}
+    ${isCoach && canEdit ? `<div class="card">
+      <h2 class="section-head">Notifications</h2>
+      ${o.pushOn
+        ? `<p><span class="badge ok">On</span></p>
+           <p class="hint">You get a push for everything: player approval requests, check-in log alerts, and new messages. Use the Alerts on/off buttons on My Players to pick which players trigger a log alert.</p>
+           <form method="post" action="/settings/push/off" class="form">
+             <button class="btn-small btn-quiet" type="submit">Turn off notifications</button>
+           </form>`
+        : `<p><span class="badge warn">Off</span></p>
+           <p class="hint">One switch for everything: player approval requests, check-in log alerts, and new messages.</p>
+           <p><button type="button" class="btn-primary" id="push-enable-btn">Turn on notifications</button></p>
+           <p class="hint">On iPhone, add the app to your home screen first — push doesn&apos;t work from Safari.</p>`}
+    </div>` : ''}
     <div class="card">
       <h2 class="section-head">Password</h2>
       <form method="post" action="/settings/password" class="form">

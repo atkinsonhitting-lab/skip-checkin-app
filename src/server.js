@@ -2747,16 +2747,22 @@ app.get('/settings', requireLogin, (req, res) => {
   if (req.user.viewAs) return res.redirect('/coach');
   res.send(views.settingsPage(req.user, {
     subscription: getSubscription(req.user.id),
+    pushOn: userPushSubscriptions(req.user.id).length > 0,
     notice: req.query.saved ? 'Account updated.' : (req.query.pw ? 'Password changed.' : (req.query.organization ? 'Organization updated.' : null)),
     ...coachAdminOpts(req),
   }));
+});
+
+app.post('/settings/push/off', requireLogin, (req, res) => {
+  db.prepare('DELETE FROM push_subscriptions WHERE user_id = ?').run(req.user.id);
+  res.redirect('/settings?saved=1');
 });
 
 app.post('/settings/profile', requireLogin, (req, res) => {
   const firstName = String(req.body.first_name || '').trim().replace(/\s+/g, ' ').slice(0, 40);
   const lastName = String(req.body.last_name || '').trim().replace(/\s+/g, ' ').slice(0, 40);
   const email = String(req.body.email || '').trim().toLowerCase();
-  const fail = (msg) => res.send(views.settingsPage(req.user, { subscription: getSubscription(req.user.id), error: msg, ...coachAdminOpts(req) }));
+  const fail = (msg) => res.send(views.settingsPage(req.user, { subscription: getSubscription(req.user.id), pushOn: userPushSubscriptions(req.user.id).length > 0, error: msg, ...coachAdminOpts(req) }));
   if (!firstName || !lastName) return fail('First and last name are required.');
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail('That email doesn\u2019t look right.');
   const taken = db.prepare('SELECT id FROM users WHERE email = ? AND id != ?').get(email, req.user.id);
@@ -2777,7 +2783,7 @@ app.post('/settings/profile', requireLogin, (req, res) => {
 // their original kind.
 app.post('/settings/role', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.status(403).send('Forbidden');
-  const fail = (msg) => res.send(views.settingsPage(req.user, { subscription: getSubscription(req.user.id), error: msg, ...coachAdminOpts(req) }));
+  const fail = (msg) => res.send(views.settingsPage(req.user, { subscription: getSubscription(req.user.id), pushOn: userPushSubscriptions(req.user.id).length > 0, error: msg, ...coachAdminOpts(req) }));
   const playerType = req.body.player_type;
   if (!validPlayerType(playerType)) return fail('Pick hitter, pitcher, or two-way.');
   db.prepare('UPDATE users SET player_type = ? WHERE id = ?').run(playerType, req.user.id);
@@ -2789,7 +2795,7 @@ app.post('/settings/role', requireLogin, (req, res) => {
 // Coaches can't use this.
 app.post('/settings/organization', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.status(403).send('Forbidden');
-  const fail = (msg) => res.send(views.settingsPage(req.user, { subscription: getSubscription(req.user.id), error: msg, ...coachAdminOpts(req) }));
+  const fail = (msg) => res.send(views.settingsPage(req.user, { subscription: getSubscription(req.user.id), pushOn: userPushSubscriptions(req.user.id).length > 0, error: msg, ...coachAdminOpts(req) }));
   const code = String(req.body.organization_code || '').trim();
   if (!code) {
     db.prepare('UPDATE users SET organization_id = NULL, team_id = NULL WHERE id = ?').run(req.user.id);
@@ -2802,7 +2808,7 @@ app.post('/settings/organization', requireLogin, (req, res) => {
 });
 
 app.post('/settings/password', requireLogin, (req, res) => {
-  const fail = (msg) => res.send(views.settingsPage(req.user, { subscription: getSubscription(req.user.id), error: msg, ...coachAdminOpts(req) }));
+  const fail = (msg) => res.send(views.settingsPage(req.user, { subscription: getSubscription(req.user.id), pushOn: userPushSubscriptions(req.user.id).length > 0, error: msg, ...coachAdminOpts(req) }));
   const row = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(req.user.id);
   if (!row || !bcrypt.compareSync(String(req.body.current_password || ''), row.password_hash)) {
     return fail('Current password didn\u2019t match.');
@@ -2828,7 +2834,7 @@ app.post('/settings/subscription/cancel', requireLogin, (req, res) => {
 
 app.post('/settings/delete', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.status(403).send('Forbidden');
-  const fail = (msg) => res.send(views.settingsPage(req.user, { subscription: getSubscription(req.user.id), error: msg, ...coachAdminOpts(req) }));
+  const fail = (msg) => res.send(views.settingsPage(req.user, { subscription: getSubscription(req.user.id), pushOn: userPushSubscriptions(req.user.id).length > 0, error: msg, ...coachAdminOpts(req) }));
   if (String(req.body.confirm || '').trim() !== 'DELETE') return fail('Type DELETE exactly to confirm.');
   const id = req.user.id;
   const del = db.transaction(() => {

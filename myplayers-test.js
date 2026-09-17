@@ -51,6 +51,21 @@ async function main() {
     .includes('<a href="https://calendly.com/atkinsonhitting" target="_blank" rel="noopener noreferrer">'));
   check('linkify escapes HTML first', !views.linkify('<script>alert(1)</script> https://x.com').includes('<script>')
     && views.linkify('<script>alert(1)</script>').includes('&lt;script&gt;'));
+  // Coach notifications master switch (Bobby, Sep 17 2026): Settings always
+  // shows the Notifications card for full-access coaches.
+  const coachUser = { role: 'coach', canEdit: 1, approvalCount: 0, firstName: 'Coach', lastName: 'C', email: 'coach@test.com' };
+  const sOff = views.settingsPage(coachUser, { pushOn: false });
+  check('coach settings has Notifications card', sOff.includes('>Notifications</h2>'));
+  check('notifications off shows enable button', sOff.includes('id="push-enable-btn"'));
+  check('notifications off explains coverage', sOff.includes('check-in log alerts'));
+  check('notifications off mentions iPhone home screen', sOff.includes('home screen'));
+  const sOn = views.settingsPage(coachUser, { pushOn: true });
+  check('notifications on shows On badge', sOn.includes('<span class="badge ok">On</span>'));
+  check('notifications on shows turn-off form', sOn.includes('/settings/push/off'));
+  const sCam = views.settingsPage({ ...coachUser, canEdit: false }, { pushOn: false });
+  check('view-only coach gets no Notifications card', !sCam.includes('>Notifications</h2>'));
+  const sAth = views.settingsPage({ role: 'athlete', approvalCount: 0, firstName: 'A', lastName: 'B', email: 'a@b.c' }, {});
+  check('athlete settings gets no Notifications card', !sAth.includes('>Notifications</h2>'));
   // Sectioned inputs render from the grouped shape; every section's input
   // always renders, chips rows are omitted when the section is empty.
   const cf2 = views.checkinForm({ role: 'athlete' }, null, {}, [], [],
@@ -213,7 +228,30 @@ async function main() {
     await login('cam', 'cam@test.com');
     await login('oc', 'orgcoach@test.com');
 
-    let r = await req('GET', '/coach/my-players', null, 'coach');
+    // ---- Coach notifications master switch (Bobby, Sep 17 2026) ----
+    const coachRow = q('SELECT id FROM users WHERE email = ?', 'coach@test.com');
+    let r = await req('GET', '/settings', null, 'coach');
+    check('GET /settings 200 for coach', r.status === 200);
+    check('settings shows Notifications card', r.text.includes('>Notifications</h2>'));
+    check('settings shows turn-on button when unsubscribed', r.text.includes('id="push-enable-btn"'));
+    r = await req('GET', '/coach', null, 'coach');
+    check('dashboard nudges to turn on notifications', r.status === 200 && r.text.includes('so you never miss an approval'));
+    run('INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, created_at) VALUES (?,?,?,?,?)',
+      coachRow.id, 'https://example.com/ep1', 'p256dh1', 'auth1', now);
+    r = await req('GET', '/settings', null, 'coach');
+    check('settings shows On badge when subscribed', r.text.includes('<span class="badge ok">On</span>'));
+    check('settings shows turn-off form when subscribed', r.text.includes('/settings/push/off'));
+    r = await req('GET', '/coach', null, 'coach');
+    check('dashboard nudge hidden once subscribed', !r.text.includes('so you never miss an approval'));
+    r = await req('POST', '/settings/push/off', P({}), 'coach');
+    check('POST /settings/push/off clears subscriptions',
+      r.status === 302 && qall('SELECT * FROM push_subscriptions WHERE user_id = ?', coachRow.id).length === 0);
+    r = await req('GET', '/settings', null, 'coach');
+    check('settings back to Off after turn-off', r.text.includes('id="push-enable-btn"'));
+    r = await req('GET', '/settings', null, 'cam');
+    check('view-only Cam gets no Notifications card', r.status === 200 && !r.text.includes('>Notifications</h2>'));
+
+    r = await req('GET', '/coach/my-players', null, 'coach');
     check('GET /coach/my-players 200 for global coach', r.status === 200);
     let html = r.text;
     check('My Players page titled', html.includes('<h1 class="page-title">My Players</h1>'));
