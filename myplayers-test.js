@@ -37,10 +37,11 @@ async function main() {
   check('remote hitter: Routine points at /program/routine', t2.some((t) => t.label === 'Routine' && t.href === '/program/routine'));
   check('remote hitter: no base /routine tab', !t2.some((t) => t.href === '/routine'));
   const cf = views.checkinForm({ role: 'athlete', approvalCount: 0 }, null, {}, [], [], {});
-  for (const d of ['Prep', 'Tee', 'Side Toss', 'Front Toss', 'BP', 'Machine'])
-    check(`drill chip "${d}" in check-in form`, cf.includes(`data-drill="${d}"`));
-  check('tip text about (prep)/(tee)/etc. present', cf.includes('add (prep), (tee), (side toss), (front toss), (BP), or (machine) after what you did'));
-  check('no drills_done field; sectioned inputs instead', cf.includes('name="sec_tee"') && !cf.includes('name="drills_done"'));
+  for (const d of ['Prep', 'Off the tee', 'Side toss', 'Front toss', 'BP', 'Machine', 'Other'])
+    check(`section "${d}" in the drill dropdown's section select`, cf.includes(`>${d}</option>`));
+  check('tagging handled by the section select (no manual-tag tip needed)',
+    cf.includes('id="drill-section"') && !cf.includes('add (prep), (tee), (side toss)'));
+  check('no drills_done field; hidden section inputs instead', cf.includes('name="sec_tee"') && !cf.includes('name="drills_done"'));
   check('"What did you do today?" heading present', cf.includes('What did you do today?'));
   check('"Did you do any drills?" gate gone', !cf.includes('Did you do any drills?') && !cf.includes('name="did_drills"'));
   check('drills block sits before the Feel slider',
@@ -66,31 +67,38 @@ async function main() {
   check('view-only coach gets no Notifications card', !sCam.includes('>Notifications</h2>'));
   const sAth = views.settingsPage({ role: 'athlete', approvalCount: 0, firstName: 'A', lastName: 'B', email: 'a@b.c' }, {});
   check('athlete settings gets no Notifications card', !sAth.includes('>Notifications</h2>'));
-  // Sectioned inputs render from the grouped shape; every section's input
-  // always renders, chips rows are omitted when the section is empty.
+  // Searchable dropdown renders: one combobox + section select + token tray +
+  // hidden sec_* inputs (Bobby, Sep 18 2026 — replaces the 7 stacked inputs).
   const cf2 = views.checkinForm({ role: 'athlete' }, null, {}, [], [],
     { tee: ['Fence Drill (Tee)'], sideToss: [], frontToss: [], bp: [], machine: [], other: ['Walk In'] });
-  check('Off the tee section renders', cf2.includes('>Off the tee<'));
-  check('all 7 section labels render', ['Prep', 'Off the tee', 'Side toss', 'Front toss', 'BP', 'Machine', 'Other']
-    .every((l) => cf2.includes(`drill-section-label">${l}</div>`)));
-  check('all 7 section inputs render', ['sec_prep', 'sec_tee', 'sec_sidetoss', 'sec_fronttoss', 'sec_bp', 'sec_machine', 'sec_other']
+  check('drill combobox renders', cf2.includes('id="drill-input"') && cf2.includes('id="drill-menu"') && cf2.includes('id="drill-tokens"'));
+  check('section select renders with all 7 sections in order',
+    ['Prep', 'Off the tee', 'Side toss', 'Front toss', 'BP', 'Machine', 'Other']
+      .every((l, i, a) => {
+        const re = new RegExp(`<option value="[a-zA-Z]+">${l}</option>`);
+        if (!re.test(cf2)) return false;
+        return i === 0 || cf2.indexOf(`>${a[i - 1]}</option>`) < cf2.indexOf(`>${l}</option>`);
+      }));
+  check('all 7 hidden section inputs render', ['sec_prep', 'sec_tee', 'sec_sidetoss', 'sec_fronttoss', 'sec_bp', 'sec_machine', 'sec_other']
     .every((f) => cf2.includes(`name="${f}"`)));
-  check('Other section renders', cf2.includes('>Other<'));
-  // Bobby Sep 17 2026: section labels must be bright red and easy to see,
-  // and the block compact so the form doesn't feel long.
+  // Decode the HTML-escaped options JSON into a parsed object for assertions.
+  const drillOptsOf = (html) => {
+    const m = html.match(/<script type="application\/json" id="drill-options">([\s\S]*?)<\/script>/);
+    if (!m) return { recent: [], registry: [] };
+    const raw = m[1].replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+    try { return JSON.parse(raw); } catch (e) { return { recent: [], registry: [] }; }
+  };
+  const allOpts = (o) => [...(o.recent || []), ...(o.registry || [])];
+  const hasOpt = (o, name, section) => allOpts(o).some((x) => x.name === name && x.section === section);
+  const opts2 = drillOptsOf(cf2);
+  check('history drills land in the options JSON with their section, bare names',
+    hasOpt(opts2, 'Fence Drill', 'tee') && hasOpt(opts2, 'Walk In', 'other') &&
+    !allOpts(opts2).some((x) => x.name.includes('(Tee)')));
+  check('blank-counts-as-none hint renders', cf2.includes('blank counts as none'));
+  // Bobby Sep 18 2026: dropdown styles present and compact.
   const css = fs.readFileSync(path.join(CWD, 'public/style.css'), 'utf8');
-  const labelRule = (css.match(/\.drill-section-label\s*\{[^}]*\}/) || [''])[0];
-  check('section labels are bright red', /color:\s*var\(--red\)/.test(labelRule));
-  check('section block is compact', /\.drill-section\s*\{\s*margin:\s*6px 0 0/.test(css));
-  check('history chip toggles the bare name into its section',
-    cf2.includes('data-drill="Fence Drill"') && !cf2.includes('data-drill="Fence Drill (Tee)"') &&
-    cf2.includes('data-target="sec_tee"'));
-  const cfEmpty = views.checkinForm({ role: 'athlete' }, null, {}, [], [],
-    { prep: [], tee: [], sideToss: [], frontToss: [], bp: [], machine: [], other: [] });
-  check('section with no history and no quick pick renders no chips row',
-    !cfEmpty.slice(cfEmpty.indexOf('drill-section-label">Other</div>')).includes('drill-chip"'));
-  check('quick picks render per section when history is empty',
-    ['Prep', 'Tee', 'Side Toss', 'Front Toss', 'BP', 'Machine'].every((d) => cfEmpty.includes(`data-drill="${d}"`)));
+  check('dropdown menu styles present', /\.drill-menu\s*\{/.test(css) && /\.drill-option\s*\{/.test(css));
+  check('token styles present', /\.drill-token\s*\{/.test(css));
   // Pregame subtitle (Bobby, Sep 17 2026): hitter form only.
   const cfSub = views.checkinForm({ role: 'athlete' }, null, {}, [], [], {});
   check('drills subtitle element present with default text',
@@ -103,14 +111,15 @@ async function main() {
     checkinSrc.includes("getElementById('drills-subtitle')") && checkinSrc.includes('input[name="environment"]'));
   const cfP = views.checkinForm({ role: 'athlete' }, null, {}, [], [],
     { prep: ['Arm Circles (Prep)'], tee: ['Fence Drill (Tee)'], sideToss: [], frontToss: [], bp: [], machine: [], other: [] });
-  check('Prep section renders before Off the tee',
-    cfP.indexOf('drill-section-label">Prep</div>') !== -1 &&
-    cfP.indexOf('drill-section-label">Prep</div>') < cfP.indexOf('drill-section-label">Off the tee</div>'));
-  check('prep-tagged drill lands in Prep section as a bare chip',
-    cfP.includes('data-drill="Arm Circles"') && cfP.includes('data-target="sec_prep"') &&
-    !cfP.includes('data-drill="Arm Circles (Prep)"'));
+  const optsP = drillOptsOf(cfP);
+  check('options JSON carries the prep-tagged drill under the prep section',
+    hasOpt(optsP, 'Arm Circles', 'prep') && !allOpts(optsP).some((x) => x.name.includes('(Prep)')));
+  check('seeded tokens render for pre-filled sections', cfP.includes('id="drill-initial"'));
   const cf3 = views.checkinForm({ role: 'athlete' }, null, {}, [], [{ name: 'Fence Drill', station: 'Tee' }], {});
-  check('routine button renders when routine set', cf3.includes('id="use-routine"') && cf3.includes('Edit daily routine'));
+  check('routine button renders when routine set', cf3.includes('id="use-routine"'));
+  check('routine button + edit link sit at the top of the drills block (before the combobox)',
+    cf3.indexOf('id="use-routine"') < cf3.indexOf('id="drill-input"') &&
+    cf3.indexOf('Edit daily routine') < cf3.indexOf('id="drill-input"'));
 
   // ---- Unit: drill-field pure helpers in public/app.js (extracted from source) ----
   const appSrc = fs.readFileSync(path.join(CWD, 'public/app.js'), 'utf8');
@@ -124,24 +133,27 @@ async function main() {
     }
     throw new Error('unbalanced braces: ' + name);
   }
-  const mergeDrillNames = new Function(extractFn(appSrc, 'mergeDrillNames') + '; return mergeDrillNames;')();
-  const toggleDrillName = new Function(extractFn(appSrc, 'toggleDrillName') + '; return toggleDrillName;')();
-  const drillSectionFor = new Function(extractFn(appSrc, 'drillSectionFor') + '; return drillSectionFor;')();
-  check('routine merge appends without dupes',
-    mergeDrillNames('Fence Drill (Tee)', ['Walk In Drill', 'Fence Drill (tee)']) === 'Fence Drill (Tee), Walk In Drill');
-  check('routine merge on empty field', mergeDrillNames('', ['A (Tee)', 'B']) === 'A (Tee), B');
-  check('routine merge no stray commas', mergeDrillNames('  A,, ', ['B']) === 'A, B');
-  check('routine merge keeps existing order', mergeDrillNames('B', ['A']) === 'B, A');
-  check('chip toggle adds', toggleDrillName('', 'Fence Drill (Tee)') === 'Fence Drill (Tee)');
-  check('chip toggle removes (case-insensitive)', toggleDrillName('A, FENCE DRILL (TEE)', 'Fence Drill (tee)') === 'A');
-  check('chip toggle no stray commas', toggleDrillName('A, B', 'B') === 'A');
-  // Routine station -> section input mapping (per-section "What did you do today?").
-  check('station maps to its section input',
-    drillSectionFor('Prep') === 'sec_prep' && drillSectionFor('Tee') === 'sec_tee' &&
-    drillSectionFor('Side toss') === 'sec_sidetoss' && drillSectionFor('Front toss') === 'sec_fronttoss' &&
-    drillSectionFor('BP') === 'sec_bp' && drillSectionFor('Batting Practice') === 'sec_bp' &&
-    drillSectionFor('Machine') === 'sec_machine');
-  check('unknown/blank station maps to Other', drillSectionFor('') === 'sec_other' && drillSectionFor('Cage') === 'sec_other');
+  const sectionKeyForStation = new Function(extractFn(appSrc, 'sectionKeyForStation') + '; return sectionKeyForStation;')();
+  const addDrillToken = new Function(extractFn(appSrc, 'addDrillToken') + '; return addDrillToken;')();
+  const serializeDrillTokens = new Function(extractFn(appSrc, 'serializeDrillTokens') + '; return serializeDrillTokens;')();
+  // Routine station -> picker section key.
+  check('station maps to its section key',
+    sectionKeyForStation('Prep') === 'prep' && sectionKeyForStation('Tee') === 'tee' &&
+    sectionKeyForStation('Side toss') === 'sideToss' && sectionKeyForStation('Front toss') === 'frontToss' &&
+    sectionKeyForStation('BP') === 'bp' && sectionKeyForStation('Batting Practice') === 'bp' &&
+    sectionKeyForStation('Machine') === 'machine');
+  check('unknown/blank station maps to other', sectionKeyForStation('') === 'other' && sectionKeyForStation('Cage') === 'other');
+  // Token add: no dupes (case-insensitive on name+section), no blanks.
+  const toks = [];
+  check('token add works', addDrillToken(toks, 'Fence Drill', 'tee') === true && toks.length === 1);
+  check('token add rejects dupes case-insensitively', addDrillToken(toks, 'fence drill', 'tee') === false && toks.length === 1);
+  check('same name in another section is a separate token', addDrillToken(toks, 'Fence Drill', 'bp') === true && toks.length === 2);
+  check('token add rejects blanks', addDrillToken(toks, '   ', 'tee') === false && toks.length === 2);
+  // Serialize: per-section comma-joined, every key present, blank = none.
+  const ser = serializeDrillTokens([{ name: 'A', section: 'prep' }, { name: 'B', section: 'tee' }, { name: 'C', section: 'tee' }]);
+  check('serialize groups by section', ser.prep === 'A' && ser.tee === 'B, C');
+  check('serialize keeps every section key present', ['prep', 'tee', 'sideToss', 'frontToss', 'bp', 'machine', 'other'].every((k) => typeof ser[k] === 'string'));
+  check('serialize of empty tokens is all blank (none)', Object.values(serializeDrillTokens([])).every((v) => v === ''));
 
   // ---- Boot 1: migration + seed ----
   fs.rmSync(DB, { force: true });
@@ -291,7 +303,7 @@ async function main() {
     check('org card shows My program toggle', html.includes('My program:'));
     check('toggle posts to /mine', html.includes(`/coach/organizations/${otherOrg}/mine`));
 
-    // ---- "What did you do today?" — 7 separated section inputs (Bobby, Sep 17 2026) ----
+    // ---- "What did you do today?" — searchable dropdown (Bobby, Sep 18 2026) ----
     const chipAthlete = run(`INSERT INTO users (email,password_hash,role,athlete_name,first_name,last_name,created_at,status) VALUES (?,?,?,?,?,?,?,?)`,
       'chips@test.com', h, 'athlete', 'Chip', 'Chip', 'Hitter', now, 'approved').lastInsertRowid;
     const addCheckin = (uid, drills, created) => run(`INSERT INTO checkins (user_id, athlete_name, created_at, drills_done) VALUES (?,?,?,?)`,
@@ -307,58 +319,48 @@ async function main() {
     check('no did_drills gate in form', !html.includes('name="did_drills"') && !html.includes('Did you do any drills?'));
     check('no single drills_done input anymore', !html.includes('name="drills_done"') && !html.includes('id="drills-input"'));
     check('drills block before Feel slider', html.indexOf('What did you do today?') < html.indexOf('name="feel"'));
-    // All 7 section inputs render, in order, every time.
+    // One combobox + section select + token tray + 7 hidden section inputs.
+    check('drill combobox renders', html.includes('id="drill-input"') && html.includes('id="drill-menu"') && html.includes('id="drill-tokens"'));
     const secNames = ['sec_prep', 'sec_tee', 'sec_sidetoss', 'sec_fronttoss', 'sec_bp', 'sec_machine', 'sec_other'];
-    check('7 section inputs render in order',
+    check('7 hidden section inputs render in order',
       secNames.every((n) => html.includes(`name="${n}"`)) &&
-      secNames.every((n, i, a) => i === 0 || html.indexOf(`name="${a[i - 1]}"`) < html.indexOf(`name="${n}"`)));
-    check('section labels in order',
+      secNames.every((n, i, a) => i === 0 || html.indexOf(`name="${a[i-1]}"`) < html.indexOf(`name="${n}"`)));
+    check('section select options in order',
       ['Prep', 'Off the tee', 'Side toss', 'Front toss', 'BP', 'Machine', 'Other']
-        .every((l, i, a) => i === 0 || html.indexOf(`drill-section-label">${a[i - 1]}</div>`) < html.indexOf(`drill-section-label">${l}</div>`)));
-    check('every section input has autocomplete', secNames.every((n) => new RegExp(`id="${n}"[^>]*list="drill-list"`).test(html)));
-    const chipCount = (name) => html.split(`data-drill="${name}"`).length - 1;
-    const secIdx = (label) => html.indexOf(`drill-section-label">${label}</div>`);
-    const chipTarget = (name) => (html.match(new RegExp(`data-drill="${name}"[^>]*data-target="([^"]+)"`)) || [])[1];
-    const inSection = (chip, label, nextLabel) => {
-      const c = html.indexOf(`data-drill="${chip}"`);
-      const s = secIdx(label);
-      const n = nextLabel ? secIdx(nextLabel) : Infinity;
-      return c > s && c < n;
-    };
-    // Chips toggle the BARE name into their own section's input.
-    check('tee history chip is bare and targets the tee section',
-      chipCount('Fence Drill') === 1 && chipTarget('Fence Drill') === 'sec_tee' && inSection('Fence Drill', 'Off the tee', 'Side toss'));
-    check('side toss chip targets the side toss section',
-      chipTarget('Walk In Drill') === 'sec_sidetoss' && inSection('Walk In Drill', 'Side toss', 'Front toss'));
-    check('untagged history chips land in Other', inSection('Old Drill One', 'Other', undefined) && inSection('New Drill Two', 'Other', undefined));
-    const prepChips = (html.match(/data-drill="[Pp][Rr][Ee][Pp]"/g) || []).length;
-    check('literal "prep" drill is a prep-section chip (quick pick excluded)', prepChips === 1 && inSection('prep', 'Prep', 'Off the tee'));
-    check('sections with no history still show their input, plus a quick pick',
-      html.includes('name="sec_fronttoss"') && html.includes('data-drill="Front Toss"') && chipTarget('Front Toss') === 'sec_fronttoss');
-    // Per-section quick picks: section name as a chip when not in history.
-    check('quick pick chip per section (Tee in tee section)',
-      html.includes('data-drill="Tee"') && chipTarget('Tee') === 'sec_tee');
-    // Case-insensitive dedupe across forms (string tag vs object station).
+        .every((l, i, a) => i === 0 || html.indexOf(`>${a[i-1]}</option>`) < html.indexOf(`>${l}</option>`)));
+    check('routine button + edit link above the combobox',
+      html.indexOf('Edit daily routine') < html.indexOf('id="drill-input"'));
+    // History drills land in the options JSON with their section, bare names.
+    const hasOptH = (name, section) => hasOpt(drillOptsOf(html), name, section);
+    check('tee history drill tagged tee in options', hasOptH('Fence Drill', 'tee'));
+    check('side toss history drill tagged sideToss in options', hasOptH('Walk In Drill', 'sideToss'));
+    check('untagged history drills land in other', hasOptH('Old Drill One', 'other') && hasOptH('New Drill Two', 'other'));
+    check('literal "prep" drill is a prep option', hasOptH('prep', 'prep'));
+    check('options use bare names (no trailing tags)',
+      !allOpts(drillOptsOf(html)).some((x) => /\(tee\)|\(side toss\)/i.test(x.name)));
+    // Case-insensitive dedupe across sections (string tag vs object station).
     addCheckin(chipAthlete, ['fence drill (TEE)'], '2026-09-13T10:00:00');
     r = await req('GET', '/checkin', null, 'chips');
     html = r.text;
-    const fenceChips = (html.match(/data-drill="[^"]*fence drill[^"]*"/gi) || []).length;
-    check('case-insensitive dedupe across sections', fenceChips === 1);
-    // Cap at 8 per section (all untagged → Other): 8 history + 0 quick picks in Other.
+    const optsDedupe = drillOptsOf(html);
+    const fenceOpts = allOpts(optsDedupe).filter((x) => x.name.toLowerCase() === 'fence drill').length;
+    check('case-insensitive dedupe across sections', fenceOpts === 1);
+    // Cap at 8 per section (all untagged → Other): D9/D10 fall off recent.
     const capAthlete = run(`INSERT INTO users (email,password_hash,role,athlete_name,first_name,last_name,created_at,status) VALUES (?,?,?,?,?,?,?,?)`,
       'cap@test.com', h, 'athlete', 'Cap', 'Cap', 'Tester', now, 'approved').lastInsertRowid;
     addCheckin(capAthlete, ['D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9', 'D10'], '2026-09-12T10:00:00');
     await login('cap', 'cap@test.com');
     r = await req('GET', '/checkin', null, 'cap');
     html = r.text;
-    const totalChips = html.split('drill-chip"').length - 1;
-    check('recent chips capped at 8 per section (+6 quick picks)', totalChips === 14 && chipCount('D9') === 0 && chipCount('D10') === 0);
-    // No history: inputs still render, quick picks only.
+    const capOpts = drillOptsOf(html);
+    const capNames = allOpts(capOpts).map((x) => x.name);
+    check('recent options capped at 8 per section', !capNames.includes('D9') && !capNames.includes('D10') && capNames.includes('D8'));
+    // No history: combobox still renders, recent group empty.
     await login('briggs', 'briggs@test.com');
     r = await req('GET', '/checkin', null, 'briggs');
     html = r.text;
-    check('inputs render for player with no history', secNames.every((n) => html.includes(`name="${n}"`)));
-    check('quick picks render for player with no history', ['Prep', 'Tee', 'Side Toss', 'Front Toss', 'BP', 'Machine'].every((d) => html.includes(`data-drill="${d}"`)));
+    check('combobox renders for player with no history',
+      html.includes('id="drill-input"') && secNames.every((n) => html.includes(`name="${n}"`)));
 
     // ---- C: check-in push gating ----
     // Gate SQL mirrors isMyProgramPlayer() in src/server.js exactly.
@@ -428,7 +430,7 @@ async function main() {
       check(`check-in ${i + 1} with Deep Tee Drill posts clean`, r.status === 302);
     }
     r = await req('GET', '/checkin', null, 'briggs');
-    check('submitted drill appears in the history picker (Off the tee)', r.text.includes('data-drill="Deep Tee Drill"') && r.text.includes('drill-section-label">Off the tee</div>'));
+    check('submitted drill appears in the dropdown options (tee)', hasOpt(drillOptsOf(r.text), 'Deep Tee Drill', 'tee'));
     r = await req('GET', '/', null, 'briggs');
     check("Skip's what-works learned the drill", r.text.includes('What you did on good days') && r.text.includes('Deep Tee Drill'));
 

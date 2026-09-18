@@ -700,3 +700,39 @@ a.stat-card { padding: 14px 8px; }
 .drawer-link { padding: 16px 20px; }
 .tabbar-link { min-height: 62px; }
 .topbar .iconbtn, .iconbtn { min-width: 44px; min-height: 44px; }
+/* "What did you do today?" searchable dropdown (Bobby, Sep 18 2026): one
+   compact combobox + section select + removable tokens. */
+.drill-top-actions { display: flex; align-items: center; gap: 16px; margin: 10px 0 2px; flex-wrap: wrap; }
+.drill-top-actions .btn-ghost { margin-top: 0; }
+.drill-edit-link { font-size: 14px; font-weight: 600; }
+.drill-combo-row { display: flex; gap: 8px; margin-top: 8px; align-items: stretch; }
+.drill-combo-row select { flex: 0 0 auto; width: auto; max-width: 128px; margin-top: 0; padding: 12px 8px; font-size: 15px; }
+.drill-combo { position: relative; flex: 1; min-width: 0; }
+.drill-combo input { margin-top: 0; }
+.drill-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 60;
+  background: var(--bg2); border: 1px solid var(--line); border-radius: 10px;
+  max-height: 280px; overflow-y: auto; box-shadow: 0 12px 32px rgba(0,0,0,.55);
+}
+.drill-menu-group {
+  padding: 8px 12px 4px; font-size: 11px; font-weight: 800;
+  text-transform: uppercase; letter-spacing: .6px; color: var(--muted);
+}
+.drill-option { padding: 10px 12px; font-size: 15px; cursor: pointer; }
+.drill-option.active { background: rgba(225,6,0,.18); }
+.drill-option-none { font-weight: 700; color: var(--muted); border-bottom: 1px solid var(--line); }
+.drill-option-sec { color: var(--muted); font-size: 13px; margin-left: 6px; }
+.drill-menu-hint { padding: 10px 12px; font-size: 13px; color: var(--muted); }
+.drill-tokens { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
+.drill-tokens:empty { margin: 0; }
+.drill-token {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--bg2); border: 1px solid var(--red); border-radius: 16px;
+  padding: 5px 4px 5px 12px; font-size: 13px; font-weight: 600;
+}
+.drill-token-sec { color: var(--muted); font-weight: 500; }
+.drill-token-x {
+  border: none; background: none; color: var(--muted);
+  font-size: 17px; line-height: 1; cursor: pointer; padding: 2px 7px;
+}
+.drill-token-x:active { color: var(--red); }

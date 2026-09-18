@@ -672,8 +672,47 @@ function checkinForm(user, error, values, drillNames, routine, recentGroups, act
   const envPills = ENVIRONMENTS
     .map((e) => `<label class="pill"><input type="radio" name="environment" value="${e}"${v.environment === e ? ' checked' : ''} required><span>${e}</span></label>`)
     .join('');
-  const datalist = (drillNames || [])
-    .map((d) => `<option value="${esc(d)}">`)
+  // "What did you do today?" searchable dropdown (Bobby, Sep 18 2026): one
+  // compact combobox replaces the 7 stacked section inputs. Options = the
+  // hitter's recent drills (tagged with their section) + the full drill
+  // registry; free-typed entries take the section select's value. Picks become
+  // removable tokens; "Didn't do this" clears them all. Tokens serialize into
+  // the hidden sec_* inputs on submit, so the server parser is untouched.
+  // Blank submits as none — nothing drill-related lands on the entry.
+  const bareDrill = (n) => String(n).replace(/\s*\([^()]*\)\s*$/, '').trim() || String(n).trim();
+  const seenOpt = new Set();
+  const recentOpts = [];
+  const groups = recentGroups && typeof recentGroups === 'object' ? recentGroups : {};
+  for (const s of DRILL_SECTIONS) {
+    const names = Array.isArray(groups[s.key]) ? groups[s.key] : [];
+    for (const n of names) {
+      const b = bareDrill(n);
+      const k = b.toLowerCase();
+      if (!b || seenOpt.has(k)) continue;
+      seenOpt.add(k);
+      recentOpts.push({ name: b, section: s.key });
+    }
+  }
+  const registryOpts = (drillNames || [])
+    .map((d) => String(d).trim())
+    .filter((d) => d && !seenOpt.has(d.toLowerCase()))
+    .map((d) => { seenOpt.add(d.toLowerCase()); return { name: d, section: null }; });
+  const drillOptionsJson = esc(JSON.stringify({ recent: recentOpts, registry: registryOpts }));
+  // Seed tokens from existing values (edit form / failed POST re-render).
+  const initialTokens = [];
+  for (const s of DRILL_SECTIONS) {
+    const raw = v[s.field] || (v.sections && v.sections[s.key]) || '';
+    for (const part of String(raw).split(',')) {
+      const name = part.trim();
+      if (name) initialTokens.push({ name, section: s.key });
+    }
+  }
+  const initialTokensJson = esc(JSON.stringify(initialTokens));
+  const hiddenSectionInputs = DRILL_SECTIONS
+    .map((s) => {
+      const secVal = v[s.field] || (v.sections && v.sections[s.key]) || '';
+      return `<input type="hidden" id="${s.field}" name="${s.field}" value="${esc(secVal)}">`;
+    })
     .join('');
   return layout({
     title: 'Check In',
@@ -687,33 +726,24 @@ function checkinForm(user, error, values, drillNames, routine, recentGroups, act
       <div class="pills">${envPills}</div>
       <div class="field-label">What did you do today?</div>
       <p class="hint" id="drills-subtitle" data-default="Everything you did \u2014 tee work, flips, BP, machine. Blank is fine.">Everything you did \u2014 tee work, flips, BP, machine. Blank is fine.</p>
-      <p class="hint">Tap to add — or just type. Blank is fine.</p>
-      ${DRILL_SECTIONS.map((s) => {
-        // "What did you do today?" sections (Bobby, Sep 17 2026): one input
-        // per section, each with its own history chips. Chips toggle the bare
-        // name into their own section's input (the section implies the tag).
-        // Inputs always render; chips rows are omitted when empty.
-        const secVal = v[s.field] || (v.sections && v.sections[s.key]) || '';
-        const groups = recentGroups && typeof recentGroups === 'object' ? recentGroups : {};
-        const names = Array.isArray(groups[s.key]) ? groups[s.key] : [];
-        const bare = (n) => String(n).replace(/\s*\([^()]*\)\s*$/, '').trim() || String(n).trim();
-        const seenNames = new Set(names.map((n) => String(n).toLowerCase()));
-        let chips = names.map((d) => {
-          const b = bare(d);
-          return `<button type="button" class="pill-link drill-chip" data-drill="${esc(b)}" data-target="${s.field}">${esc(b)}</button>`;
-        });
-        if (s.quick && !seenNames.has(s.quick.toLowerCase())) {
-          chips.push(`<button type="button" class="pill-link drill-chip" data-drill="${esc(s.quick)}" data-target="${s.field}">${esc(s.quick)}</button>`);
-        }
-        const chipsRow = chips.length
-          ? `<div class="drill-chips drill-chips-scroll">${chips.join('')}</div>` : '';
-        return `<div class="drill-section"><div class="drill-section-label">${s.label}</div>` +
-          `<input id="${s.field}" name="${s.field}" list="drill-list" placeholder="e.g. Fence drill, Walk In Drill" value="${esc(secVal)}">` +
-          `${chipsRow}</div>`;
-      }).join('')}
-      ${rt.length ? `<button type="button" id="use-routine" class="btn-ghost" data-routine="${routineJson}">Use my daily routine</button>` : ''}
-      <p class="hint"><a href="/routine">Edit daily routine →</a></p>
-      <p class="hint">Tip: add (prep), (tee), (side toss), (front toss), (BP), or (machine) after what you did &mdash; e.g. &quot;Fence drill (tee)&quot;.</p>
+      <div class="drill-top-actions">
+        ${rt.length ? `<button type="button" id="use-routine" class="btn-ghost" data-routine="${routineJson}">Use my daily routine</button>` : ''}
+        <a href="/routine" class="drill-edit-link">Edit daily routine →</a>
+      </div>
+      <div class="drill-combo-row">
+        <select id="drill-section" aria-label="Where you did it">
+          ${DRILL_SECTIONS.map((s) => `<option value="${s.key}">${s.label}</option>`).join('')}
+        </select>
+        <div class="drill-combo">
+          <input id="drill-input" type="text" placeholder="Search drills or type your own" autocomplete="off" autocapitalize="off" spellcheck="false" role="combobox" aria-expanded="false" aria-controls="drill-menu" aria-label="Add a drill">
+          <div id="drill-menu" class="drill-menu" role="listbox" hidden></div>
+        </div>
+      </div>
+      <div id="drill-tokens" class="drill-tokens" aria-live="polite"></div>
+      <p class="hint">Tap a drill to add it — or just type and hit enter. Leave blank if you didn't do drills; blank counts as none.</p>
+      <script type="application/json" id="drill-options">${drillOptionsJson}</script>
+      <script type="application/json" id="drill-initial">${initialTokensJson}</script>
+      ${hiddenSectionInputs}
       ${sliderField('feel', 'Feel', 'How good did you feel?', v.feel)}
       ${sliderField('confidence', 'Confidence', 'How confident did you feel?', v.confidence)}
       ${sliderField('focus', 'Focus', 'How locked in was your focus?', v.focus)}
@@ -721,7 +751,6 @@ function checkinForm(user, error, values, drillNames, routine, recentGroups, act
       <script src="/checkin.js"></script>
       <label>Session notes <span class="req" aria-hidden="true">*</span> <span class="hint-inline">(don't hold back — what you felt, what you saw, what was off)</span><span class="talk-wrap"><textarea id="session_notes" name="session_notes" rows="4" placeholder="How did it go? What did you feel?">${esc(v.session_notes || '')}</textarea><button type="button" class="mic-btn" data-target="session_notes" aria-label="Dictate instead of typing">🎙</button></span></label>
       <label>What worked <span class="hint-inline">(be specific — the exact drill, cue, or feel)</span><span class="talk-wrap"><textarea id="what_worked" name="what_worked" rows="2" placeholder="What clicked today?">${esc(v.what_worked || '')}</textarea><button type="button" class="mic-btn" data-target="what_worked" aria-label="Dictate instead of typing">🎙</button></span></label>
-      <datalist id="drill-list">${datalist}</datalist>
       <button type="submit" class="btn-primary">${isEdit ? 'Save changes' : 'Submit check-in'}</button>
     </form></div>`,
   });

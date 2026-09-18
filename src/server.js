@@ -4906,24 +4906,10 @@ async function sendResetEmail(to, link) {
 
 // ---- Account approvals: Bobby reviews every signup ----
 
-// New hitter signed up — tell Bobby so he can approve or decline them.
+// New hitter signed up — Bobby reviews every signup through the app
+// (Bobby, Sep 18 2026: no more signup emails to him — push only).
 async function notifyCoachOfSignup(req, email, name, organizationName) {
-  const m = mailer();
-  const coachEmail = (process.env.COACH_EMAIL || '').trim().toLowerCase();
-  if (!m || !coachEmail) {
-    console.warn('SIGNUP (no mail configured or no coach email):', email);
-    return;
-  }
-  const base = publicBaseUrl(req);
   const via = organizationName ? ` (via ${organizationName})` : '';
-  await m.transport.sendMail({
-    from: m.from,
-    to: coachEmail,
-    subject: `New Daily Hitter signup: ${name}`,
-    text:
-      `${name} (${email}) just signed up for Diamond Daily${via} and is waiting for your approval.\n\n` +
-      `Approve or decline them here:\n${base}/coach\n`,
-  });
   pushToCoaches(
     'New hitter waiting',
     `${name}${via} just signed up and needs your approval.`,

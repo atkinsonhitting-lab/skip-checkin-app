@@ -88,93 +88,218 @@
 
 })();
 
-  // ---- Check-in drill field: pure helpers (unit-tested via source extraction) ----
-  // Merge comma-separated drill names: additions go on the end, no dupes
-  // (case-insensitive), no stray commas.
-  function mergeDrillNames(current, additions) {
-    const parts = String(current || '').split(',').map((s) => s.trim()).filter(Boolean);
-    const seen = new Set(parts.map((p) => p.toLowerCase()));
-    for (const a of additions || []) {
-      const name = String(a || '').trim();
-      if (name && !seen.has(name.toLowerCase())) { seen.add(name.toLowerCase()); parts.push(name); }
-    }
-    return parts.join(', ');
-  }
-  // Toggle one drill name in the comma-separated field.
-  function toggleDrillName(current, name) {
-    const parts = String(current || '').split(',').map((s) => s.trim()).filter(Boolean);
-    const key = String(name || '').toLowerCase();
-    const idx = parts.findIndex((p) => p.toLowerCase() === key);
-    if (idx >= 0) parts.splice(idx, 1);
-    else if (key) parts.push(String(name).trim());
-    return parts.join(', ');
-  }
-  function syncDrillChips() {
-    // Each section chip tracks its own section input (data-target); a chip is
-    // active when its drill is present in that input's comma-separated value.
-    const chips = Array.from(document.querySelectorAll('.drill-chip[data-target]'));
-    if (!chips.length) return;
-    chips.forEach((chip) => {
-      const input = document.getElementById(chip.getAttribute('data-target'));
-      if (!input) return;
-      const present = new Set(input.value.split(',').map((s) => s.trim().toLowerCase()));
-      chip.classList.toggle('active', present.has(String(chip.dataset.drill || '').toLowerCase()));
-    });
-  }
-
-  // Map a routine drill station to its "What did you do today?" section input
-  // id. Unknown/blank stations land in Other (no tag is attached there).
-  function drillSectionFor(station) {
+  // ---- Check-in drill picker: pure helpers (unit-tested via source extraction) ----
+  // Routine station -> drill-picker section key.
+  function sectionKeyForStation(station) {
     const s = String(station || '').trim().toLowerCase();
-    if (s === 'prep') return 'sec_prep';
-    if (s === 'tee') return 'sec_tee';
-    if (s === 'side toss') return 'sec_sidetoss';
-    if (s === 'front toss') return 'sec_fronttoss';
-    if (s === 'bp' || s === 'batting practice') return 'sec_bp';
-    if (s === 'machine') return 'sec_machine';
-    return 'sec_other';
+    if (s === 'prep') return 'prep';
+    if (s === 'tee') return 'tee';
+    if (s === 'side toss') return 'sideToss';
+    if (s === 'front toss') return 'frontToss';
+    if (s === 'bp' || s === 'batting practice') return 'bp';
+    if (s === 'machine') return 'machine';
+    return 'other';
+  }
+  // Add a {name, section} token: no dupes (case-insensitive on name+section),
+  // no blanks. Returns true when the token was added.
+  function addDrillToken(tokens, name, section) {
+    const clean = String(name || '').trim();
+    if (!clean) return false;
+    const sec = String(section || 'other');
+    const key = sec + '|' + clean.toLowerCase();
+    for (const t of tokens) {
+      if (String(t.section || 'other') + '|' + String(t.name || '').toLowerCase() === key) return false;
+    }
+    tokens.push({ name: clean, section: sec });
+    return true;
+  }
+  // Serialize tokens into per-section comma-separated values for the hidden
+  // sec_* inputs. Every section key is always present ('' when empty), so a
+  // blank picker submits as none and nothing lands on the entry.
+  function serializeDrillTokens(tokens) {
+    const out = { prep: [], tee: [], sideToss: [], frontToss: [], bp: [], machine: [], other: [] };
+    for (const t of tokens || []) {
+      const k = Object.prototype.hasOwnProperty.call(out, t.section) ? t.section : 'other';
+      const name = String(t.name || '').trim();
+      if (name) out[k].push(name);
+    }
+    const joined = {};
+    for (const k of Object.keys(out)) joined[k] = out[k].join(', ');
+    return joined;
   }
 
-  // ---- Check-in: "What did you do today?" sections (Bobby, Sep 17 2026) ----
-  // 7 section inputs, not one text box. Chips toggle the bare drill name into
-  // their own section's input (data-target = the input id); "Use my daily
-  // routine" merges each routine item into its station's section — never wipes
-  // what the player already typed or tapped.
-  (function useRoutine() {
-    const btn = document.getElementById('use-routine');
-    if (!btn) return;
-    btn.addEventListener('click', () => {
-      let drills = [];
-      try { drills = JSON.parse(btn.dataset.routine || '[]'); } catch (e) { drills = []; }
-      if (!drills.length) return;
-      const bySection = {};
-      for (const d of drills) {
-        const id = drillSectionFor(d.station);
-        (bySection[id] = bySection[id] || []).push(String(d.name || '').trim());
-      }
-      for (const [id, names] of Object.entries(bySection)) {
-        const input = document.getElementById(id);
-        if (input) input.value = mergeDrillNames(input.value, names);
-      }
-      syncDrillChips();
+  // ---- Check-in: "What did you do today?" searchable dropdown (Bobby, Sep 18 2026) ----
+  // One compact combobox replaces the 7 stacked section inputs. Players search
+  // the dropdown or type their own; each pick is tagged with a delivery-method
+  // section (the select next to the input, or the option's own section for
+  // history picks). "Didn't do this" clears every token. Tokens serialize into
+  // the hidden sec_* inputs on submit, so the server parser is untouched.
+  (function drillCombo() {
+    const input = document.getElementById('drill-input');
+    if (!input) return;
+    const menu = document.getElementById('drill-menu');
+    const tokensEl = document.getElementById('drill-tokens');
+    const sectionSel = document.getElementById('drill-section');
+    const form = input.closest('form');
+    const SECTION_LABEL = { prep: 'Prep', tee: 'Tee', sideToss: 'Side toss', frontToss: 'Front toss', bp: 'BP', machine: 'Machine', other: 'Other' };
+    const SECTION_INPUT = { prep: 'sec_prep', tee: 'sec_tee', sideToss: 'sec_sidetoss', frontToss: 'sec_fronttoss', bp: 'sec_bp', machine: 'sec_machine', other: 'sec_other' };
+    function esc(s) {
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+    function readJson(id) {
+      const el = document.getElementById(id);
+      if (!el) return null;
+      try { return JSON.parse(el.textContent || 'null'); } catch (e) { return null; }
+    }
+    const opts = readJson('drill-options') || { recent: [], registry: [] };
+    const tokens = readJson('drill-initial') || [];
+    function renderTokens() {
+      tokensEl.innerHTML = tokens.map((t, i) =>
+        '<span class="drill-token">' + esc(t.name) + ' <span class="drill-token-sec">' + esc(SECTION_LABEL[t.section] || t.section) + '</span>' +
+        '<button type="button" class="drill-token-x" data-i="' + i + '" aria-label="Remove ' + esc(t.name) + '">\u00d7</button></span>'
+      ).join('');
+    }
+    tokensEl.addEventListener('click', (ev) => {
+      const b = ev.target.closest ? ev.target.closest('[data-i]') : null;
+      if (!b) return;
+      tokens.splice(Number(b.getAttribute('data-i')), 1);
+      renderTokens();
+      input.focus();
     });
-  })();
-
-  // ---- Check-in: quick-tap drill chips toggle entries in their section ----
-  (function drillChips() {
-    const chips = Array.from(document.querySelectorAll('.drill-chip[data-target]'));
-    if (!chips.length) return;
-    chips.forEach((chip) => {
-      const input = document.getElementById(chip.getAttribute('data-target'));
-      chip.addEventListener('click', () => {
-        if (!input) return;
-        input.value = toggleDrillName(input.value, chip.dataset.drill);
-        syncDrillChips();
+    // ---- dropdown ----
+    let items = []; // menu items: {act:'none'} | {act:'add', name, section|null}
+    let active = -1;
+    function matches(q) {
+      q = String(q || '').trim().toLowerCase();
+      const hit = (o) => !q || String(o.name).toLowerCase().indexOf(q) !== -1;
+      return {
+        recent: (opts.recent || []).filter(hit).slice(0, 8),
+        registry: (opts.registry || []).filter(hit).slice(0, 40),
+      };
+    }
+    function renderMenu() {
+      const m = matches(input.value);
+      items = [{ act: 'none' }];
+      let html = '<div class="drill-option drill-option-none" role="option" data-i="0">Didn\u2019t do this</div>';
+      if (m.recent.length) {
+        html += '<div class="drill-menu-group">Recent</div>';
+        m.recent.forEach((o) => {
+          items.push({ act: 'add', name: o.name, section: o.section });
+          html += '<div class="drill-option" role="option" data-i="' + (items.length - 1) + '">' + esc(o.name) +
+            ' <span class="drill-option-sec">' + esc(SECTION_LABEL[o.section] || '') + '</span></div>';
+        });
+      }
+      if (m.registry.length) {
+        html += '<div class="drill-menu-group">All drills</div>';
+        m.registry.forEach((o) => {
+          items.push({ act: 'add', name: o.name, section: null });
+          html += '<div class="drill-option" role="option" data-i="' + (items.length - 1) + '">' + esc(o.name) + '</div>';
+        });
+      }
+      if (!m.recent.length && !m.registry.length && String(input.value).trim()) {
+        html += '<div class="drill-menu-hint">No matches \u2014 hit enter to add \u201c' + esc(String(input.value).trim()) + '\u201d.</div>';
+      }
+      menu.innerHTML = html;
+      active = -1;
+    }
+    function openMenu() {
+      renderMenu();
+      menu.hidden = false;
+      input.setAttribute('aria-expanded', 'true');
+    }
+    function closeMenu() {
+      menu.hidden = true;
+      input.setAttribute('aria-expanded', 'false');
+      active = -1;
+    }
+    function isOpen() { return !menu.hidden; }
+    function highlight() {
+      const els = menu.querySelectorAll('.drill-option');
+      els.forEach((el, i) => el.classList.toggle('active', i === active));
+      if (active >= 0 && els[active] && els[active].scrollIntoView) {
+        els[active].scrollIntoView({ block: 'nearest' });
+      }
+    }
+    function defaultSection() { return (sectionSel && sectionSel.value) || 'other'; }
+    function commitTyped() {
+      const typed = String(input.value || '').trim();
+      if (!typed) return;
+      if (addDrillToken(tokens, typed, defaultSection())) {
+        renderTokens();
+        input.value = '';
+        closeMenu();
+      }
+    }
+    function pick(item) {
+      if (!item) return;
+      if (item.act === 'none') {
+        // "Didn't do this": clear everything so nothing lands on the entry.
+        tokens.length = 0;
+        renderTokens();
+        input.value = '';
+        closeMenu();
         input.focus();
-      });
+        return;
+      }
+      if (addDrillToken(tokens, item.name, item.section || defaultSection())) {
+        renderTokens();
+        input.value = '';
+        closeMenu();
+        input.focus();
+      }
+    }
+    input.addEventListener('focus', openMenu);
+    input.addEventListener('input', () => { if (!isOpen()) openMenu(); else renderMenu(); });
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape') { closeMenu(); return; }
+      if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+        ev.preventDefault();
+        if (!isOpen()) openMenu();
+        const n = items.length;
+        active = ev.key === 'ArrowDown' ? (active + 1) % n : (active - 1 + n) % n;
+        highlight();
+        return;
+      }
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        if (isOpen() && active >= 0 && active < items.length) pick(items[active]);
+        else commitTyped();
+      }
     });
-    // Mark chips already present when the form loads (e.g. after a failed POST).
-    syncDrillChips();
+    menu.addEventListener('mousedown', (ev) => {
+      const el = ev.target.closest ? ev.target.closest('.drill-option') : null;
+      if (!el) return;
+      ev.preventDefault(); // keep input focus; pick on mousedown before blur
+      pick(items[Number(el.getAttribute('data-i'))]);
+    });
+    document.addEventListener('click', (ev) => {
+      if (!ev.target.closest || !ev.target.closest('.drill-combo')) closeMenu();
+    });
+    // "Use my daily routine" (top of the section, Bobby Sep 18 2026): merges
+    // each routine item in as a token under its station's section — never
+    // wipes what the player already picked or typed.
+    const routineBtn = document.getElementById('use-routine');
+    if (routineBtn) routineBtn.addEventListener('click', () => {
+      let drills = [];
+      try { drills = JSON.parse(routineBtn.dataset.routine || '[]'); } catch (e) { drills = []; }
+      let added = false;
+      for (const d of drills) {
+        if (addDrillToken(tokens, String(d.name || ''), sectionKeyForStation(d.station))) added = true;
+      }
+      if (added) renderTokens();
+      input.focus();
+    });
+    // Serialize tokens into the hidden sec_* inputs on submit. A leftover
+    // typed-but-uncommitted entry is committed first so nothing is lost.
+    if (form) form.addEventListener('submit', () => {
+      commitTyped();
+      const bySection = serializeDrillTokens(tokens);
+      for (const k of Object.keys(SECTION_INPUT)) {
+        const el = document.getElementById(SECTION_INPUT[k]);
+        if (el) el.value = bySection[k];
+      }
+    });
+    renderTokens();
   })();
 
   // ---- Coach dashboard: filter hitters as you type + by role ----
