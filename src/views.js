@@ -1383,7 +1383,6 @@ function pendingApprovalCards(pending, canEdit) {
 function coachApprovalsPage(user, pending, waitingOnParent) {
   const n = (pending || []).length;
   const canEdit = user.role === 'coach' && user.canEdit !== false;
-  const restricted = !!(opts && opts.restricted);
   return layout({
     title: 'Approvals',
     user,
@@ -2528,7 +2527,6 @@ function librarySection(library) {
 
 function coachLibraryPage(user, cats, activeCat, videos, playing) {
   const canEdit = user.role === 'coach' && user.canEdit !== false;
-  const restricted = !!(opts && opts.restricted);
   const pills = cats
     .map(
       (c) =>
@@ -2733,7 +2731,6 @@ function coachSkipPage(user, entries, hitters, thread, chatEnabled, saved, propo
   const brain = require('./brain');
   const skipImg = `<img src="/skip-avatar.webp" class="skip-avatar" alt="Skip">`;
   const canEdit = user.role === 'coach' && user.canEdit !== false;
-  const restricted = !!(opts && opts.restricted);
   const msgs = (thread || [])
     .map(
       (m) =>
