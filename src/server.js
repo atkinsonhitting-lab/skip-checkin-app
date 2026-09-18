@@ -4246,6 +4246,62 @@ app.post('/api/checkins/:id/skip-rating', (req, res) => {
   res.json({ ...row, drills_done: safeParseDrills(row.drills_done) });
 });
 
+// POST /api/remote-programs/extend-month — roll a remote athlete's program
+// date_range forward one month when their monthly payment is confirmed.
+// Body: { "athlete": "<name>" }. Auth: SKIP_API_KEY (x-api-key header or ?key=).
+// New range: start = old end date, end = old end + 1 calendar month (day clamped
+// to the month's length). Returns { athlete_name, old_range, new_range }.
+// 400 = missing athlete, 401 = bad key, 404 = unknown athlete,
+// 422 = date_range missing or unparseable.
+function clampDay(year, monthIdx, day) {
+  const last = new Date(year, monthIdx + 1, 0).getDate();
+  return Math.min(day, last);
+}
+function addOneMonthClamped(d) {
+  const r = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+  r.setDate(clampDay(r.getFullYear(), r.getMonth(), d.getDate()));
+  return r;
+}
+function fmtMD(d) {
+  return `${d.getMonth() + 1}/${d.getDate()}`;
+}
+app.post('/api/remote-programs/extend-month', (req, res) => {
+  if (!checkApiKey(req, res)) return;
+  const name = String((req.body || {}).athlete || '').trim();
+  if (!name) return res.status(400).json({ error: 'athlete is required' });
+  const progId = remoteProgramForName(name);
+  if (!progId) return res.status(404).json({ error: 'no remote program for athlete' });
+  const row = db.prepare('SELECT athlete_name, program_json FROM remote_programs WHERE id = ?').get(progId);
+  let prog = {};
+  try {
+    prog = JSON.parse(row.program_json || '{}') || {};
+  } catch {
+    prog = {};
+  }
+  const oldRange = String(prog.date_range || '').trim();
+  const m = oldRange.match(/(\d{1,2})\/(\d{1,2})\s*[–—-]\s*(\d{1,2})\/(\d{1,2})/);
+  if (!m) return res.status(422).json({ error: 'date_range missing or unparseable', date_range: oldRange });
+  const [, , , eM, eD] = m.map(Number);
+  if (eM < 1 || eM > 12 || eD < 1 || eD > 31) {
+    return res.status(422).json({ error: 'date_range has invalid end date', date_range: oldRange });
+  }
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const SIX_MONTHS = 1000 * 60 * 60 * 24 * 183;
+  let end = new Date(today.getFullYear(), eM - 1, clampDay(today.getFullYear(), eM - 1, eD));
+  if (end - today > SIX_MONTHS) end.setFullYear(end.getFullYear() - 1);
+  if (today - end > SIX_MONTHS) end.setFullYear(end.getFullYear() + 1);
+  const newEnd = addOneMonthClamped(end);
+  const newRange = `${fmtMD(end)}–${fmtMD(newEnd)}`;
+  prog.date_range = newRange;
+  db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?').run(
+    JSON.stringify(prog),
+    new Date().toISOString(),
+    progId
+  );
+  res.json({ athlete_name: row.athlete_name, old_range: oldRange, new_range: newRange });
+});
+
 // ---- Talk to Skip (AI chat) ----
 //
 // GET /chat renders the chat page. POST /api/chat takes { message } and
