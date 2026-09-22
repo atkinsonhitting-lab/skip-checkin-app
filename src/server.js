@@ -6463,7 +6463,16 @@ function leadRateOk(ip) {
   rec.count += 1;
   return rec.count <= LEAD_RATE_MAX;
 }
+// CORS: the public application form lives on a static page (different origin),
+// so the endpoint answers preflights and labels every response shareable.
+app.options('/api/leads', (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, x-leads-secret');
+  res.status(204).end();
+});
 app.post('/api/leads', (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
   const secret = process.env.LEADS_API_SECRET;
   if (!secret) return res.status(503).json({ error: 'leads endpoint not configured' });
   const provided = req.get('x-leads-secret') || req.query.secret || req.body.secret;
