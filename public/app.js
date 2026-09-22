@@ -536,6 +536,25 @@
   });
 })();
 
+// ---- Keep the bottom tab bar pinned when the iOS keyboard opens ----
+// iOS positions position:fixed;bottom:0 relative to the visual viewport,
+// so the tab bar rides up above the keyboard and drops back down when it
+// closes. Counter-translate it by the keyboard height so it stays put
+// (tucked behind the keyboard while typing) instead of jumping.
+(function pinTabbar() {
+  var tabbar = document.getElementById('tabbar');
+  if (!tabbar) return;
+  var vv = window.visualViewport;
+  if (!vv) return;
+  function pin() {
+    var kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    tabbar.style.transform = kb > 1 ? 'translateY(' + Math.round(kb) + 'px)' : '';
+  }
+  vv.addEventListener('resize', pin);
+  vv.addEventListener('scroll', pin);
+  pin();
+})();
+
   // ---- Compact day picker: <select data-autosubmit> submits its form ----
   document.addEventListener('change', function (e) {
     if (e.target && e.target.hasAttribute && e.target.hasAttribute('data-autosubmit')) {
