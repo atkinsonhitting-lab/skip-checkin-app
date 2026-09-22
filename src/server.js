@@ -3069,6 +3069,22 @@ function intakeTokenValid(tok) {
   const cur = getIntakeToken();
   return !!(tok && cur && tok === cur);
 }
+// Per-lead questionnaire invite (Sep 2026): a token bound to a website-
+// application lead. Opening it pre-fills the form from the lead's application.
+function intakeInviteFor(tok) {
+  if (!tok) return null;
+  try { return db.prepare('SELECT * FROM intake_invites WHERE token = ?').get(tok) || null; }
+  catch (e) { return null; }
+}
+function leadPrefillValues(lead) {
+  const parts = String((lead && lead.name) || '').trim().split(/\s+/).filter(Boolean);
+  return {
+    first_name: parts[0] || '',
+    last_name: parts.slice(1).join(' ') || '',
+    phone: (lead && lead.phone) || '',
+    goals_90: (lead && lead.goals) || '',
+  };
+}
 
 // ---- Progression intelligence (Sep 2026) ----
 // When Bobby drafts the NEXT 4-week block, the app reads the athlete's logged
@@ -3301,20 +3317,32 @@ function progressionRead(userId) {
 }
 app.get('/intake/:token', (req, res) => {
   if (req.user) return res.redirect('/');
+  // Lead-bound invite: pre-fill name, phone, and goals from the application.
+  const invite = intakeInviteFor(req.params.token);
+  if (invite) {
+    const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(invite.lead_id);
+    return res.send(views.intakeFormPage(req.params.token, null, leadPrefillValues(lead), { prefillLead: lead }));
+  }
   if (!intakeTokenValid(req.params.token)) return res.status(404).send('Not found.');
   res.send(views.intakeFormPage(req.params.token));
 });
 app.post('/intake/:token/submit', (req, res) => {
-  if (!intakeTokenValid(req.params.token)) return res.status(404).send('Not found.');
+  // Lead-bound invite tokens work alongside the shared standalone token.
+  const invite = intakeInviteFor(req.params.token);
+  if (!invite && !intakeTokenValid(req.params.token)) return res.status(404).send('Not found.');
+  const lead = invite ? db.prepare('SELECT * FROM leads WHERE id = ?').get(invite.lead_id) : null;
+  const prefillOpts = lead ? { prefillLead: lead } : undefined;
   const ip = req.ip;
   if (!attemptAllowed(ip)) {
-    return res.send(views.intakeFormPage(req.params.token, 'Too many attempts. Wait a few minutes and try again.', req.body));
+    return res.send(views.intakeFormPage(req.params.token, 'Too many attempts. Wait a few minutes and try again.', req.body, prefillOpts));
   }
   const fail = (msg) => {
     attemptFailed(ip);
-    return res.send(views.intakeFormPage(req.params.token, msg, req.body));
+    return res.send(views.intakeFormPage(req.params.token, msg, req.body, prefillOpts));
   };
   const a = parseIntakeBody(req.body);
+  // Carry the application age/level into the answers so Bobby sees it on review.
+  if (lead && lead.age_level) a.age_level_from_application = String(lead.age_level).slice(0, 60);
   if (!a.first_name || !a.last_name) return fail('Enter your first and last name.');
   if (!validEmail(a.email)) return fail('Enter a valid email address.');
   if (db.prepare('SELECT id FROM users WHERE email = ?').get(a.email)) {
@@ -3362,6 +3390,13 @@ app.post('/intake/:token/submit', (req, res) => {
     .run(a.email, hash, 'athlete', athleteName, a.first_name, a.last_name, nowIso, status, orgId, a.date_of_birth, 'hitter', nowIso, '1', a.parent_name || null, a.parent_email || null, pInfo.lastInsertRowid);
   db.prepare('INSERT INTO intake_responses (user_id, answers_json, created_at) VALUES (?, ?, ?)')
     .run(uInfo.lastInsertRowid, JSON.stringify(a), nowIso);
+  // Lead-bound submission: link the new account back to the lead, mark the
+  // invite used, and move the lead to enrolled.
+  if (invite && lead) {
+    db.prepare('UPDATE intake_responses SET lead_id = ? WHERE user_id = ?').run(lead.id, uInfo.lastInsertRowid);
+    db.prepare('UPDATE intake_invites SET used_at = ? WHERE id = ?').run(nowIso, invite.id);
+    db.prepare("UPDATE leads SET status = 'enrolled' WHERE id = ?").run(lead.id);
+  }
   // Welcome token: sets their password without needing email (30-day expiry).
   const token = crypto.randomBytes(32).toString('hex');
   const expires = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
@@ -4767,9 +4802,12 @@ app.get('/coach', requireCoachAny, (req, res) => {
   const me = realUser(req);
   const analytics = coachAnalytics(scope, stats);
   // Website application leads: global coaches only (Bobby's business).
+  // invite_token = an unused questionnaire link already made for this lead.
   let leads = [];
   if (!me.organizationId) {
-    leads = db.prepare('SELECT * FROM leads ORDER BY submitted_at DESC LIMIT 25').all();
+    leads = db.prepare(`SELECT l.*,
+      (SELECT token FROM intake_invites WHERE lead_id = l.id AND used_at = '' ORDER BY id DESC LIMIT 1) AS invite_token
+      FROM leads l ORDER BY submitted_at DESC LIMIT 25`).all();
   }
   res.send(
     views.coachHomePage(me, quiet, latest, pending, userPushSubscriptions(req.user.id).length > 0, analytics, leads)
@@ -6460,6 +6498,25 @@ app.post('/coach/leads/:id/status', requireGlobalCoachAny, requireCoach, (req, r
   if (!['new', 'contacted', 'enrolled', 'archived'].includes(status)) return res.status(400).send('Bad status');
   db.prepare('UPDATE leads SET status = ? WHERE id = ?').run(status, id);
   res.redirect('/coach#leads');
+});
+
+// Send questionnaire to a website-application lead: generates a questionnaire
+// link bound to the lead, so the form pre-fills from their application.
+// Bobby texts the link to the athlete after the call.
+app.post('/coach/leads/:id/questionnaire', requireGlobalCoachAny, requireCoach, (req, res) => {
+  const id = Number(req.params.id);
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(id);
+  if (!lead) return res.status(404).send('Lead not found.');
+  const nowIso = new Date().toISOString();
+  let inv = db.prepare("SELECT * FROM intake_invites WHERE lead_id = ? AND used_at = '' ORDER BY id DESC LIMIT 1").get(id);
+  if (!inv) {
+    const token = crypto.randomBytes(32).toString('hex');
+    const info = db.prepare('INSERT INTO intake_invites (token, lead_id, created_at, created_by) VALUES (?, ?, ?, ?)')
+      .run(token, id, nowIso, (realUser(req) || {}).email || '');
+    inv = { id: info.lastInsertRowid, token };
+  }
+  if (lead.status === 'new') db.prepare("UPDATE leads SET status = 'contacted' WHERE id = ?").run(id);
+  res.send(views.leadQuestionnaireLinkPage(realUser(req), lead, `${publicBaseUrl(req)}/intake/${inv.token}`));
 });
 
 // New hitter signed up — Bobby reviews every signup through the app

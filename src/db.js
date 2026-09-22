@@ -1025,6 +1025,24 @@ db.exec(`CREATE TABLE IF NOT EXISTS intake_responses (
   created_at TEXT NOT NULL DEFAULT ''
 );`);
 db.exec('CREATE INDEX IF NOT EXISTS idx_intake_user ON intake_responses(user_id);');
+// Per-lead questionnaire invites (Sep 2026): Bobby sends a questionnaire link
+// bound to a website-application lead, so the form pre-fills from the lead's
+// application instead of asking for it all again.
+db.exec(`CREATE TABLE IF NOT EXISTS intake_invites (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  token TEXT UNIQUE NOT NULL,
+  lead_id INTEGER NOT NULL REFERENCES leads(id),
+  created_at TEXT NOT NULL DEFAULT '',
+  used_at TEXT NOT NULL DEFAULT '',
+  created_by TEXT NOT NULL DEFAULT ''
+);`);
+db.exec('CREATE INDEX IF NOT EXISTS idx_intake_invites_token ON intake_invites(token);');
+db.exec('CREATE INDEX IF NOT EXISTS idx_intake_invites_lead ON intake_invites(lead_id);');
+// Link each questionnaire submission back to the lead it came from (if any).
+{
+  const cols = db.prepare('PRAGMA table_info(intake_responses)').all().map((c) => c.name);
+  if (!cols.includes('lead_id')) db.exec('ALTER TABLE intake_responses ADD COLUMN lead_id INTEGER;');
+}
 // 4-week training blocks (Sep 2026): each remote program tracks its current
 // block. block_start = ISO date the block began; block_number counts from 1;
 // block_notified_at marks when Bobby was pinged that the block ended;

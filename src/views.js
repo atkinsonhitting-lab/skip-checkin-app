@@ -1861,6 +1861,9 @@ function coachHomePage(user, quiet, latest, pending, pushOn, analytics, leads) {
         ${l.goals ? `<div class="hint" style="margin-top:4px">${esc(l.goals)}</div>` : ''}
         <div style="display:flex;gap:8px;margin:8px 0 0;flex-wrap:wrap;align-items:center">
           ${tel ? `<a class="btn-small" href="tel:${esc(tel)}">Call</a><a class="btn-small btn-quiet" href="sms:${esc(tel)}">Text</a>` : ''}
+          ${canEdit ? `<form method="post" action="/coach/leads/${l.id}/questionnaire" style="margin:0">
+            <button class="btn-small" type="submit">${l.invite_token ? 'Questionnaire link' : 'Send questionnaire'}</button>
+          </form>` : ''}
           ${canEdit ? `<form method="post" action="/coach/leads/${l.id}/status" style="margin:0;display:flex;gap:6px;align-items:center">
             <select name="status" aria-label="Lead status">${statusOpts}</select>
             <button class="btn-small btn-quiet" type="submit">Update</button>
@@ -2167,6 +2170,34 @@ function intakeSection(intake, canEdit) {
   <script>
   (function(){var b=document.getElementById('intake-copy');if(!b)return;b.addEventListener('click',function(){var i=document.getElementById('intake-link');i.select();var done=function(){b.textContent='Copied';setTimeout(function(){b.textContent='Copy'},1500)};if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(i.value).then(done).catch(function(){document.execCommand('copy');done()})}else{document.execCommand('copy');done()}});})();
   </script>`;
+}
+
+// Questionnaire link bound to a website-application lead (Sep 2026): Bobby
+// copies it and texts it to the athlete after the call. Their name, phone,
+// and goals are already filled in when they open it.
+function leadQuestionnaireLinkPage(user, lead, link) {
+  const tel = String((lead && lead.phone) || '').replace(/[^\d+]/g, '');
+  const text = encodeURIComponent(`Hey ${String((lead && lead.name) || '').split(' ')[0] || 'there'} — here's your Atkinson Hitting intake questionnaire. Your application info is already filled in: ${link}`);
+  return layout({
+    title: 'Questionnaire link',
+    user,
+    tabs: [],
+    body: `<div class="login-card card">
+      <h1 class="page-title">Questionnaire ready</h1>
+      <p class="hint">Text this link to <strong>${esc(lead.name || '')}</strong> — their name, phone, and goals are already filled in from their application.</p>
+      <div class="intake-linkrow">
+        <input type="text" readonly value="${esc(link)}" id="qlink" class="input-sm" style="flex:1;min-width:0" onclick="this.select()">
+        <button type="button" class="btn btn-sm" id="qcopy">Copy</button>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+        ${tel ? `<a class="btn btn-sm" href="sms:${esc(tel)}?body=${text}">Text it to them</a>` : ''}
+        <a class="btn btn-sm btn-quiet" href="/coach#leads">Back to applications</a>
+      </div>
+    </div>
+    <script>
+    (function(){var b=document.getElementById('qcopy');if(!b)return;b.addEventListener('click',function(){var i=document.getElementById('qlink');i.select();var done=function(){b.textContent='Copied';setTimeout(function(){b.textContent='Copy'},1500)};if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(i.value).then(done).catch(function(){document.execCommand('copy');done()})}else{document.execCommand('copy');done()}});})();
+    </script>`,
+  });
 }
 
 // Coaches with dashboard access — full access or view-only. Only a full
@@ -3558,8 +3589,16 @@ function settingsPage(user, opts) {
 // Detailed multi-step intake. Bobby: "everything knowable about a guy" —
 // thorough, organized in sections with a progress indicator.
 
-function intakeFormPage(token, err, values) {
+function intakeFormPage(token, err, values, opts) {
   const v = values || {};
+  const pre = opts && opts.prefillLead ? opts.prefillLead : null;
+  // Lead-bound link: the athlete already gave us the basics on the website
+  // application — show what's pre-filled so they can confirm, not re-type.
+  const prefillBanner = pre
+    ? `<div class="card" style="margin:0 0 12px;border-left:3px solid var(--accent,#2e7d32)">` +
+      `<strong>✓ Already got your application${pre.age_level ? ` (${esc(pre.age_level)})` : ''}.</strong> ` +
+      `We filled in your name, phone, and goals below — check they're right and fix anything that's off.</div>`
+    : '';
   const ival = (n) => esc(String((v[n] != null ? v[n] : '') || ''));
   const ivc = (n, val) => {
     const cur = v[n];
@@ -3579,6 +3618,7 @@ function intakeFormPage(token, err, values) {
       <img src="/diamond-daily-logo.jpg" class="brand-logo-full" alt="Diamond Daily">
       <h1 class="page-title" style="margin-top:4px">Athlete intake</h1>
       <p class="hint">This is how Coach Bobby builds your program — the more detail you give, the better it fits. Takes most guys 10–15 minutes.</p>
+      ${prefillBanner}
       <div class="intake-progress"><div class="intake-bar"><div id="ibar"></div></div><div id="istep-label" class="hint"></div></div>
       ${err ? `<div class="error">${esc(err)}</div>` : ''}
       <form method="post" action="/intake/${esc(token)}/submit" class="form" id="intake-form" novalidate>
@@ -3994,6 +4034,7 @@ module.exports = {
   DRILL_SECTIONS,
   intakeFormPage,
   intakeDetailPage,
+  leadQuestionnaireLinkPage,
   welcomePage,
   waiverPage,
   substitutePage,
