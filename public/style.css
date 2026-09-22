@@ -796,3 +796,54 @@ a.stat-card { padding: 14px 8px; }
 .watch-link:active { background: var(--red); border-color: var(--red); color: #fff; }
 .checkrow .watch-link { margin-left: auto; }
 .routine-row .watch-link { margin-left: auto; }
+
+/* Status pills (Sep 2026): progression read, waiver status, draft flags. */
+.pill, .pill-draft, .pill-good, .pill-warn, .pill-bad {
+  display: inline-block; padding: 3px 10px; border-radius: 999px;
+  font-size: 12px; font-weight: 700; white-space: nowrap;
+  border: 1px solid var(--line); background: var(--bg2); color: var(--text);
+}
+.pill-draft { border-color: var(--warn); color: var(--warn); }
+.pill-good { border-color: var(--ok); color: var(--ok); }
+.pill-warn { border-color: var(--warn); color: var(--warn); }
+.pill-bad { border-color: var(--bad); color: var(--bad); }
+/* Progression read card (Sep 2026). */
+.prog-read { border-left: 3px solid var(--red); }
+.prog-lines, .prog-adj { margin: 8px 0; padding-left: 0; list-style: none; }
+.prog-lines li, .prog-adj li { margin: 6px 0; font-size: 14px; line-height: 1.45; }
+.prog-adj li { padding-left: 18px; position: relative; }
+.prog-adj li::before { content: "→"; position: absolute; left: 0; color: var(--red); font-weight: 700; }
+
+/* ---- Intake questionnaire / waiver / substitution (Sep 2026) ---- */
+.intake-card { max-width: 640px; margin: 0 auto; }
+.intake-progress { margin: 12px 0 4px; }
+.intake-bar { height: 8px; border-radius: 4px; background: #eee; overflow: hidden; }
+.intake-bar #ibar { height: 100%; width: 0; background: var(--red, #c00); border-radius: 4px; transition: width 0.25s ease; }
+.js .istep { display: none; border: 0; padding: 0; margin: 0; }
+.js .istep.active { display: block; }
+.istep-title { font-size: 20px; font-weight: 700; margin: 12px 0 4px; padding: 0; }
+.pick { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid #e2e2e2; border-radius: 10px; margin: 8px 0; cursor: pointer; }
+.pick input { margin-top: 3px; }
+.pick-group.pick-inline { display: flex; flex-wrap: wrap; gap: 8px; }
+.pick.chip { margin: 0; padding: 8px 12px; }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+@media (max-width: 480px) { .two-col, .three-col { grid-template-columns: 1fr; } }
+.intake-nav { display: flex; gap: 10px; margin-top: 18px; }
+.intake-nav .btn, .intake-nav .btn-primary { flex: 1; }
+.field-err { outline: 2px solid var(--red, #c00); border-radius: 6px; }
+.group-err { outline: 2px solid var(--red, #c00); border-radius: 10px; padding: 6px; }
+.waiver-text { max-height: 300px; overflow-y: auto; border: 1px solid #e2e2e2; border-radius: 10px; padding: 4px 14px; margin: 12px 0; font-size: 14px; line-height: 1.55; }
+.waiver-text p { margin: 10px 0; }
+.pill-draft { display: inline-block; background: #fff3cd; color: #856404; border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 700; }
+.pill-warn { display: inline-block; background: #fdecea; color: #a33; border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 700; }
+.draft-banner { background: #fff3cd; border: 1px solid #ffe082; border-radius: 10px; padding: 12px 14px; margin: 12px 0; font-size: 14px; }
+/* Warm-up block on lifting days */
+.warmup-list { margin: 6px 0 4px; padding-left: 20px; font-size: 14px; line-height: 1.6; }
+/* Mid-workout substitution */
+.sub-link { font-size: 12px; color: #555; text-decoration: underline; }
+.sub-badge { display: inline-block; background: #eef4ff; color: #1a4fa0; border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 700; margin: 4px 0; }
+.sub-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; border: 1px solid #e2e2e2; border-radius: 10px; padding: 10px 12px; margin: 8px 0; }
+
+/* Session order toggle (athlete program page) */
+.order-toggle { display: flex; align-items: center; gap: 8px; margin: 10px 0 4px; flex-wrap: wrap; }

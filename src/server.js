@@ -185,6 +185,11 @@ function toReqUser(row) {
     teamId: row.team_id || null,
     dateOfBirth: row.date_of_birth || null,
     playerType: row.player_type || 'hitter',
+    // Liability waiver (Sep 2026): athletes with a program sign before opening it.
+    waiverSignedAt: row.waiver_signed_at || null,
+    waiverName: row.waiver_name || null,
+    waiverParentName: row.waiver_parent_name || null,
+    waiverVersion: row.waiver_version || null,
     // View-only coaches (can_edit=0) see everything but change nothing.
     canEdit: row.can_edit == null ? true : row.can_edit !== 0,
   };
@@ -579,14 +584,14 @@ function viewerIsOrgCoach(req) {
 
 function attachUser(req, res, next) {
   if (req.session && req.session.userId) {
-    const row = db.prepare('SELECT id, email, role, athlete_name, first_name, last_name, status, remote_program_id, can_edit, organization_id, team_id, date_of_birth, player_type FROM users WHERE id = ?').get(req.session.userId);
+    const row = db.prepare('SELECT id, email, role, athlete_name, first_name, last_name, status, remote_program_id, can_edit, organization_id, team_id, date_of_birth, player_type, waiver_signed_at, waiver_name, waiver_parent_name, waiver_version FROM users WHERE id = ?').get(req.session.userId);
     if (row) {
       req.user = decorateUser(toReqUser(row));
       // "View as hitter": the coach browses the app exactly as this hitter
       // sees it. req.user becomes the hitter; the real coach stays on
       // req.coachUser so coach-only routes keep working.
       if (row.role === 'coach' && req.session.viewAsUserId) {
-        const t = db.prepare("SELECT id, email, role, athlete_name, first_name, last_name, status, remote_program_id, organization_id, team_id, date_of_birth, player_type FROM users WHERE id = ? AND role != 'coach'").get(req.session.viewAsUserId);
+        const t = db.prepare("SELECT id, email, role, athlete_name, first_name, last_name, status, remote_program_id, organization_id, team_id, date_of_birth, player_type, waiver_signed_at, waiver_name, waiver_parent_name, waiver_version FROM users WHERE id = ? AND role != 'coach'").get(req.session.viewAsUserId);
         if (t) {
           req.coachUser = req.user;
           req.user = decorateUser(toReqUser(t));
@@ -1731,7 +1736,7 @@ function getProgram(id) {
   let prog = null;
   try { prog = JSON.parse(row.program_json || '{}'); } catch (e) { prog = {}; }
   if (!prog || typeof prog !== 'object') prog = {};
-  return { id: row.id, athlete_name: row.athlete_name, updated_at: row.updated_at, prog };
+  return { id: row.id, athlete_name: row.athlete_name, updated_at: row.updated_at, prog, session_order: row.session_order || 'hitting_first' };
 }
 // ---- Programs tab: lifting + check-offs (Sep 2026) ----
 // Chicago date string (YYYY-MM-DD) used as the check-off day key.
@@ -1739,20 +1744,21 @@ function chiToday() {
   return chiDay(new Date());
 }
 // Classify a program block category into a Programs sub-tab.
-// Bobby's order: lifters get MOBILITY -> HITTING -> LIFTING (med ball work
-// lives INSIDE the Lifting tab); everyone else gets MOBILITY -> MED BALL ->
-// HITTING. Prep work always stays with Hitting.
+// Bobby's order: lifters get MOBILITY -> HITTING -> METABOLIC -> LIFTING (med
+// ball work lives INSIDE the Lifting tab); everyone else gets MOBILITY ->
+// MED BALL -> HITTING -> METABOLIC. Prep work always stays with Hitting.
 function blockKind(category) {
   const n = String(category || '');
   if (/med\s*ball/i.test(n)) return 'medball';
   if (/mobility/i.test(n)) return 'mobility';
   if (/prep/i.test(n)) return 'prep';
+  if (/metabol|conditioning/i.test(n)) return 'metabolic';
   return 'hit';
 }
 function splitProgramBlocks(p) {
   const prog = (p && p.prog) || {};
   const routine = Array.isArray(prog.routine) ? prog.routine : [];
-  const out = { mobility: [], medball: [], prep: [], hit: [] };
+  const out = { mobility: [], medball: [], prep: [], hit: [], metabolic: [] };
   // Bobby's rule: blocks with no real items (blank rows he left empty) don't
   // exist for the athlete — they neither render nor create tabs.
   const realItems = (items) =>
@@ -1779,10 +1785,15 @@ function programSubTabs(p, lifting) {
   const hasLifting = liftDays.some((d) =>
     (Array.isArray(d.exercises) ? d.exercises : []).some((ex) => String((ex && ex.name) || '').trim())
   );
+  const liftFirst = (p && p.session_order) === 'lifting_first';
+  // Session order is flexible (Bobby's call): lifting can run before hitting.
+  // Med ball rides with lifting either way — it's the explosive start of it.
   if (blocks.mobility.length) tabs.push({ id: 'mobility', label: 'Mobility' });
+  if (liftFirst && hasLifting) tabs.push({ id: 'lifting', label: 'Lifting' });
   if (!hasLifting && blocks.medball.length) tabs.push({ id: 'medball', label: 'Med Ball' });
   tabs.push({ id: 'hitting', label: 'Hitting' });
-  if (hasLifting) {
+  if (blocks.metabolic.length) tabs.push({ id: 'metabolic', label: 'Metabolic' });
+  if (!liftFirst && hasLifting) {
     tabs.push({ id: 'lifting', label: 'Lifting' });
   }
   return tabs;
@@ -1819,7 +1830,9 @@ function getLifting(id) {
   try { pj = JSON.parse(row.program_json || '{}'); } catch (e) { pj = {}; }
   if (!pj || typeof pj !== 'object') pj = {};
   if (!Array.isArray(pj.days)) pj.days = [];
-  return { id: row.id, name: row.name, is_template: row.is_template, days: pj.days, notes: pj.notes || [] };
+  // Preserve any extra fields on the JSON (draft flag, warm-ups, injury
+  // flags, progression read) instead of dropping them on read.
+  return { id: row.id, name: row.name, is_template: row.is_template, ...pj, days: pj.days, notes: pj.notes || [] };
 }
 // Today's check-offs for an athlete, keyed by item_key.
 function getCheckoffs(userId, day) {
@@ -1894,7 +1907,7 @@ function backfillRemoteLinks() {
 }
 
 // Hitter's program page — remote athletes only.
-app.get('/program', requireLogin, (req, res) => {
+app.get('/program', requireLogin, requireWaiver, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
   if (!req.user.remoteProgramId) return res.redirect('/');
   const p = getProgram(req.user.remoteProgramId);
@@ -1940,7 +1953,18 @@ app.get('/program', requireLogin, (req, res) => {
     isToday: !reqDay || (autoDay && reqDay.toLowerCase() === autoDay.toLowerCase()),
     ldayIdx, liftData,
     videoLib: videoLibMap(),
+    subs: todaySubs(req.user.id),
+    sessionOrder: p.session_order || 'hitting_first',
   }));
+});
+
+// Athlete (or Bobby via the program edit page) picks which runs first in a
+// session: hitting or lifting. Tabs reorder to match.
+app.post('/program/session-order', requireLogin, requireWaiver, (req, res) => {
+  if (req.user.role === 'coach' || !req.user.remoteProgramId || req.user.viewAs) return res.redirect('/program');
+  const order = req.body.session_order === 'lifting_first' ? 'lifting_first' : 'hitting_first';
+  db.prepare('UPDATE remote_programs SET session_order = ? WHERE id = ?').run(order, req.user.remoteProgramId);
+  res.redirect('/program?sub=' + encodeURIComponent(String(req.body.sub || 'lifting')));
 });
 
 // drive_file_id -> { id, hidden }: resolves a program item's stored video URL
@@ -1958,7 +1982,7 @@ function videoLibMap() {
 // Check off / log a program item. Posts from the athlete's Programs tab:
 // kind=hit|mob|med|lift, item_key, plus weight/rpe for lifts. Re-posting an
 // already-done item updates it (lift log); posting with no payload clears it.
-app.post('/program/check', requireLogin, (req, res) => {
+app.post('/program/check', requireLogin, requireWaiver, (req, res) => {
   if (req.user.role === 'coach') return res.status(403).send('Coaches cannot log program work.');
   if (!req.user.remoteProgramId) return res.status(403).send('No program assigned.');
   if (req.user.viewAs) return res.status(403).send('View-as is read-only.');
@@ -1996,6 +2020,84 @@ app.post('/program/check', requireLogin, (req, res) => {
       : '');
   res.redirect(back);
 });
+
+// ---- Athlete self-substitution (Sep 2026) ----
+// Mid-workout: swap an exercise for the same movement pattern, filtered by
+// the athlete's own equipment. Logged so Bobby sees every swap. "Ask coach"
+// opens a message pre-filled with the context.
+function athleteEquipmentTags(userId) {
+  try {
+    const r = db.prepare('SELECT answers_json FROM intake_responses WHERE user_id = ? ORDER BY id DESC LIMIT 1').get(userId);
+    if (r && r.answers_json) {
+      const a = JSON.parse(r.answers_json);
+      return { tags: equipmentTags(a), answers: a };
+    }
+  } catch (e) { /* ignore */ }
+  return { tags: new Set(['bodyweight', ...EQ_ALL]), answers: {} };
+}
+function substitutionAlternatives(userId, name) {
+  const { tags, answers } = athleteEquipmentTags(userId);
+  const src = EXERCISE_INDEX[String(name || '').toLowerCase()];
+  if (!src) return { pattern: null, options: [], tags, answers };
+  const rules = injuryKeys(answers);
+  const track = goalTrack(answers);
+  const options = LIFT_POOL.filter(
+    (e) => e.pattern === src.pattern && e.name.toLowerCase() !== src.name.toLowerCase() && fitsEq(e, tags) && !isAvoided(e, rules)
+  )
+    .map((e) => ({ e, score: e.goals.includes(track) ? 2 : e.goals.includes('balanced') ? 1 : 0 }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 6)
+    .map((x) => x.e);
+  return { pattern: src.pattern, options, tags, answers };
+}
+app.get('/program/substitute', requireLogin, requireWaiver, (req, res) => {
+  if (req.user.role === 'coach') return res.redirect('/coach');
+  if (!req.user.remoteProgramId) return res.redirect('/');
+  const name = String(req.query.name || '').slice(0, 120);
+  const key = String(req.query.key || '').slice(0, 300);
+  const back = '/program?sub=' + encodeURIComponent(String(req.query.sub || 'lifting')) +
+    (req.query.lday != null && String(req.query.lday) !== '' ? '&lday=' + encodeURIComponent(String(req.query.lday)) : '') +
+    (req.query.day ? '&day=' + encodeURIComponent(String(req.query.day)) : '');
+  const { pattern, options } = substitutionAlternatives(req.user.id, name);
+  res.send(views.substitutePage(req.user, { name, key, back, pattern, options,
+    sub: String(req.query.sub || 'lifting'), lday: String(req.query.lday || ''), day: String(req.query.day || '') }));
+});
+app.post('/program/substitute', requireLogin, requireWaiver, (req, res) => {
+  if (req.user.role === 'coach' || !req.user.remoteProgramId || req.user.viewAs) return res.redirect('/program');
+  const key = String(req.body.key || '').slice(0, 300);
+  const original = String(req.body.original || '').slice(0, 120);
+  const subName = String(req.body.sub_name || '').slice(0, 120);
+  const reason = String(req.body.reason || '').trim().slice(0, 200);
+  const back = '/program?sub=' + encodeURIComponent(String(req.body.sub || 'lifting')) +
+    (req.body.lday != null && String(req.body.lday) !== '' ? '&lday=' + encodeURIComponent(String(req.body.lday)) : '') +
+    (req.body.day ? '&day=' + encodeURIComponent(String(req.body.day)) : '');
+  if (!key || !original || !subName) return res.redirect(back);
+  const today = chiToday();
+  db.prepare("DELETE FROM program_substitutions WHERE user_id = ? AND day = ? AND item_key = ?")
+    .run(req.user.id, today, key);
+  db.prepare(
+    'INSERT INTO program_substitutions (user_id, day, item_key, original_name, sub_name, reason, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(req.user.id, today, key, original, subName, reason, new Date().toISOString());
+  res.redirect(back);
+});
+app.post('/program/substitute/revert', requireLogin, requireWaiver, (req, res) => {
+  if (req.user.role === 'coach' || !req.user.remoteProgramId || req.user.viewAs) return res.redirect('/program');
+  const key = String(req.body.key || '').slice(0, 300);
+  if (key) db.prepare('DELETE FROM program_substitutions WHERE user_id = ? AND day = ? AND item_key = ?').run(req.user.id, chiToday(), key);
+  const back = '/program?sub=' + encodeURIComponent(String(req.body.sub || 'lifting')) +
+    (req.body.lday != null && String(req.body.lday) !== '' ? '&lday=' + encodeURIComponent(String(req.body.lday)) : '') +
+    (req.body.day ? '&day=' + encodeURIComponent(String(req.body.day)) : '');
+  res.redirect(back);
+});
+function todaySubs(userId) {
+  const map = {};
+  try {
+    for (const r of db.prepare('SELECT * FROM program_substitutions WHERE user_id = ? AND day = ?').all(userId, chiToday())) {
+      map[r.item_key] = r;
+    }
+  } catch (e) { /* ignore */ }
+  return map;
+}
 
 // ---- Push notifications ----
 function savePushSubscription(userId, sub) {
@@ -2177,7 +2279,7 @@ app.post('/mental-game/save', requireLogin, async (req, res) => {
 });
 
 // Hitter's daily routine tab — every-day blocks of their program. Remote athletes only.
-app.get('/program/routine', requireLogin, (req, res) => {
+app.get('/program/routine', requireLogin, requireWaiver, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
   if (!req.user.remoteProgramId) return res.redirect('/');
   const p = getProgram(req.user.remoteProgramId);
@@ -2190,9 +2292,29 @@ app.get('/coach/program/:id/edit', requireCoach, (req, res) => {
   setApprovalCount(req);
   const p = getProgram(req.params.id);
   if (!p) return res.redirect('/coach/programs');
-  const linked = db.prepare('SELECT email FROM users WHERE remote_program_id = ? LIMIT 1').get(p.id);
+  const linked = db.prepare('SELECT id, email FROM users WHERE remote_program_id = ? LIMIT 1').get(p.id);
   const lift = db.prepare('SELECT lifting_program_id FROM remote_programs WHERE id = ?').get(p.id);
-  res.send(views.programEditPage(realUser(req), p, linked ? linked.email : null, !!(lift && lift.lifting_program_id)));
+  // Progression read: logged weights → what's improving/stalled → next-block
+  // emphasis. Makes Bobby's next-block approval fast and informed.
+  let progression = null;
+  try {
+    if (linked && linked.id) progression = progressionRead(linked.id);
+  } catch (e) { progression = null; }
+  let subs = [];
+  try {
+    if (linked && linked.id) {
+      subs = db.prepare('SELECT * FROM program_substitutions WHERE user_id = ? ORDER BY id DESC LIMIT 15').all(linked.id);
+    }
+  } catch (e) { subs = []; }
+  const block = db.prepare('SELECT block_start, block_number, block_notified_at, next_lifting_id, next_block_start FROM remote_programs WHERE id = ?').get(p.id) || {};
+  let nextLiftName = '';
+  if (block.next_lifting_id) {
+    try {
+      const nl = db.prepare('SELECT name FROM lifting_programs WHERE id = ?').get(block.next_lifting_id);
+      if (nl) nextLiftName = nl.name;
+    } catch (e) { /* ignore */ }
+  }
+  res.send(views.programEditPage(realUser(req), p, linked ? linked.email : null, !!(lift && lift.lifting_program_id), progression, { subs, block, nextLiftName }));
 });
 
 app.post('/coach/program/:id/save', requireCoach, (req, res) => {
@@ -2278,9 +2400,15 @@ app.post('/coach/program/:id/save', requireCoach, (req, res) => {
     .slice(0, 20);
   if (!Array.isArray(prog.schedule)) prog.schedule = [];
   if (!Array.isArray(prog.notes)) prog.notes = [];
-  db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?').run(
+  // Saving clears the intake-draft flag — Bobby has reviewed the program.
+  delete prog.draft;
+  delete prog.draft_source;
+  delete prog.draft_note;
+  const sessionOrder = b.session_order === 'lifting_first' ? 'lifting_first' : 'hitting_first';
+  db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ?, session_order = ? WHERE id = ?').run(
     JSON.stringify(prog),
     new Date().toISOString(),
+    sessionOrder,
     p.id
   );
   // The Programs tab is gone — program editing now lives on the Organizations page.
@@ -2433,12 +2561,996 @@ app.post('/coach/lifting/:id/save', requireLiftingCoach, (req, res) => {
         notes: String(req.body['lex_' + i + '_' + j + '_notes'] || '').trim().slice(0, 200),
       });
     }
-    days.push({ label: label || ('Day ' + String.fromCharCode(65 + i)), exercises });
+    const warmup = String(req.body['lday_' + i + '_warmup'] || '')
+      .split('\n').map((x) => x.trim().slice(0, 200)).filter(Boolean);
+    days.push({ label: label || ('Day ' + String.fromCharCode(65 + i)), warmup, exercises });
   }
   db.prepare('UPDATE lifting_programs SET name = ?, program_json = ?, updated_at = ? WHERE id = ?').run(
-    name, JSON.stringify({ days, notes: lp.notes }), new Date().toISOString(), lp.id
+    // Saving clears the intake-draft marker — Bobby has reviewed the program.
+    // Other JSON fields (progression read, block index) are preserved.
+    name.replace(/\s*\(DRAFT\)\s*$/i, '').trim() || name,
+    JSON.stringify({ ...lp, days, notes: lp.notes, draft: false }),
+    new Date().toISOString(),
+    lp.id
   );
   res.redirect('/coach/lifting');
+});
+
+// ---- Pre-signup intake questionnaire (Sep 2026) ----
+
+// ---- Liability waiver (Sep 2026) ----
+// Plain-English training waiver. Athletes with a program must sign before
+// they can open it. The version is pinned on each signature, so Bobby's
+// lawyer can revise the text later without invalidating old signatures.
+const WAIVER_VERSION = 'v1-2026-09-22';
+const WAIVER_PARAGRAPHS = [
+  'I want to take part in baseball training programmed by Atkinson Hitting, including hitting practice, strength training with weights, medicine ball and explosive work, mobility work, and conditioning. I understand this training is voluntary.',
+  'I understand that physical training — especially lifting weights — carries real risks, including muscle strains, sprains, broken bones, serious injury, and in rare cases permanent disability or death. I take on those risks for myself.',
+  'I confirm that I am physically able to train. I have no medical condition that makes this training unsafe for me, or I have been cleared by a doctor. I will stop training and tell my coach right away if I feel pain, dizziness, chest discomfort, or anything else wrong.',
+  'I release Atkinson Hitting, Atko Enterprises, Inc., Bobby Atkinson, and any coaches, assistants, or facility hosts working with them from any claims or lawsuits for injuries or losses connected to this training, even if caused by their negligence, to the fullest extent the law allows.',
+  'I understand no results are promised. Getting stronger or hitting better depends on many factors, including my own effort, consistency, and health.',
+  'I am signing this of my own free will. If I am under 18, my parent or legal guardian is co-signing below and agrees to all of this on my behalf.',
+];
+// Athletes with a linked program must sign the waiver before opening it.
+// View-as sessions are exempt so Bobby can preview the athlete experience.
+function needsWaiver(u) {
+  return !!u && u.role === 'athlete' && u.remoteProgramId && !u.waiverSignedAt && !u.viewAs;
+}
+function waiverIsMinor(u) {
+  const age = u && u.dateOfBirth ? ageOn(u.dateOfBirth) : null;
+  return age != null && age < 18;
+}
+// Bobby texts prospects a shareable link. On submit the app auto-creates
+// their athlete account (pending Bobby's approval), generates a baseline
+// draft program from the answers (schedule from availability, tabs from
+// components, provisional lifting draft from goals), and notifies Bobby.
+// The draft is clearly marked unreviewed until Bobby edits + saves it.
+const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+function getIntakeToken() {
+  try {
+    const r = db.prepare("SELECT value FROM settings WHERE key = 'intake_token'").get();
+    return r ? r.value : '';
+  } catch (e) { return ''; }
+}
+function intakeLink(req) {
+  const tok = getIntakeToken();
+  return tok ? `${publicBaseUrl(req)}/intake/${tok}` : '';
+}
+function parseIntakeBody(b) {
+  const s = (v, n) => String(v == null ? '' : v).trim().slice(0, n || 500);
+  const arr = (v) =>
+    (Array.isArray(v) ? v : v ? [v] : []).map((x) => String(x).trim()).filter(Boolean);
+  const yn = (v) => v === '1' || v === 'on' || v === 'yes';
+  return {
+    first_name: s(b.first_name, 40),
+    last_name: s(b.last_name, 40),
+    email: s(b.email, 120).toLowerCase(),
+    phone: s(b.phone, 30),
+    date_of_birth: s(b.date_of_birth, 10),
+    parent_name: s(b.parent_name, 80),
+    parent_email: s(b.parent_email, 120).toLowerCase(),
+    height: s(b.height, 20),
+    weight: s(b.weight, 20),
+    // Goals
+    goals: arr(b.goals),
+    goals_other: s(b.goals_other, 200),
+    goals_90: s(b.goals_90, 500),
+    // Health & injuries (detailed)
+    injury_current: s(b.injury_current, 1000),
+    injury_area: s(b.injury_area, 200),
+    injury_severity: s(b.injury_severity, 20),
+    injury_cleared: s(b.injury_cleared, 20),
+    injury_past: s(b.injury_past, 1000),
+    pain_now: s(b.pain_now, 500),
+    doctor_notes: s(b.doctor_notes, 500),
+    // Training background
+    years_training: s(b.years_training, 20),
+    lifting_experience: s(b.lifting_experience, 20),
+    past_programs: s(b.past_programs, 1000),
+    what_worked: s(b.what_worked, 1000),
+    what_didnt: s(b.what_didnt, 1000),
+    squat_max: s(b.squat_max, 20),
+    bench_max: s(b.bench_max, 20),
+    deadlift_max: s(b.deadlift_max, 20),
+    strong_not_explosive: yn(b.strong_not_explosive),
+    // Equipment (specific)
+    equipment: arr(b.equipment),
+    equipment_detail: s(b.equipment_detail, 1000),
+    // Availability & season
+    components: arr(b.components),
+    hit_days_per_week: Math.min(7, Math.max(1, parseInt(b.hit_days_per_week, 10) || 5)),
+    lift_days_per_week: Math.min(7, Math.max(1, parseInt(b.lift_days_per_week, 10) || 4)),
+    train_days: arr(b.train_days).filter((d) => WEEKDAYS.includes(d)),
+    session_length: s(b.session_length, 40),
+    schedule_constraints: s(b.schedule_constraints, 500),
+    season_phase: ['offseason', 'preseason', 'inseason'].includes(b.season_phase) ? b.season_phase : 'offseason',
+    season_detail: s(b.season_detail, 500),
+    games_per_week: s(b.games_per_week, 20),
+    // Hitting resources (explicit)
+    has_tee: yn(b.has_tee),
+    has_net: yn(b.has_net),
+    has_cage: yn(b.has_cage),
+    has_machine: yn(b.has_machine),
+    has_feed_partner: yn(b.has_feed_partner),
+    feed_partner_detail: s(b.feed_partner_detail, 300),
+    hitting_progression: arr(b.hitting_progression),
+    current_ev: s(b.current_ev, 20),
+    current_bat_speed: s(b.current_bat_speed, 20),
+    // Lifestyle
+    sleep_hours: s(b.sleep_hours, 20),
+    sleep_quality: s(b.sleep_quality, 40),
+    nutrition: s(b.nutrition, 1000),
+    stress: s(b.stress, 500),
+    other_notes: s(b.other_notes, 2000),
+  };
+}
+// Baseline program scaffold from intake answers. Structure + templates are
+// the app's job; Bobby fills in his hitting drills/cues in the editor.
+// Mobility is the baseball template (hips/t-spine/shoulders/ankles), med ball
+// and metabolic are equipment-filtered templates. Hitting day blocks are empty
+// on purpose — but labeled with the environments he actually has so Bobby
+// never programs machine work for a guy with no machine and no partner.
+function buildIntakeProgram(a, athleteName) {
+  const prog = blankProgram(athleteName);
+  prog.draft = true;
+  prog.draft_source = 'intake';
+  const tags = equipmentTags(a);
+  const has = (c) => a.components.includes(c);
+  // Schedule: checked training days -> Day 1..N (Monday-first).
+  const ordered = WEEKDAYS.filter((d) => a.train_days.includes(d));
+  const n = Math.min(ordered.length || a.hit_days_per_week, a.hit_days_per_week);
+  const useDays = ordered.slice(0, n);
+  prog.schedule = useDays.map((d, i) => [d, 'Day ' + (i + 1)]);
+  if (has('mobility')) for (const b of mobilityBlocks(tags)) prog.routine.push(b);
+  // Hitting environments he actually has — drives which drills are feasible.
+  const envs = [];
+  if (a.has_tee) envs.push('tee');
+  if (a.has_net) envs.push('net');
+  if (a.has_cage) envs.push('cage');
+  if (a.has_machine) envs.push('machine');
+  if (a.has_feed_partner) envs.push('front/side toss (has feeder)');
+  else envs.push('NO feed partner — tee/net/cage work only');
+  if (has('hitting')) {
+    for (let i = 0; i < useDays.length; i++) {
+      prog.routine.push({ category: 'Day ' + (i + 1) + ' — Hitting', items: [] });
+    }
+  }
+  // Med ball: lifters get it bundled inside the Lifting tab (the block lives
+  // in the routine and the athlete view renders it there); non-lifters who
+  // checked it get the standalone Med Ball tab.
+  if (has('lifting') || has('medball')) for (const b of medballBlocks(tags)) prog.routine.push(b);
+  if (has('metabolic')) for (const b of metabolicBlocks(tags)) prog.routine.push(b);
+  const flags = [];
+  const inj = [a.injury_area && ('Area: ' + a.injury_area), a.injury_current, a.injury_severity && ('Severity: ' + a.injury_severity), a.injury_cleared && ('Cleared: ' + a.injury_cleared), a.pain_now && ('Current pain: ' + a.pain_now)].filter(Boolean).join(' · ');
+  if (inj) flags.push('INJURIES: ' + inj);
+  if (a.injury_past) flags.push('Past injuries: ' + a.injury_past);
+  if (a.doctor_notes) flags.push('Doctor: ' + a.doctor_notes);
+  if (a.goals_other) flags.push('Other goals: ' + a.goals_other);
+  if (a.goals_90) flags.push('90-day goal: ' + a.goals_90);
+  if (a.hitting_progression.length) flags.push('Hitting progression: ' + a.hitting_progression.join(', '));
+  if (a.lifting_experience) flags.push('Lifting experience: ' + a.lifting_experience);
+  flags.push('Equipment: ' + ((a.equipment || []).join(', ') || 'bodyweight only'));
+  if (a.equipment_detail) flags.push('Equipment detail: ' + a.equipment_detail);
+  flags.push('Hitting resources: ' + envs.join(' · '));
+  if (a.feed_partner_detail) flags.push('Feeder: ' + a.feed_partner_detail);
+  if (a.current_ev || a.current_bat_speed) flags.push('Current: ' + [a.current_ev && ('EV ' + a.current_ev), a.current_bat_speed && ('bat speed ' + a.current_bat_speed)].filter(Boolean).join(' / '));
+  const maxes = [a.squat_max && ('Squat ' + a.squat_max), a.bench_max && ('Bench ' + a.bench_max), a.deadlift_max && ('DL ' + a.deadlift_max)].filter(Boolean).join(' / ');
+  if (maxes) flags.push('Best lifts: ' + maxes);
+  flags.push('Season: ' + ({ offseason: 'Off-season', preseason: 'Pre-season', inseason: 'In-season' }[a.season_phase] || a.season_phase));
+  if (a.games_per_week) flags.push('Games/wk: ' + a.games_per_week);
+  if (a.season_detail) flags.push('Season detail: ' + a.season_detail);
+  if (a.years_training) flags.push('Training yrs: ' + a.years_training);
+  if (a.past_programs) flags.push('Past programs: ' + a.past_programs);
+  if (a.what_worked) flags.push('What worked: ' + a.what_worked);
+  if (a.what_didnt) flags.push("What didn't: " + a.what_didnt);
+  if (a.sleep_hours || a.sleep_quality) flags.push('Sleep: ' + [a.sleep_hours, a.sleep_quality].filter(Boolean).join(' '));
+  if (a.nutrition) flags.push('Nutrition: ' + a.nutrition);
+  if (a.stress) flags.push('Stress: ' + a.stress);
+  if (a.schedule_constraints) flags.push('Schedule: ' + a.schedule_constraints);
+  if (a.session_length) flags.push('Session length: ' + a.session_length);
+  if (a.other_notes) flags.push('Other: ' + a.other_notes);
+  if (flags.length) prog.draft_note = 'From intake — ' + flags.join(' · ');
+  return prog;
+}
+// ---- Lifting program generation (Sep 2026) ----
+// Bobby is a hitting coach, not a lifting expert — the app drafts like one.
+// Sourced from the guidelines doc (Summers Method, Kelly Training, Ian Jenkins):
+// strength first → express it fast; explosive/med ball FIRST in the session;
+// baseball movement patterns; season-calibrated; injury-smart; equipment-
+// constrained. Bobby reviews/approves every draft. Keep the tables below easy
+// to edit — he will send more guidelines.
+
+// Equipment tags granted by each questionnaire checkbox. full_gym grants all.
+const EQ_ALL = ['barbell', 'rack', 'dumbbell', 'kettlebell', 'trapbar', 'bands', 'pullup', 'bench', 'medball', 'box', 'sled', 'cables', 'field', 'rope'];
+const EQ_MAP = {
+  full_gym: EQ_ALL,
+  barbell: ['barbell'], rack: ['rack'], dumbbell: ['dumbbell'], kettlebell: ['kettlebell'],
+  trapbar: ['trapbar'], bands: ['bands'], pullup_bar: ['pullup'], bench: ['bench'],
+  medball: ['medball'], plyo_box: ['box'], sled: ['sled'], cables: ['cables'],
+  field_space: ['field'], jump_rope: ['rope'],
+};
+function equipmentTags(a) {
+  const tags = new Set(['bodyweight']);
+  for (const e of (a && a.equipment) || []) {
+    for (const t of EQ_MAP[e] || []) tags.add(t);
+  }
+  return tags;
+}
+const fitsEq = (ex, tags) => (ex.eq || []).every((t) => tags.has(t));
+
+// Movement patterns — used for equipment substitutions AND athlete self-subs.
+const PATTERNS = ['squat', 'hinge', 'unilateral', 'push_h', 'push_v', 'pull_h', 'pull_v', 'core', 'rotational', 'jump', 'carry', 'iso'];
+// ex: {name, pattern, eq:[tags], goals:[tracks], avoid:[injury keys], schemes}
+// schemes keyed by emphasis: strength (absorb), power (produce), speed (express), health.
+const LIFT_POOL = [
+  // --- Squat pattern ---
+  { name: 'Back Squat', pattern: 'squat', eq: ['barbell', 'rack'], goals: ['strength', 'exit_velo', 'balanced'], avoid: ['back', 'knee', 'hip', 'ankle'], schemes: { strength: ['5', '5', 8, '3–4 sec lowering'], power: ['4', '5', 8, '2-sec pause at bottom'], speed: ['5', '3', 7, 'Move it FAST — stop if bar slows'], health: ['3', '8', 7, ''] } },
+  { name: 'Front Squat', pattern: 'squat', eq: ['barbell', 'rack'], goals: ['strength', 'exit_velo'], avoid: ['back', 'knee', 'wrist'], schemes: { strength: ['4', '5', 8, ''], power: ['4', '4', 8, ''], speed: ['5', '3', 7, 'Explode up'], health: ['3', '8', 6, ''] } },
+  { name: 'Box Squat', pattern: 'squat', eq: ['barbell', 'rack', 'box'], goals: ['strength', 'health'], avoid: ['back'], schemes: { strength: ['5', '5', 8, 'Sit back, pause on box'], power: ['4', '5', 8, ''], speed: ['5', '3', 7, 'Explode off box'], health: ['3', '8', 6, 'Knee-friendly depth'] } },
+  { name: 'Goblet Squat', pattern: 'squat', eq: ['dumbbell'], goals: ['balanced', 'health', 'exit_velo'], avoid: ['knee'], schemes: { strength: ['4', '8', 8, ''], power: ['4', '6', 8, ''], speed: ['4', '5', 7, 'Fast up'], health: ['3', '10', 6, ''] } },
+  { name: 'Goblet Squat', pattern: 'squat', eq: ['kettlebell'], goals: ['balanced', 'health', 'exit_velo'], avoid: ['knee'], schemes: { strength: ['4', '8', 8, ''], power: ['4', '6', 8, ''], speed: ['4', '5', 7, 'Fast up'], health: ['3', '10', 6, ''] } },
+  { name: 'Bodyweight Squat', pattern: 'squat', eq: [], goals: ['health', 'balanced'], avoid: ['knee'], schemes: { strength: ['3', '15', 7, ''], power: ['3', '12', 7, ''], speed: ['4', '8', 7, 'Explode up'], health: ['3', '12', 6, ''] } },
+  // --- Hinge pattern ---
+  { name: 'Trap Bar Deadlift', pattern: 'hinge', eq: ['trapbar'], goals: ['strength', 'exit_velo', 'balanced'], avoid: ['back'], schemes: { strength: ['5', '5', 8, '3–4 sec lowering'], power: ['4', '5', 8, ''], speed: ['5', '3', 7, 'Speed off floor'], health: ['3', '6', 7, ''] } },
+  { name: 'Romanian Deadlift', pattern: 'hinge', eq: ['barbell'], goals: ['strength', 'exit_velo', 'health'], avoid: ['back'], schemes: { strength: ['4', '6', 8, 'Slow eccentric'], power: ['4', '6', 8, ''], speed: ['4', '5', 7, 'Snap hips'], health: ['3', '8', 6, ''] } },
+  { name: 'DB Romanian Deadlift', pattern: 'hinge', eq: ['dumbbell'], goals: ['strength', 'exit_velo', 'health', 'balanced'], avoid: ['back'], schemes: { strength: ['4', '8', 8, ''], power: ['4', '6', 8, ''], speed: ['4', '5', 7, 'Snap hips'], health: ['3', '10', 6, ''] } },
+  { name: 'Hip Thrust', pattern: 'hinge', eq: ['bench', 'barbell'], goals: ['exit_velo', 'strength', 'health'], avoid: [], schemes: { strength: ['4', '8', 8, ''], power: ['4', '6', 9, '2-sec hold at top'], speed: ['4', '6', 7, 'Explode up'], health: ['3', '10', 6, ''] } },
+  { name: 'DB Hip Thrust', pattern: 'hinge', eq: ['bench', 'dumbbell'], goals: ['exit_velo', 'health', 'balanced'], avoid: [], schemes: { strength: ['4', '10', 8, ''], power: ['4', '8', 8, ''], speed: ['4', '6', 7, 'Explode up'], health: ['3', '12', 6, ''] } },
+  { name: 'Glute Bridge', pattern: 'hinge', eq: [], goals: ['health', 'balanced'], avoid: [], schemes: { strength: ['3', '12', 7, ''], power: ['3', '10', 8, ''], speed: ['3', '10', 7, ''], health: ['3', '12', 6, ''] } },
+  { name: 'Hang Clean', pattern: 'hinge', eq: ['barbell'], goals: ['explosive'], avoid: ['back', 'wrist'], schemes: { strength: ['5', '3', 8, ''], power: ['5', '3', 8, ''], speed: ['5', '3', 7, 'Max intent'], health: ['3', '5', 6, 'Light, crisp'] } },
+  { name: 'DB Hang Snatch', pattern: 'hinge', eq: ['dumbbell'], goals: ['explosive', 'exit_velo'], avoid: ['shoulder', 'wrist'], schemes: { strength: ['4', '4', 8, 'Each arm'], power: ['4', '4', 8, 'Each arm'], speed: ['4', '3', 7, 'Max intent, each arm'], health: ['3', '5', 6, 'Light'] } },
+  // --- Unilateral ---
+  { name: 'Bulgarian Split Squat', pattern: 'unilateral', eq: ['dumbbell', 'bench'], goals: ['strength', 'exit_velo', 'health', 'balanced'], avoid: ['knee'], schemes: { strength: ['3', '8', 8, 'Each leg'], power: ['3', '6', 8, 'Each leg, pause at bottom'], speed: ['3', '5', 7, 'Explode up, each leg'], health: ['3', '8', 6, 'Each leg'] } },
+  { name: 'Bulgarian Split Squat', pattern: 'unilateral', eq: ['bench'], goals: ['health', 'balanced'], avoid: ['knee'], schemes: { strength: ['3', '10', 7, 'Each leg, bodyweight+'], power: ['3', '8', 7, 'Each leg'], speed: ['3', '6', 7, 'Explode, each leg'], health: ['3', '10', 6, 'Each leg'] } },
+  { name: 'Reverse Lunge', pattern: 'unilateral', eq: ['dumbbell'], goals: ['strength', 'health', 'balanced'], avoid: ['knee'], schemes: { strength: ['3', '8', 8, 'Each leg'], power: ['3', '8', 8, 'Each leg'], speed: ['3', '6', 7, 'Each leg'], health: ['3', '10', 6, 'Each leg'] } },
+  { name: 'Step-Up', pattern: 'unilateral', eq: ['dumbbell', 'box'], goals: ['strength', 'health'], avoid: ['knee'], schemes: { strength: ['3', '8', 8, 'Each leg'], power: ['3', '6', 8, 'Each leg'], speed: ['3', '5', 7, 'Drive up fast'], health: ['3', '8', 6, 'Low box, each leg'] } },
+  { name: 'Single-Leg RDL', pattern: 'unilateral', eq: ['dumbbell'], goals: ['exit_velo', 'health', 'balanced'], avoid: ['back'], schemes: { strength: ['3', '8', 7, 'Each leg'], power: ['3', '8', 7, 'Each leg'], speed: ['3', '6', 7, 'Each leg'], health: ['3', '10', 6, 'Each leg'] } },
+  { name: 'Lateral Lunge', pattern: 'unilateral', eq: ['dumbbell'], goals: ['exit_velo', 'health'], avoid: ['knee', 'hip'], schemes: { strength: ['3', '8', 7, 'Each side — baseball moves sideways'], power: ['3', '8', 7, 'Each side'], speed: ['3', '6', 7, 'Each side'], health: ['3', '8', 6, 'Each side'] } },
+  // --- Horizontal push ---
+  { name: 'Bench Press', pattern: 'push_h', eq: ['barbell', 'bench', 'rack'], goals: ['strength', 'balanced'], avoid: ['shoulder', 'elbow'], schemes: { strength: ['5', '5', 8, ''], power: ['4', '5', 8, '2-sec pause on chest'], speed: ['5', '3', 7, 'Speed reps'], health: ['3', '8', 6, ''] } },
+  { name: 'DB Bench Press', pattern: 'push_h', eq: ['dumbbell', 'bench'], goals: ['strength', 'exit_velo', 'balanced'], avoid: ['shoulder'], schemes: { strength: ['4', '8', 8, ''], power: ['4', '6', 8, ''], speed: ['4', '5', 7, 'Explode up'], health: ['3', '10', 6, 'Neutral grip if shoulders cranky'] } },
+  { name: 'Floor Press', pattern: 'push_h', eq: ['dumbbell'], goals: ['strength', 'health'], avoid: [], schemes: { strength: ['4', '8', 8, 'Shoulder-friendly'], power: ['4', '6', 8, 'Pause at floor'], speed: ['4', '5', 7, ''], health: ['3', '10', 6, ''] } },
+  { name: 'Push-Up', pattern: 'push_h', eq: [], goals: ['health', 'balanced'], avoid: ['shoulder', 'elbow', 'wrist'], schemes: { strength: ['3', '12', 8, ''], power: ['3', '10', 8, ''], speed: ['4', '6', 7, 'Explode off floor'], health: ['3', '10', 6, ''] } },
+  // --- Vertical push ---
+  { name: 'Overhead Press', pattern: 'push_v', eq: ['barbell'], goals: ['strength'], avoid: ['shoulder', 'back'], schemes: { strength: ['4', '6', 8, ''], power: ['4', '5', 8, ''], speed: ['4', '4', 7, 'Push fast'], health: ['3', '8', 6, 'Seated if back cranky'] } },
+  { name: 'DB Overhead Press', pattern: 'push_v', eq: ['dumbbell'], goals: ['strength', 'balanced'], avoid: ['shoulder'], schemes: { strength: ['3', '8', 8, ''], power: ['3', '8', 8, ''], speed: ['3', '5', 7, ''], health: ['3', '10', 6, ''] } },
+  { name: 'Landmine Press', pattern: 'push_v', eq: ['barbell'], goals: ['strength', 'health', 'exit_velo'], avoid: [], schemes: { strength: ['3', '8', 8, 'Each arm — shoulder-friendly pressing'], power: ['3', '8', 8, 'Each arm'], speed: ['3', '5', 7, 'Each arm, fast'], health: ['3', '10', 6, 'Each arm'] } },
+  { name: 'Push Press', pattern: 'push_v', eq: ['barbell'], goals: ['explosive'], avoid: ['shoulder', 'back'], schemes: { strength: ['4', '5', 8, 'Leg drive'], power: ['4', '5', 8, ''], speed: ['5', '3', 7, 'Max intent'], health: ['3', '6', 6, 'Light'] } },
+  // --- Horizontal pull ---
+  { name: 'Bent-Over Row', pattern: 'pull_h', eq: ['barbell'], goals: ['strength', 'balanced'], avoid: ['back'], schemes: { strength: ['4', '8', 8, ''], power: ['4', '8', 8, ''], speed: ['4', '6', 7, 'Explode'], health: ['3', '10', 6, 'Chest-supported if back cranky'] } },
+  { name: 'DB Row', pattern: 'pull_h', eq: ['dumbbell', 'bench'], goals: ['strength', 'exit_velo', 'balanced'], avoid: [], schemes: { strength: ['4', '8', 8, 'Each arm'], power: ['4', '8', 8, 'Each arm'], speed: ['4', '6', 7, 'Each arm, fast'], health: ['3', '10', 6, 'Each arm'] } },
+  { name: 'Cable Row', pattern: 'pull_h', eq: ['cables'], goals: ['strength', 'health'], avoid: [], schemes: { strength: ['4', '10', 8, ''], power: ['4', '10', 8, ''], speed: ['4', '8', 7, ''], health: ['3', '12', 6, ''] } },
+  { name: 'Inverted Row', pattern: 'pull_h', eq: ['rack'], goals: ['health', 'balanced'], avoid: [], schemes: { strength: ['3', '10', 8, 'Bar at waist height'], power: ['3', '10', 8, ''], speed: ['3', '8', 7, ''], health: ['3', '10', 6, ''] } },
+  // --- Vertical pull ---
+  { name: 'Pull-Up', pattern: 'pull_v', eq: ['pullup'], goals: ['strength', 'exit_velo', 'balanced'], avoid: ['shoulder', 'elbow'], schemes: { strength: ['4', '6', 8, 'Band-assist if needed'], power: ['4', '5', 8, ''], speed: ['4', '4', 7, 'Explode up'], health: ['3', '6', 6, ''] } },
+  { name: 'Chin-Up', pattern: 'pull_v', eq: ['pullup'], goals: ['strength', 'balanced'], avoid: ['elbow'], schemes: { strength: ['4', '6', 8, ''], power: ['4', '5', 8, ''], speed: ['4', '4', 7, ''], health: ['3', '6', 6, ''] } },
+  { name: 'Lat Pulldown', pattern: 'pull_v', eq: ['cables'], goals: ['strength', 'health'], avoid: ['shoulder'], schemes: { strength: ['4', '8', 8, ''], power: ['4', '8', 8, ''], speed: ['4', '6', 7, ''], health: ['3', '10', 6, ''] } },
+  { name: 'Band Pull-Apart', pattern: 'pull_h', eq: ['bands'], goals: ['health', 'balanced'], avoid: [], schemes: { strength: ['3', '15', 7, 'Shoulder health'], power: ['3', '15', 7, ''], speed: ['3', '12', 7, ''], health: ['3', '15', 6, ''] } },
+  { name: 'Face Pull', pattern: 'pull_h', eq: ['cables'], goals: ['health'], avoid: [], schemes: { strength: ['3', '12', 7, ''], power: ['3', '12', 7, ''], speed: ['3', '12', 7, ''], health: ['3', '15', 6, ''] } },
+  // --- Core ---
+  { name: 'Pallof Press', pattern: 'core', eq: ['cables'], goals: ['exit_velo', 'health', 'balanced'], avoid: [], schemes: { strength: ['3', '10', 7, 'Each side — anti-rotation'], power: ['3', '8', 8, 'Each side, 3-sec hold'], speed: ['3', '8', 7, 'Each side'], health: ['3', '10', 6, 'Each side'] } },
+  { name: 'Pallof Press', pattern: 'core', eq: ['bands'], goals: ['exit_velo', 'health', 'balanced'], avoid: [], schemes: { strength: ['3', '10', 7, 'Each side — anti-rotation'], power: ['3', '8', 8, 'Each side, 3-sec hold'], speed: ['3', '8', 7, 'Each side'], health: ['3', '10', 6, 'Each side'] } },
+  { name: 'Dead Bug', pattern: 'core', eq: [], goals: ['health', 'balanced'], avoid: ['back'], schemes: { strength: ['3', '10', 6, 'Each side, slow'], power: ['3', '10', 6, 'Each side'], speed: ['3', '10', 6, 'Each side'], health: ['3', '10', 6, 'Each side'] } },
+  { name: 'Ab Wheel Rollout', pattern: 'core', eq: [], goals: ['strength'], avoid: ['back', 'shoulder'], schemes: { strength: ['3', '10', 8, ''], power: ['3', '8', 8, ''], speed: ['3', '8', 7, ''], health: ['3', '8', 6, 'Short range'] } },
+  { name: 'Side Plank', pattern: 'core', eq: [], goals: ['health', 'balanced'], avoid: [], schemes: { strength: ['3', '30s', 7, 'Each side'], power: ['3', '30s', 7, 'Each side'], speed: ['3', '30s', 7, 'Each side'], health: ['3', '30s', 6, 'Each side'] } },
+  // --- Rotational / med ball ---
+  { name: 'Med Ball Rotational Throw', pattern: 'rotational', eq: ['medball'], goals: ['exit_velo', 'explosive', 'balanced'], avoid: [], schemes: { strength: ['3', '6', 8, 'Each side — throw it like a swing'], power: ['4', '5', 9, 'Each side, max intent'], speed: ['4', '4', 8, 'Each side, max intent'], health: ['3', '6', 7, 'Each side, smooth'] } },
+  { name: 'Med Ball Chest Pass', pattern: 'rotational', eq: ['medball'], goals: ['exit_velo', 'explosive'], avoid: ['shoulder'], schemes: { strength: ['3', '8', 8, ''], power: ['4', '6', 9, 'Max intent'], speed: ['4', '5', 8, 'Max intent'], health: ['3', '8', 6, ''] } },
+  { name: 'Med Ball Slam', pattern: 'rotational', eq: ['medball'], goals: ['explosive', 'exit_velo'], avoid: ['shoulder', 'back'], schemes: { strength: ['3', '8', 8, ''], power: ['4', '6', 9, 'Max intent'], speed: ['4', '5', 8, 'Max intent'], health: ['3', '8', 6, 'Light ball'] } },
+  { name: 'Med Ball Overhead Throw', pattern: 'rotational', eq: ['medball'], goals: ['explosive'], avoid: ['shoulder', 'back'], schemes: { strength: ['3', '6', 8, ''], power: ['4', '5', 9, 'Max intent'], speed: ['4', '4', 8, 'Max intent'], health: ['3', '6', 6, ''] } },
+  { name: 'Rotational Jump', pattern: 'rotational', eq: [], goals: ['explosive', 'exit_velo'], avoid: ['knee', 'ankle'], schemes: { strength: ['3', '4', 7, 'Each side — no-ball rotational power sub'], power: ['4', '4', 8, 'Each side'], speed: ['4', '4', 8, 'Each side'], health: ['3', '4', 6, 'Each side, easy'] } },
+  // --- Jumps ---
+  { name: 'Box Jump', pattern: 'jump', eq: ['box'], goals: ['explosive', 'exit_velo'], avoid: ['knee', 'ankle'], schemes: { strength: ['4', '3', 7, 'Stick the landing'], power: ['4', '3', 8, ''], speed: ['5', '3', 8, 'Max height, full rest'], health: ['3', '3', 6, 'Low box'] } },
+  { name: 'Broad Jump', pattern: 'jump', eq: [], goals: ['explosive', 'exit_velo', 'balanced'], avoid: ['knee', 'ankle'], schemes: { strength: ['4', '3', 7, 'Stick the landing'], power: ['4', '3', 8, ''], speed: ['5', '3', 8, 'Max distance, full rest'], health: ['3', '3', 6, 'Sub-max'] } },
+  { name: 'Jump Squat', pattern: 'jump', eq: [], goals: ['explosive'], avoid: ['knee', 'ankle', 'back'], schemes: { strength: ['4', '5', 7, ''], power: ['4', '5', 8, ''], speed: ['5', '3', 8, 'Max intent, stop when speed drops'], health: ['3', '5', 6, ''] } },
+  { name: 'DB Jump Squat', pattern: 'jump', eq: ['dumbbell'], goals: ['explosive', 'exit_velo'], avoid: ['knee', 'ankle', 'back'], schemes: { strength: ['4', '5', 7, 'Light DBs'], power: ['4', '5', 8, ''], speed: ['5', '3', 8, 'Max intent'], health: ['3', '5', 6, ''] } },
+  // --- Carry ---
+  { name: "Farmer's Carry", pattern: 'carry', eq: ['dumbbell'], goals: ['strength', 'health', 'balanced'], avoid: [], schemes: { strength: ['3', '40 yd', 8, 'Heavy'], power: ['3', '40 yd', 8, ''], speed: ['3', '30 yd', 7, ''], health: ['3', '40 yd', 6, ''] } },
+  { name: "Farmer's Carry", pattern: 'carry', eq: ['trapbar'], goals: ['strength'], avoid: [], schemes: { strength: ['3', '40 yd', 8, 'Heavy'], power: ['3', '40 yd', 8, ''], speed: ['3', '30 yd', 7, ''], health: ['3', '40 yd', 6, ''] } },
+  // --- Isometrics (produce phase) ---
+  { name: 'Iso Split Squat Hold', pattern: 'iso', eq: [], goals: ['strength', 'exit_velo', 'health'], avoid: ['knee'], schemes: { strength: ['3', '20s', 8, 'Each leg — max intent'], power: ['4', '10s', 9, 'Each leg — MAX intent'], speed: ['3', '10s', 7, 'Each leg'], health: ['3', '20s', 6, 'Each leg'] } },
+  { name: 'Iso Push-Up Hold', pattern: 'iso', eq: [], goals: ['strength', 'health'], avoid: ['shoulder', 'elbow'], schemes: { strength: ['3', '20s', 8, 'Bottom position'], power: ['4', '10s', 9, 'MAX intent'], speed: ['3', '10s', 7, ''], health: ['3', '15s', 6, ''] } },
+  { name: 'Lead Arm Iso Pull', pattern: 'iso', eq: ['bands'], goals: ['exit_velo'], avoid: ['shoulder', 'elbow'], schemes: { strength: ['3', '8s', 8, 'Each arm — rotational pulling strength'], power: ['4', '6s', 9, 'Each arm, MAX intent'], speed: ['3', '6s', 7, 'Each arm'], health: ['3', '8s', 6, 'Each arm, easy'] } },
+];
+// Global name → pool entry index (powers athlete self-substitution).
+const EXERCISE_INDEX = {};
+for (const ex of LIFT_POOL) EXERCISE_INDEX[ex.name.toLowerCase()] = ex;
+
+// Injury keyword → avoided pool entries (matched by name keyword or avoid tag).
+const INJURY_RULES = [
+  { keys: ['shoulder', 'rotator'], avoidNames: ['Overhead Press', 'DB Overhead Press', 'Push Press', 'Med Ball Overhead Throw', 'Med Ball Slam'], note: 'shoulder — no overhead work' },
+  { keys: ['elbow', 'tommy john', 'ucl'], avoidNames: ['Overhead Press', 'Push Press', 'Pull-Up'], note: 'elbow — limited overhead/pull volume' },
+  { keys: ['back', 'spine', 'lumbar', 'disc', 'herniat'], avoidNames: ['Back Squat', 'Front Squat', 'Conventional', 'Hang Clean', 'Bent-Over Row'], note: 'back — no axial loading' },
+  { keys: ['knee', 'acl', 'mcl', 'meniscus', 'patella'], avoidNames: ['Back Squat', 'Front Squat', 'Box Jump', 'Jump Squat', 'DB Jump Squat', 'Broad Jump', 'Rotational Jump'], note: 'knee — no deep loaded knee flexion or jumping' },
+  { keys: ['wrist', 'hand'], avoidNames: ['Front Squat', 'Hang Clean'], note: 'wrist — no front-rack/catch positions' },
+  { keys: ['hip', 'labrum'], avoidNames: ['Back Squat', 'Lateral Lunge'], note: 'hip — limited deep hip flexion' },
+  { keys: ['ankle', 'achilles'], avoidNames: ['Box Jump', 'Jump Squat', 'DB Jump Squat', 'Broad Jump'], note: 'ankle — no jumping' },
+];
+function injuryKeys(a) {
+  const text = [a.injury_area, a.injury_current, a.pain_now, a.injury_past].join(' ').toLowerCase();
+  const hits = [];
+  for (const r of INJURY_RULES) {
+    if (r.keys.some((k) => text.includes(k))) hits.push(r);
+  }
+  return hits;
+}
+function isAvoided(ex, rules) {
+  if (!rules.length) return null;
+  for (const r of rules) {
+    if ((ex.avoid || []).some((t) => r.keys.some((k) => t.includes(k)))) return r;
+    if (r.avoidNames.some((n) => ex.name.toLowerCase().includes(n.toLowerCase()))) return r;
+  }
+  return null;
+}
+// Pick the best pool entry for a movement pattern: fits equipment, not avoided
+// by injuries, matches goal track when possible. Falls back across the pool so
+// a missing piece of equipment substitutes the pattern instead of dropping it.
+function pickExercise(pattern, tags, rules, track, usedNames, gaps) {
+  const cands = LIFT_POOL.filter((e) => e.pattern === pattern && !usedNames.has(e.name));
+  const ok = cands.filter((e) => fitsEq(e, tags) && !isAvoided(e, rules));
+  const scored = ok
+    .map((e) => ({ e, score: (e.goals.includes(track) ? 2 : 0) + (e.goals.includes('balanced') ? 1 : 0) }))
+    .sort((x, y) => y.score - x.score);
+  if (scored.length) return { ex: scored[0].e, sub: null };
+  // Nothing fits — report the gap, try ANYTHING in the pattern (Bobby decides).
+  const anyFit = cands.filter((e) => fitsEq(e, tags));
+  if (anyFit.length) {
+    const e = anyFit[0];
+    return { ex: e, sub: `INJURY WORKAROUND NEEDED: only option for ${pattern} is ${e.name} — review` };
+  }
+  if (gaps && !gaps.includes(pattern)) gaps.push(pattern);
+  // Last resort: bodyweight-only entry in the pattern.
+  const bw = cands.find((e) => (e.eq || []).length === 0);
+  return { ex: bw || null, sub: bw ? null : `NO ${pattern.toUpperCase()} OPTION with his equipment` };
+}
+
+// Warm-up philosophy (Bobby's call, Sep 2026): ONE integrated warm-up per
+// session — general movement + baseball mobility (hips, t-spine, shoulders,
+// ankles) + hitting prep, run at session start. That IS the Mobility tab.
+// Athletes hit first then lift (app order), so they arrive at med ball /
+// lifting already warm — a second full warm-up is dead time they'd skip.
+// On lifting-only days, the full Mobility tab runs before lifting.
+// Heavy lifts don't get a separate warm-up routine either: ramp-up sets are
+// baked into each main lift below.
+function rampNote(ex) {
+  const eq = ex.eq || [];
+  if (eq.includes('barbell')) return 'Ramp: bar x10 → 50% x8 → 70% x5 → work sets';
+  if (eq.includes('dumbbell') || eq.includes('kettlebell')) return 'Ramp: 1 light set x12 → 1 medium set x8 → work sets';
+  return 'Ramp: 1 easy set x10 → work sets';
+}
+// Baseball mobility template (Sep 2026): rotational-athlete mobility, not
+// generic. Hips / t-spine / shoulders / ankles — the baseball kinetic chain.
+const MOBILITY_TEMPLATE = [
+  { section: 'Hips', items: [
+    ['90/90 Hip Switches', '8 each side'], ['Pigeon Stretch', '45 sec each side'],
+    ['Half-Kneeling Hip Flexor Stretch', '30 sec each side'], ['Deep Squat Hold w/ Elbow Press', '30 sec'],
+  ]},
+  { section: 'T-Spine (rotation)', items: [
+    ['Open Books', '8 each side'], ['Quadruped Thoracic Rotations', '8 each side'],
+    ['Cat-Cow', '10'], ['Thread the Needle', '6 each side'],
+  ]},
+  { section: 'Shoulders', items: [
+    ['Sleeper Stretch', '30 sec each side'], ['Cross-Body Shoulder Stretch', '30 sec each side'],
+    ['Wall Slides', '10'], ['Band Pull-Aparts', '15'],
+  ]},
+  { section: 'Ankles', items: [
+    ['Knee-to-Wall', '10 each side'], ['Half-Kneeling Calf Stretch', '30 sec each side'],
+    ['Ankle Circles', '10 each direction'],
+  ]},
+];
+const MEDBALL_TEMPLATE = [
+  ['Med Ball Rotational Throw', '3 x 6 each side', 'Throw it like a swing — rotate and transfer'],
+  ['Med Ball Chest Pass', '3 x 8', 'Explode through the chest'],
+  ['Med Ball Slam', '3 x 8', 'Full body, max intent'],
+  ['Med Ball Overhead Throw', '3 x 6', 'Extend tall, throw far'],
+];
+const METABOLIC_TEMPLATE = [
+  ['Build-Up Sprints', '6 x 40 yd', 'Walk back recovery', ['field']],
+  ['Tempo Runs', '8 x 100 yd @ 70%', 'Jog back recovery', ['field']],
+  ['Jump Rope Intervals', '8 x 1 min on / 30 sec off', '', ['rope']],
+  ['Bike Intervals', '8 x 30 sec hard / 90 sec easy', '', []],
+];
+function mobilityBlocks(tags) {
+  return MOBILITY_TEMPLATE.map((sec) => ({
+    category: 'Mobility — ' + sec.section,
+    items: sec.items
+      .filter(([name]) => name !== 'Band Pull-Aparts' || tags.has('bands'))
+      .map(([drill, volume]) => ({ drill, volume })),
+  }));
+}
+function medballBlocks(tags) {
+  if (!tags.has('medball')) {
+    return [{ category: 'Med Ball', items: [
+      { drill: 'Rotational Jump', volume: '4 x 4 each side', notes: 'No med ball available — rotational power without the ball' },
+      { drill: 'Broad Jump', volume: '4 x 3', notes: 'Stick the landing' },
+    ]}];
+  }
+  return [{ category: 'Med Ball', items: MEDBALL_TEMPLATE.map(([drill, volume, notes]) => ({ drill, volume, notes })) }];
+}
+function metabolicBlocks(tags) {
+  const items = METABOLIC_TEMPLATE.filter(([, , , eq]) => (eq || []).every((t) => tags.has(t)))
+    .map(([drill, volume, notes]) => ({ drill, volume, notes }));
+  if (!items.length) items.push({ drill: 'Bodyweight Circuit', volume: '4 rounds', notes: 'Jumping jacks 30s / push-ups 10 / squats 15 / rest 1 min — no equipment needed' });
+  return [{ category: 'Metabolic', items }];
+}
+// Goal track from questionnaire answers.
+function goalTrack(a) {
+  const g = (a.goals || []).map((x) => String(x).toLowerCase());
+  if (a.strong_not_explosive || g.some((x) => x.includes('explosive')) ) return 'explosive';
+  if (g.some((x) => x.includes('exit') || x.includes('velo'))) return 'exit_velo';
+  if (g.some((x) => x.includes('strong'))) return 'strength';
+  if (g.some((x) => x.includes('health') || x.includes('stay healthy'))) return 'health';
+  if (g[0]) return 'balanced';
+  return 'balanced';
+}
+// Full lifting draft: goal arc + season + equipment + injuries + warm-ups.
+// opts: { blockIndex (0-based), progression (progressionRead output or null) }
+function buildLiftingDraft(a, opts) {
+  const o = opts || {};
+  const track = goalTrack(a);
+  const arc = GOAL_BLOCK_ARCS[track] || GOAL_BLOCK_ARCS.balanced;
+  const step = arc[Math.min(o.blockIndex || 0, arc.length - 1)];
+  let emphasis = step.emphasis; // strength | power | speed | health
+  const tags = equipmentTags(a);
+  const rules = injuryKeys(a);
+  const season = a.season_phase || 'offseason';
+  const subs = [];   // flagged substitutions for Bobby
+  const gaps = [];   // equipment gaps for Bobby
+  // Pre-season biases toward the express end (potentiation, not building).
+  if (season === 'preseason' && emphasis === 'strength') emphasis = 'power';
+  const inSeason = season === 'inseason';
+  const n = inSeason ? 2 : Math.min(6, Math.max(2, a.lift_days_per_week || 4));
+  const used = new Set();
+  const mk = (pickRes, kind) => {
+    const e = pickRes.ex;
+    if (!e) return null;
+    if (pickRes.sub) subs.push(pickRes.sub);
+    used.add(e.name);
+    const sc = e.schemes[emphasis] || e.schemes.strength;
+    const extra = [];
+    if (kind === 'contrast') extra.push('CONTRAST: do the hold, then throw IMMEDIATELY');
+    // Main lifts carry their own ramp-up — that's the warm-up for heavy work.
+    if (kind === 'main') extra.push(rampNote(e));
+    return {
+      name: e.name, sets: sc[0], reps: sc[1],
+      target_rpe: sc[2] || '',
+      notes: [sc[3], ...extra].filter(Boolean).join(' · ').slice(0, 220),
+    };
+  };
+  const days = [];
+  const buildDay = (label, plan) => {
+    const exs = [];
+    for (const [pattern, kind] of plan) {
+      const r = pickExercise(pattern, tags, rules, track, used, gaps);
+      if (!r.ex) { subs.push(`No ${pattern} option with his equipment — pattern skipped`); continue; }
+      const ex = mk(r, kind);
+      if (ex) exs.push(ex);
+    }
+    return { label, exercises: exs };
+  };
+  if (n <= 3 || inSeason) {
+    // Full-body A/B (also the in-season maintenance format: 2x, short).
+    const plans = [
+      ['Full Body A', [['rotational', 'power'], ['squat', 'main'], ['push_h', 'main'], ['pull_h', 'acc'], ['core', 'acc']]],
+      ['Full Body B', [['jump', 'power'], ['hinge', 'main'], ['pull_v', 'main'], ['push_v', 'acc'], ['carry', 'acc']]],
+    ];
+    for (let i = 0; i < n; i++) {
+      const [label, plan] = plans[i % 2];
+      const d = buildDay(label + (inSeason ? ' (in-season maintenance)' : ''), plan);
+      if (inSeason) d.exercises = d.exercises.slice(0, 4);
+      days.push(d);
+    }
+  } else {
+    // Upper/lower split, 4 days: lower strength / upper strength / lower explosive / upper explosive.
+    const plans = [
+      ['Lower — Strength', [['rotational', 'power'], ['squat', 'main'], ['unilateral', 'main'], ['hinge', 'acc'], ['core', 'acc']]],
+      ['Upper — Strength', [['rotational', 'power'], ['push_h', 'main'], ['pull_h', 'main'], ['push_v', 'acc'], ['pull_v', 'acc']]],
+      ['Lower — Explosive', [['jump', 'power'], ['hinge', 'main'], ['unilateral', 'acc'], ['squat', 'acc'], ['core', 'acc']]],
+      ['Upper — Explosive', [['rotational', 'power'], ['push_v', 'main'], ['pull_v', 'main'], ['push_h', 'acc'], ['core', 'acc']]],
+    ];
+    for (let i = 0; i < n; i++) {
+      const [label, plan] = plans[i % plans.length];
+      days.push(buildDay(i >= 4 ? label + ' (wk2)' : label, plan));
+    }
+  }
+  const notes = [];
+  notes.push(`Goal track: ${track} · Block emphasis: ${step.label}${inSeason ? ' · IN-SEASON: 2x/week maintenance, never bury him' : ''}`);
+  notes.push('WARM-UP: one integrated warm-up per session (Mobility tab + hitting prep) at session start. Default order is hitting first — athlete arrives at med ball already warm, goes straight in. If lifting runs first, do the full Mobility tab + the lifting-day primer, then med ball. Main lifts carry their own ramp-up sets — those are essential, not optional.');
+  if (season === 'preseason') notes.push('Pre-season: potentiation style — long rest, quality over fatigue.');
+  if (rules.length) notes.push('INJURIES: ' + rules.map((r) => r.note).join(' · '));
+  if (subs.length) notes.push('SUBSTITUTIONS (review): ' + subs.join(' | '));
+  if (gaps.length) notes.push('EQUIPMENT GAPS — no ' + gaps.join(', ') + ' option with what he has. Consider: ' + gaps.map((g) => ({ squat: 'goblet/box squat or gym access', hinge: 'DB RDLs or trap bar access', push_h: 'push-up progressions or bench access', pull_v: 'a pull-up bar or bands', rotational: 'a med ball (any weight)', jump: 'open floor space' }[g] || 'equipment upgrade')).join('; '));
+  if (o.progression && o.progression.adjustments && o.progression.adjustments.length) {
+    notes.push('PROGRESSION READ: ' + o.progression.adjustments.join(' | '));
+  }
+  return { days, notes, draft: true, subs, gaps, track, emphasis, block_index: o.blockIndex || 0 };
+}
+function intakeTokenValid(tok) {
+  const cur = getIntakeToken();
+  return !!(tok && cur && tok === cur);
+}
+
+// ---- Progression intelligence (Sep 2026) ----
+// When Bobby drafts the NEXT 4-week block, the app reads the athlete's logged
+// lifting data (program_checkoffs: weight + RPE per lift per day) and tells him
+// what's actually improving vs stalled, then recommends the next block's
+// emphasis. Data-driven, not calendar-driven: the goal arc only advances
+// toward power/speed once strength is confirmed in the logs.
+//
+// Bobby approves every next block before it goes live; this read exists to
+// make that approval fast and informed. The next-block builder should call
+// progressionRead(userId) and attach the result to the draft.
+
+// Multi-block emphasis arc per goal track. Index = 0-based 4-week block; the
+// last entry repeats for later blocks. Bobby will send more guidelines — keep
+// this table easy to edit.
+const GOAL_BLOCK_ARCS = {
+  exit_velo: [
+    { emphasis: 'strength', label: 'Block 1 — Build the base', detail: 'Absorb → produce: heavy compounds, slow eccentrics, max-effort isometrics. Strength before speed.' },
+    { emphasis: 'strength_power', label: 'Block 2 — Strength + intro power', detail: 'Keep the heavy work; layer in contrast pairings and max-intent med ball throws.' },
+    { emphasis: 'power', label: 'Block 3+ — Express it fast', detail: 'Move weight fast: jump squats, speed work, rotational power. Strength confirmed in the logs.' },
+  ],
+  strength: [
+    { emphasis: 'strength', label: 'Block 1 — Absorb force', detail: 'Heavy compounds, slow eccentrics (3–5 sec), total control under tension.' },
+    { emphasis: 'strength', label: 'Block 2 — Produce force', detail: 'Max-effort isometrics, paused positions, heavy holds. Extend the strength block.' },
+    { emphasis: 'strength_power', label: 'Block 3+ — Strength + power', detail: 'Base built; start expressing it fast while keeping one heavy day.' },
+  ],
+  explosive: [
+    { emphasis: 'strength_speed', label: 'Block 1 — A little strength + intro speed', detail: 'One heavy compound day to confirm the base; everything else moves fast.' },
+    { emphasis: 'power', label: 'Block 2+ — All speed', detail: 'Jump squats, contrast pairings, max-intent med ball, long rest for quality.' },
+    { emphasis: 'power', label: 'Block 3+ — Stay explosive', detail: 'Keep expressing; re-test the heavy lifts monthly to confirm the base holds.' },
+  ],
+  health: [
+    { emphasis: 'health', label: 'Every block — Train, don\'t strain', detail: 'Moderate loads (RPE 6–8), single-leg/multi-plane work, isometrics. Never grind.' },
+    { emphasis: 'health', label: 'Every block — Train, don\'t strain', detail: 'Same: consistency beats intensity. Rotate variations, not maxes.' },
+  ],
+  balanced: [
+    { emphasis: 'strength', label: 'Block 1 — Build the base', detail: 'Heavy compounds with control; learn the movements.' },
+    { emphasis: 'strength_power', label: 'Block 2 — Strength + power', detail: 'Add explosive work on top of the base.' },
+    { emphasis: 'power', label: 'Block 3+ — Express it', detail: 'Shift toward speed as strength is confirmed.' },
+  ],
+};
+const GOAL_TRACK_LABELS = {
+  exit_velo: 'Build exit velo',
+  strength: 'Get stronger',
+  explosive: 'Strong, needs explosiveness',
+  health: 'Stay healthy',
+  balanced: 'Balanced',
+};
+const EMPHASIS_LABELS = {
+  strength: 'Strength',
+  strength_power: 'Strength + power',
+  strength_speed: 'Strength + intro speed',
+  power: 'Power / speed',
+  health: 'Health / maintenance',
+};
+// How "power-oriented" an emphasis is; the arc only moves up this ladder when
+// the logs confirm strength. A stall steps back down one rung.
+const EMPHASIS_RANK = { health: 0, strength: 1, strength_speed: 2, strength_power: 2, power: 3 };
+const EMPHASIS_STEP_BACK = { power: 'strength_power', strength_power: 'strength', strength_speed: 'strength' };
+
+// Estimated 1RM from a logged set via Epley, using RPE as reps-in-reserve.
+// Falls back to RPE 8 when the athlete logged weight without an RPE.
+function estimated1RM(weight, rpe) {
+  const w = Number(weight);
+  if (!(w > 0)) return null;
+  let r = parseInt(rpe, 10);
+  if (!(r >= 1 && r <= 10)) r = 8;
+  return w * (1 + (10 - r) / 30);
+}
+function liftNameFromKey(itemKey) {
+  const m = String(itemKey || '').match(/^lift::(?:[^:]+)::(.+)$/);
+  return (m ? m[1] : String(itemKey || '')).trim();
+}
+// Per-lift progression from the logs: improving / stalled / regressing /
+// holding / new. Compares mean estimated-1RM of the earliest sessions vs the
+// most recent sessions; a lift is "stalled" when it hasn't moved in 3+ weeks
+// of regular logging (Bobby's flag-for-review rule).
+function analyzeLiftProgression(userId) {
+  const keys = db
+    .prepare(
+      `SELECT DISTINCT item_key FROM program_checkoffs
+       WHERE user_id = ? AND kind = 'lift' AND weight IS NOT NULL AND weight > 0`
+    )
+    .all(userId)
+    .map((r) => r.item_key);
+  const out = [];
+  for (const key of keys) {
+    const logs = db
+      .prepare(
+        `SELECT day, weight, rpe FROM program_checkoffs
+         WHERE user_id = ? AND kind = 'lift' AND item_key = ? AND weight IS NOT NULL AND weight > 0
+         ORDER BY day ASC, id ASC`
+      )
+      .all(userId, key);
+    if (!logs.length) continue;
+    const name = liftNameFromKey(key) || key;
+    const pts = logs.map((l) => ({ day: l.day, e1: estimated1RM(l.weight, l.rpe), w: Number(l.weight) }));
+    const mean = (a) => a.reduce((s, p) => s + p.e1, 0) / a.length;
+    // Few sessions: compare first vs last directly. Enough history: compare
+    // means of the first three vs the last three to smooth daily noise.
+    const head = pts.length >= 6 ? pts.slice(0, 3) : pts.slice(0, 1);
+    const tail = pts.length >= 6 ? pts.slice(-3) : pts.slice(-1);
+    const e1First = mean(head);
+    const e1Last = mean(tail);
+    const pct = e1First > 0 ? ((e1Last - e1First) / e1First) * 100 : 0;
+    const spanDays = Math.round(
+      (new Date(pts[pts.length - 1].day + 'T12:00:00') - new Date(pts[0].day + 'T12:00:00')) / 86400000
+    );
+    const topWeight = Math.max(...pts.map((p) => p.w));
+    let status, detail;
+    if (pts.length < 3) {
+      status = 'new';
+      detail = `${pts.length} log${pts.length === 1 ? '' : 's'} — not enough data yet`;
+    } else if (pct >= 2.5) {
+      status = 'improving';
+      detail = `e1RM ${Math.round(e1First)} → ${Math.round(e1Last)} lbs (${pts.length} sessions, ${spanDays}d)`;
+    } else if (pct <= -2.5) {
+      status = 'regressing';
+      detail = `e1RM ${Math.round(e1First)} → ${Math.round(e1Last)} lbs (${pts.length} sessions, ${spanDays}d) — consider a deload week`;
+    } else if (spanDays >= 21 && pts.length >= 4) {
+      status = 'stalled';
+      detail = `no e1RM change in ${spanDays}d (${pts.length} sessions, top ${topWeight} lbs) — flag for review`;
+    } else {
+      status = 'holding';
+      detail = `flat so far (${pts.length} sessions, ${spanDays}d) — keep watching`;
+    }
+    out.push({
+      name, key, status, detail,
+      sessions: pts.length, spanDays,
+      pct: Math.round(pct * 10) / 10,
+      topWeight,
+    });
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name));
+  return out;
+}
+// The athlete's goal track, from their questionnaire answers; 'balanced' for
+// everyone else (direct signups, pre-questionnaire athletes).
+function athleteGoalTrack(userId) {
+  try {
+    const r = db
+      .prepare('SELECT answers_json FROM intake_responses WHERE user_id = ? ORDER BY id DESC LIMIT 1')
+      .get(userId);
+    if (r && r.answers_json) {
+      const a = JSON.parse(r.answers_json);
+      const goals = Array.isArray(a.goals) ? a.goals : [];
+      for (const g of ['exit_velo', 'strength', 'explosive', 'health']) {
+        if (goals.includes(g)) return g;
+      }
+    }
+  } catch (e) { /* fall through to balanced */ }
+  return 'balanced';
+}
+// 0-based 4-week block index. Uses the program's tracked block_number when
+// available; falls back to inferring from training history.
+function trainingBlockIndex(userId) {
+  try {
+    const r = db
+      .prepare('SELECT rp.block_number FROM remote_programs rp JOIN users u ON u.remote_program_id = rp.id WHERE u.id = ?')
+      .get(userId);
+    if (r && r.block_number) return Math.max(0, Number(r.block_number) - 1);
+  } catch (e) { /* ignore */ }
+  let start = null;
+  try {
+    const r = db
+      .prepare('SELECT MIN(day) AS d FROM program_checkoffs WHERE user_id = ? AND kind = \'lift\'')
+      .get(userId);
+    if (r && r.d) start = r.d;
+  } catch (e) { /* ignore */ }
+  if (!start) {
+    try {
+      const u = db.prepare('SELECT created_at FROM users WHERE id = ?').get(userId);
+      if (u && u.created_at) start = String(u.created_at).slice(0, 10);
+    } catch (e) { /* ignore */ }
+  }
+  if (!start) return 0;
+  const days = Math.floor((Date.now() - new Date(start + 'T12:00:00').getTime()) / 86400000);
+  return Math.max(0, Math.floor(days / 28));
+}
+// The progression read Bobby sees when drafting/approving the next block:
+// what's improving, what's stalled, and how the draft's emphasis adjusted
+// because of it. The emphasis follows the data, not just the calendar.
+function progressionRead(userId) {
+  const lifts = analyzeLiftProgression(userId);
+  const improving = lifts.filter((l) => l.status === 'improving');
+  const stalled = lifts.filter((l) => l.status === 'stalled' || l.status === 'regressing');
+  const track = athleteGoalTrack(userId);
+  const arc = GOAL_BLOCK_ARCS[track] || GOAL_BLOCK_ARCS.balanced;
+  const blockIndex = trainingBlockIndex(userId);
+  const step = arc[Math.min(blockIndex, arc.length - 1)];
+  const nextStep = arc[Math.min(blockIndex + 1, arc.length - 1)];
+  const adjustments = [];
+  let emphasis = step.emphasis;
+  if (stalled.length && (EMPHASIS_RANK[emphasis] || 0) >= 2) {
+    // Strength not confirmed — step back toward strength, don't advance.
+    const held = EMPHASIS_STEP_BACK[emphasis] || 'strength';
+    adjustments.push(
+      `Holding strength emphasis — ${stalled.map((l) => l.name).join(', ')} ${stalled.length === 1 ? 'is' : 'are'} stalled, so the block does not advance to ${EMPHASIS_LABELS[emphasis].toLowerCase()} yet.`
+    );
+    emphasis = held;
+  } else if (
+    improving.length &&
+    (EMPHASIS_RANK[nextStep.emphasis] || 0) > (EMPHASIS_RANK[step.emphasis] || 0)
+  ) {
+    adjustments.push(
+      `Strength confirmed in the logs (${improving.map((l) => `${l.name} e1RM +${l.pct}%`).join(', ')}) → next block shifts toward speed: ${nextStep.label}.`
+    );
+  } else if (improving.length) {
+    adjustments.push(
+      `Strength confirmed (${improving.map((l) => `${l.name} e1RM +${l.pct}%`).join(', ')}) — arc position: ${step.label}.`
+    );
+  }
+  if (!lifts.length) {
+    adjustments.push('No lifting logs yet — drafting from the goal arc only. This read gets smarter as he logs.');
+  }
+  return {
+    track,
+    trackLabel: GOAL_TRACK_LABELS[track] || track,
+    blockNumber: blockIndex + 1,
+    arcStep: step,
+    nextStep,
+    emphasis,
+    emphasisLabel: EMPHASIS_LABELS[emphasis] || emphasis,
+    lifts,
+    improvingCount: improving.length,
+    stalledNames: stalled.map((l) => l.name),
+    lines: lifts.map((l) => ({ name: l.name, status: l.status, detail: l.detail })),
+    adjustments,
+  };
+}
+app.get('/intake/:token', (req, res) => {
+  if (req.user) return res.redirect('/');
+  if (!intakeTokenValid(req.params.token)) return res.status(404).send('Not found.');
+  res.send(views.intakeFormPage(req.params.token));
+});
+app.post('/intake/:token/submit', (req, res) => {
+  if (!intakeTokenValid(req.params.token)) return res.status(404).send('Not found.');
+  const ip = req.ip;
+  if (!attemptAllowed(ip)) {
+    return res.send(views.intakeFormPage(req.params.token, 'Too many attempts. Wait a few minutes and try again.', req.body));
+  }
+  const fail = (msg) => {
+    attemptFailed(ip);
+    return res.send(views.intakeFormPage(req.params.token, msg, req.body));
+  };
+  const a = parseIntakeBody(req.body);
+  if (!a.first_name || !a.last_name) return fail('Enter your first and last name.');
+  if (!validEmail(a.email)) return fail('Enter a valid email address.');
+  if (db.prepare('SELECT id FROM users WHERE email = ?').get(a.email)) {
+    return fail('An account with that email already exists. Try logging in.');
+  }
+  if (!validDob(a.date_of_birth)) return fail('Enter your date of birth.');
+  if (!a.components.length) return fail('Pick at least one training component below.');
+  if (!(req.body.agree_terms === '1' || req.body.agree_terms === 'on')) {
+    return fail('Please agree to the Terms of Service and Privacy Policy.');
+  }
+  const age = ageOn(a.date_of_birth);
+  if (age !== null && age < 18) {
+    if (!a.parent_name) return fail('A parent or guardian\u2019s name is required for players under 18.');
+    if (!validEmail(a.parent_email)) return fail('A parent or guardian\u2019s valid email is required for players under 18.');
+  }
+  const athleteName = `${a.first_name} ${a.last_name}`;
+  const needsParentConsent = age !== null && age < 13;
+  const status = needsParentConsent ? 'pending_parent' : 'pending';
+  const nowIso = new Date().toISOString();
+  // Draft program first so the account can link straight to it.
+  const prog = buildIntakeProgram(a, athleteName);
+  try { videoLinks.attachVideoLinks(prog, videoLinks.getLibraryRows(db)); } catch (e) { /* library not ready */ }
+  const pInfo = db
+    .prepare('INSERT INTO remote_programs (athlete_name, program_json, updated_at, block_start, block_number) VALUES (?, ?, ?, ?, 1)')
+    .run(athleteName, JSON.stringify(prog), nowIso, nowIso.slice(0, 10));
+  if (a.components.includes('lifting')) {
+    const draft = buildLiftingDraft(a);
+    const lInfo = db
+      .prepare('INSERT INTO lifting_programs (name, is_template, program_json, updated_at) VALUES (?, 0, ?, ?)')
+      .run(`Lifting \u2014 ${athleteName} (DRAFT)`, JSON.stringify(draft), nowIso);
+    db.prepare('UPDATE remote_programs SET lifting_program_id = ? WHERE id = ?')
+      .run(lInfo.lastInsertRowid, pInfo.lastInsertRowid);
+  }
+  // Questionnaire athletes join Bobby's remote org directly (no signup code).
+  let orgId = null;
+  try {
+    const org = db.prepare('SELECT id FROM organizations WHERE name = ?').get(FOUNDER_ORG_NAME);
+    if (org) orgId = org.id;
+  } catch (e) { /* organizations not ready */ }
+  const hash = bcrypt.hashSync(crypto.randomBytes(32).toString('hex'), 12);
+  const uInfo = db
+    .prepare(
+      'INSERT INTO users (email, password_hash, role, athlete_name, first_name, last_name, created_at, status, organization_id, date_of_birth, player_type, accepted_terms_at, terms_version, parent_name, parent_email, remote_program_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    )
+    .run(a.email, hash, 'athlete', athleteName, a.first_name, a.last_name, nowIso, status, orgId, a.date_of_birth, 'hitter', nowIso, '1', a.parent_name || null, a.parent_email || null, pInfo.lastInsertRowid);
+  db.prepare('INSERT INTO intake_responses (user_id, answers_json, created_at) VALUES (?, ?, ?)')
+    .run(uInfo.lastInsertRowid, JSON.stringify(a), nowIso);
+  // Welcome token: sets their password without needing email (30-day expiry).
+  const token = crypto.randomBytes(32).toString('hex');
+  const expires = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+  db.prepare(
+    'INSERT INTO password_reset_tokens (user_id, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?)'
+  ).run(uInfo.lastInsertRowid, resetTokenHash(token), expires, nowIso);
+  if (needsParentConsent) {
+    const ct = crypto.randomBytes(32).toString('hex');
+    db.prepare('UPDATE users SET parent_consent_token_hash = ?, parent_consent_sent_at = ? WHERE id = ?')
+      .run(resetTokenHash(ct), nowIso, uInfo.lastInsertRowid);
+    sendParentConsentEmail(a.parent_email, athleteName, `${publicBaseUrl(req)}/parent-consent?token=${ct}`, publicBaseUrl(req))
+      .catch((e) => console.warn('intake parent consent email failed:', e.message));
+  }
+  pushToCoaches(
+    'New intake questionnaire',
+    `${athleteName} just filled out the intake \u2014 draft program ready to review.`,
+    '/coach/programs'
+  ).catch((e) => console.warn('intake push failed:', e.message));
+  res.redirect('/welcome/' + token);
+});
+// Welcome link: the prospect sets their password (no email needed), gets
+// logged in, and waits on the pending page until Bobby reviews + approves.
+app.get('/welcome/:token', (req, res) => {
+  if (req.user) return res.redirect('/');
+  const row = validResetToken(req.params.token);
+  if (!row) return res.send(views.welcomePage(null, 'That link is invalid or expired. Ask Bobby for a fresh one.'));
+  res.send(views.welcomePage(req.params.token));
+});
+app.post('/welcome/:token', (req, res) => {
+  const row = validResetToken(req.params.token);
+  if (!row) return res.send(views.welcomePage(null, 'That link is invalid or expired. Ask Bobby for a fresh one.'));
+  const pw = String(req.body.password || '');
+  const pw2 = String(req.body.confirm_password || '');
+  if (pw.length < 8) return res.send(views.welcomePage(req.params.token, 'Password must be at least 8 characters.'));
+  if (pw !== pw2) return res.send(views.welcomePage(req.params.token, 'Passwords do not match.'));
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(pw, 12), row.user_id);
+  db.prepare("UPDATE password_reset_tokens SET used_at = datetime('now') WHERE id = ?").run(row.id);
+  req.session.userId = row.user_id;
+  res.redirect('/pending');
+});
+// Liability waiver: athletes with a program sign before they can open it.
+// Typed full name (+ parent co-sign for under-18) and date; version pinned.
+app.get('/waiver', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.redirect('/coach');
+  if (!needsWaiver(req.user)) return res.redirect('/program');
+  res.send(views.waiverPage(req.user, null, { paragraphs: WAIVER_PARAGRAPHS, minor: waiverIsMinor(req.user) }));
+});
+app.post('/waiver', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.redirect('/coach');
+  if (!needsWaiver(req.user)) return res.redirect('/program');
+  const name = String(req.body.waiver_name || '').trim().slice(0, 120);
+  if (name.length < 2) return res.send(views.waiverPage(req.user, 'Type your full name to sign.', { paragraphs: WAIVER_PARAGRAPHS, minor: waiverIsMinor(req.user) }));
+  const minor = waiverIsMinor(req.user);
+  const parent = String(req.body.waiver_parent_name || '').trim().slice(0, 120);
+  if (minor && parent.length < 2) {
+    return res.send(views.waiverPage(req.user, 'A parent or guardian must co-sign for players under 18.', { paragraphs: WAIVER_PARAGRAPHS, minor: true }));
+  }
+  db.prepare(
+    'UPDATE users SET waiver_signed_at = ?, waiver_name = ?, waiver_parent_name = ?, waiver_version = ? WHERE id = ?'
+  ).run(new Date().toISOString(), name, minor ? parent : null, WAIVER_VERSION, req.user.id);
+  res.redirect('/program');
+});
+// Gate program access on the waiver — no program until it's signed.
+function requireWaiver(req, res, next) {
+  if (needsWaiver(req.user)) return res.redirect('/waiver');
+  next();
+}
+// Bobby's intake review: clean read of a prospect's answers + their draft.
+app.get('/coach/intake/:id', requireCoachAny, (req, res) => {
+  setApprovalCount(req);
+  const row = db
+    .prepare(
+      `SELECT i.*, u.first_name, u.last_name, u.email, u.status, u.remote_program_id
+       FROM intake_responses i JOIN users u ON u.id = i.user_id WHERE i.id = ?`
+    )
+    .get(req.params.id);
+  if (!row) return res.redirect('/coach/programs');
+  let answers = {};
+  try { answers = JSON.parse(row.answers_json || '{}'); } catch (e) { answers = {}; }
+  res.send(views.intakeDetailPage(realUser(req), { ...row, answers }));
+});
+// Rotate the shareable questionnaire link.
+app.post('/coach/intake/rotate', requireCoach, (req, res) => {
+  db.prepare("UPDATE settings SET value = ? WHERE key = 'intake_token'")
+    .run(crypto.randomBytes(12).toString('hex'));
+  res.redirect('/coach/programs');
+});
+
+// ---- 4-week training blocks (Sep 2026) ----
+// Blocks run 4 weeks then switch. Bobby builds the next block a few days early
+// once the guy confirms renewal; it flips automatically on the date (or he can
+// make it current manually from the program edit page).
+function blockSweep() {
+  const today = chiToday();
+  try {
+    // 1) Block ended → notify Bobby once (he builds the next block).
+    const due = db.prepare(
+      `SELECT rp.id, rp.athlete_name FROM remote_programs rp
+       WHERE rp.block_start != '' AND date(rp.block_start, '+28 days') <= date(?)
+       AND (rp.block_notified_at IS NULL OR rp.block_notified_at = '' OR rp.block_notified_at < rp.block_start)`
+    ).all(today);
+    for (const p of due) {
+      db.prepare('UPDATE remote_programs SET block_notified_at = ? WHERE id = ?')
+        .run(new Date().toISOString(), p.id);
+      pushToCoaches(
+        'New program due',
+        `${p.athlete_name}'s 4-week block is up — build the next block.`,
+        '/coach/program/' + p.id + '/edit'
+      ).catch((e) => console.warn('block-due push failed:', e.message));
+    }
+    // 2) Staged next block reached its flip date → make it current.
+    const flips = db.prepare(
+      `SELECT id, athlete_name, next_lifting_id, next_block_start, block_number FROM remote_programs
+       WHERE next_lifting_id IS NOT NULL AND next_block_start != '' AND date(next_block_start) <= date(?)`
+    ).all(today);
+    for (const p of flips) {
+      db.prepare(
+        `UPDATE remote_programs SET lifting_program_id = ?, block_start = ?, block_number = ?,
+         next_lifting_id = NULL, next_block_start = '', block_notified_at = '' WHERE id = ?`
+      ).run(p.next_lifting_id, p.next_block_start, (Number(p.block_number) || 1) + 1, p.id);
+      pushToCoaches(
+        'New block is live',
+        `${p.athlete_name}'s next 4-week block just flipped over.`,
+        '/coach/program/' + p.id + '/edit'
+      ).catch((e) => console.warn('block-flip push failed:', e.message));
+    }
+  } catch (e) { console.warn('blockSweep failed:', e.message); }
+}
+let lastBlockSweepDay = '';
+setInterval(() => {
+  try {
+    const d = chiToday();
+    if (d === lastBlockSweepDay) return;
+    lastBlockSweepDay = d;
+    blockSweep();
+  } catch (e) { console.warn('block sweep tick failed:', e.message); }
+}, 15 * 60 * 1000);
+// Build the NEXT 4-week block draft for a program: progression read from the
+// athlete's logged lifts + goal arc + answers. Staged to flip on the date;
+// Bobby edits in the lifting editor and approves before anything goes live.
+app.post('/coach/program/:id/next-block', requireCoach, (req, res) => {
+  const p = getProgram(req.params.id);
+  if (!p) return res.redirect('/coach/programs');
+  const linked = db.prepare('SELECT id FROM users WHERE remote_program_id = ? LIMIT 1').get(p.id);
+  let answers = {};
+  if (linked) {
+    try {
+      const r = db.prepare('SELECT answers_json FROM intake_responses WHERE user_id = ? ORDER BY id DESC LIMIT 1').get(linked.id);
+      if (r) answers = JSON.parse(r.answers_json || '{}');
+    } catch (e) { answers = {}; }
+  }
+  const prog = p.prog || {};
+  if (answers.season_phase == null && prog.draft_note && /in-season/i.test(prog.draft_note)) answers.season_phase = 'inseason';
+  const blockIndex = Math.max(0, (Number(db.prepare('SELECT block_number AS n FROM remote_programs WHERE id = ?').get(p.id).n) || 1));
+  let progression = null;
+  try { if (linked) progression = progressionRead(linked.id); } catch (e) { progression = null; }
+  const draft = buildLiftingDraft(answers, { blockIndex, progression });
+  draft.progression_read = progression;
+  const nowIso = new Date().toISOString();
+  const info = db.prepare(
+    'INSERT INTO lifting_programs (name, is_template, program_json, updated_at) VALUES (?, 0, ?, ?)'
+  ).run(`Lifting \u2014 ${p.athlete_name} (Block ${blockIndex + 1} DRAFT)`, JSON.stringify(draft), nowIso);
+  const cur = db.prepare('SELECT block_start FROM remote_programs WHERE id = ?').get(p.id);
+  const base = (cur && cur.block_start) || nowIso.slice(0, 10);
+  const flip = new Date(base + 'T12:00:00');
+  flip.setDate(flip.getDate() + 28);
+  const flipIso = flip.toISOString().slice(0, 10);
+  db.prepare('UPDATE remote_programs SET next_lifting_id = ?, next_block_start = ? WHERE id = ?')
+    .run(info.lastInsertRowid, flipIso, p.id);
+  res.redirect('/coach/lifting/' + info.lastInsertRowid + '/edit');
+});
+// Manual: make the staged next block current right now.
+app.post('/coach/program/:id/block-flip-now', requireCoach, (req, res) => {
+  const row = db.prepare('SELECT id, next_lifting_id, block_number FROM remote_programs WHERE id = ?').get(req.params.id);
+  if (!row || !row.next_lifting_id) return res.redirect('/coach/program/' + req.params.id + '/edit');
+  const today = chiToday();
+  db.prepare(
+    `UPDATE remote_programs SET lifting_program_id = ?, block_start = ?, block_number = ?,
+     next_lifting_id = NULL, next_block_start = '', block_notified_at = '' WHERE id = ?`
+  ).run(row.next_lifting_id, today, (Number(row.block_number) || 1) + 1, row.id);
+  res.redirect('/coach/program/' + req.params.id + '/edit');
+});
+// Manual: mark a fresh block started (for non-lifting programs or corrections).
+app.post('/coach/program/:id/block-bump', requireCoach, (req, res) => {
+  const row = db.prepare('SELECT id, block_number FROM remote_programs WHERE id = ?').get(req.params.id);
+  if (!row) return res.redirect('/coach/programs');
+  db.prepare("UPDATE remote_programs SET block_number = ?, block_start = ?, block_notified_at = '' WHERE id = ?")
+    .run((Number(row.block_number) || 1) + 1, chiToday(), row.id);
+  res.redirect('/coach/program/' + req.params.id + '/edit');
 });
 
 // ---- Video library: Bobby's Development System, synced from Drive by the
@@ -3627,7 +4739,8 @@ function remoteProgramList() {
     .prepare(
       `SELECT p.id, p.athlete_name, p.aliases, p.updated_at, p.lifting_program_id,
               lp.name AS lifting_name,
-              (SELECT email FROM users WHERE remote_program_id = p.id LIMIT 1) AS user_email
+              (SELECT email FROM users WHERE remote_program_id = p.id LIMIT 1) AS user_email,
+              instr(p.program_json, '"draft":true') AS is_draft
        FROM remote_programs p LEFT JOIN lifting_programs lp ON lp.id = p.lifting_program_id
        ORDER BY p.athlete_name`
     )
@@ -3653,8 +4766,13 @@ app.get('/coach', requireCoachAny, (req, res) => {
   const pending = pendingList(scope);
   const me = realUser(req);
   const analytics = coachAnalytics(scope, stats);
+  // Website application leads: global coaches only (Bobby's business).
+  let leads = [];
+  if (!me.organizationId) {
+    leads = db.prepare('SELECT * FROM leads ORDER BY submitted_at DESC LIMIT 25').all();
+  }
   res.send(
-    views.coachHomePage(me, quiet, latest, pending, userPushSubscriptions(req.user.id).length > 0, analytics)
+    views.coachHomePage(me, quiet, latest, pending, userPushSubscriptions(req.user.id).length > 0, analytics, leads)
   );
 });
 
@@ -3856,6 +4974,7 @@ app.get('/messages', requireLogin, (req, res) => {
       error: req.query.error || null,
       canMessage: isMyProgramPlayer(me.id),
       nudge: userPushSubscriptions(me.id).length === 0,
+      prefill: String(req.query.prefill || '').slice(0, 500),
     })
   );
 });
@@ -3894,7 +5013,18 @@ app.post('/coach/organizations/:id/mine', requireCoach, requireFinances, (req, r
 // Coach Programs tab: remote programs.
 app.get('/coach/programs', requireGlobalCoachAny, (req, res) => {
   setApprovalCount(req);
-  res.send(views.coachProgramsPage(realUser(req), remoteProgramList()));
+  const intakes = db
+    .prepare(
+      `SELECT i.id, i.created_at, u.first_name, u.last_name, u.email, u.status,
+              u.remote_program_id, u.waiver_signed_at,
+              instr(p.program_json, '"draft":true') AS is_draft
+       FROM intake_responses i
+       JOIN users u ON u.id = i.user_id
+       LEFT JOIN remote_programs p ON p.id = u.remote_program_id
+       ORDER BY i.id DESC LIMIT 20`
+    )
+    .all();
+  res.send(views.coachProgramsPage(realUser(req), remoteProgramList(), { url: intakeLink(req), intakes }));
 });
 
 // Flip a coach between full access and view-only. Full coaches only, never
@@ -5272,6 +6402,65 @@ async function sendResetEmail(to, link) {
 }
 
 // ---- Account approvals: Bobby reviews every signup ----
+
+// ---- Website application leads (Sep 2026) ----
+// Short public application form on the sales website -> Bobby's dashboard.
+// This is NOT the full questionnaire (that stays behind Bobby's link,
+// post-call). Docs: docs/leads-api.md
+//
+// Auth: LEADS_API_SECRET env var must match, via the `secret` form field,
+// `?secret=` query param, or `x-leads-secret` header. Honeypot: the `website`
+// field must be empty (bots fill it). Plus a simple per-IP rate limit.
+const LEAD_RATE = new Map(); // ip -> { count, resetAt }
+const LEAD_RATE_MAX = 10; // submissions per window
+const LEAD_RATE_WINDOW_MS = 60 * 60 * 1000;
+function leadRateOk(ip) {
+  const now = Date.now();
+  const rec = LEAD_RATE.get(ip);
+  if (!rec || now >= rec.resetAt) {
+    LEAD_RATE.set(ip, { count: 1, resetAt: now + LEAD_RATE_WINDOW_MS });
+    return true;
+  }
+  rec.count += 1;
+  return rec.count <= LEAD_RATE_MAX;
+}
+app.post('/api/leads', (req, res) => {
+  const secret = process.env.LEADS_API_SECRET;
+  if (!secret) return res.status(503).json({ error: 'leads endpoint not configured' });
+  const provided = req.get('x-leads-secret') || req.query.secret || req.body.secret;
+  if (provided !== secret) return res.status(401).json({ error: 'unauthorized' });
+  if (String(req.body.website || '').trim() !== '') return res.status(400).json({ error: 'invalid submission' });
+  const ip = String((req.headers['x-forwarded-for'] || '').split(',')[0] || '').trim() || req.ip || 'unknown';
+  if (!leadRateOk(ip)) return res.status(429).json({ error: 'too many submissions' });
+  const b = req.body || {};
+  const name = String(b.name || '').trim().slice(0, 80);
+  const phone = String(b.phone || '').trim().slice(0, 30);
+  const ageLevel = String(b.age_level || b.age || '').trim().slice(0, 60);
+  const goals = String(b.goals || '').trim().slice(0, 500);
+  const source = String(b.source || 'website').trim().slice(0, 40) || 'website';
+  if (!name) return res.status(400).json({ error: 'name is required' });
+  if (!phone) return res.status(400).json({ error: 'phone is required' });
+  db.prepare(
+    'INSERT INTO leads (name, phone, age_level, goals, source, status, submitted_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(name, phone, ageLevel, goals, source, 'new', new Date().toISOString());
+  // Same coach-push path as signup approvals (Bobby, Sep 18 2026: push only).
+  pushToCoaches(
+    'New application',
+    `${name}${ageLevel ? ' · ' + ageLevel : ''} just applied — tap to call them back.`,
+    '/coach#leads'
+  ).catch((e) => console.warn('lead push failed:', e.message));
+  res.json({ ok: true });
+});
+
+// Lead status: new / contacted / enrolled / archived. Full-access global
+// coaches only (Bobby) — view-only Cam sees the list but can't change status.
+app.post('/coach/leads/:id/status', requireGlobalCoachAny, requireCoach, (req, res) => {
+  const id = Number(req.params.id);
+  const status = String(req.body.status || '').trim();
+  if (!['new', 'contacted', 'enrolled', 'archived'].includes(status)) return res.status(400).send('Bad status');
+  db.prepare('UPDATE leads SET status = ? WHERE id = ?').run(status, id);
+  res.redirect('/coach#leads');
+});
 
 // New hitter signed up — Bobby reviews every signup through the app
 // (Bobby, Sep 18 2026: no more signup emails to him — push only).

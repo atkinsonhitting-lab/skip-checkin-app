@@ -604,7 +604,7 @@
             var oi = parseInt(f.getAttribute('data-lift-day'), 10);
             if (oi !== ni) {
               f.setAttribute('data-lift-day', String(ni));
-              f.querySelectorAll('input[name^="lday_"]').forEach(function (inp) {
+              f.querySelectorAll('input[name^="lday_"], textarea[name^="lday_"]').forEach(function (inp) {
                 inp.name = inp.name.replace(/^lday_\d+_/, 'lday_' + ni + '_');
               });
               f.querySelectorAll('[data-addex]').forEach(function (b) { b.setAttribute('data-addex', String(ni)); });
@@ -627,6 +627,8 @@
           '<legend class="lift-day-legend">Day ' + (i + 1) + '</legend>' +
           '<input type="hidden" name="lday_' + i + '_excount" value="0" data-excount>' +
           '<label class="lift-field">Day label <input name="lday_' + i + '_label" maxlength="40" placeholder="Day ' + String.fromCharCode(65 + i) + '"></label>' +
+          '<label class="lift-field">Warm-up <span class="hint-inline">(one per line)</span>' +
+          '<textarea name="lday_' + i + '_warmup" rows="3" style="width:100%;box-sizing:border-box"></textarea></label>' +
           '<div class="lift-ex-list" data-exlist></div>' +
           '<div class="row-actions"><button type="button" class="btn small" data-addex="' + i + '">+ Exercise</button> ' +
           '<button type="button" class="btn btn-sm btn-danger" data-rmday>Remove day</button></div>';

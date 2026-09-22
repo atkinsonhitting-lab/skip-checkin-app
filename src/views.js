@@ -1780,7 +1780,7 @@ function coachOrganizationsPage(user, organizations, error, addedId) {
 
 // Coach Home: "needs your attention" — approvals waiting, hitters gone
 // quiet (no check-in in 3+ Chicago days), and the compact latest feed.
-function coachHomePage(user, quiet, latest, pending, pushOn, analytics) {
+function coachHomePage(user, quiet, latest, pending, pushOn, analytics, leads) {
   const canEdit = user.role === 'coach' && user.canEdit !== false;
   // Organization coaches see which program (and team) they're scoped to.
   const orgBanner = user.role === 'coach' && user.organizationName
@@ -1808,11 +1808,14 @@ function coachHomePage(user, quiet, latest, pending, pushOn, analytics) {
       : `<div class="stat-card">${inner}</div>`;
   };
   const isGlobal = !user.organizationId;
+  const leadList = leads || [];
+  const newLeadCount = leadList.filter((l) => l.status === 'new').length;
   const cards = [
     statCard(a.players || 0, 'Players'),
     ...(isGlobal
       ? [statCard(a.orgCount || 0, 'Organizations', '', '/coach/organizations'),
-         statCard(fmtMoney(a.revenueCents), 'Collected', '', '/coach/organizations')]
+         statCard(fmtMoney(a.revenueCents), 'Collected', '', '/coach/organizations'),
+         statCard(newLeadCount, 'New applications', '', '#leads')]
       : []),
     statCard(a.checkedInToday || 0, 'Checked in today'),
     statCard(a.checkinsWeek || 0, 'Check-ins \u00b7 7d', trendSub(a.checkinsWeek || 0, a.checkinsPrevWeek)),
@@ -1840,6 +1843,36 @@ function coachHomePage(user, quiet, latest, pending, pushOn, analytics) {
   const approvalNudge = pending && pending.length
     ? `<a class="card approval-nudge" href="/coach/approvals">${pending.length} player${pending.length === 1 ? '' : 's'} waiting for approval →</a>`
     : '';
+  // Website application leads (Sep 2026): name, phone, age/level, goals.
+  // Tap-to-call/text so Bobby can reach back fast.
+  const leadStatusPill = (s) => {
+    const cls = s === 'new' ? 'warn' : s === 'contacted' ? '' : s === 'enrolled' ? 'ok' : 'quiet';
+    return `<span class="badge ${cls}">${esc(s)}</span>`;
+  };
+  const leadCards = leadList
+    .map((l) => {
+      const tel = String(l.phone || '').replace(/[^\d+]/g, '');
+      const statusOpts = ['new', 'contacted', 'enrolled', 'archived']
+        .map((s) => `<option value="${s}"${l.status === s ? ' selected' : ''}>${s}</option>`)
+        .join('');
+      return `<div class="card athlete-card">
+        <div class="athlete-card-name">${esc(l.name)} ${leadStatusPill(l.status || 'new')}</div>
+        <div class="athlete-card-meta">${l.age_level ? `${esc(l.age_level)} · ` : ''}applied ${fmtDate(l.submitted_at)}</div>
+        ${l.goals ? `<div class="hint" style="margin-top:4px">${esc(l.goals)}</div>` : ''}
+        <div style="display:flex;gap:8px;margin:8px 0 0;flex-wrap:wrap;align-items:center">
+          ${tel ? `<a class="btn-small" href="tel:${esc(tel)}">Call</a><a class="btn-small btn-quiet" href="sms:${esc(tel)}">Text</a>` : ''}
+          ${canEdit ? `<form method="post" action="/coach/leads/${l.id}/status" style="margin:0;display:flex;gap:6px;align-items:center">
+            <select name="status" aria-label="Lead status">${statusOpts}</select>
+            <button class="btn-small btn-quiet" type="submit">Update</button>
+          </form>` : ''}
+        </div>
+      </div>`;
+    })
+    .join('');
+  const leadsSection = isGlobal
+    ? `<h2 class="section-head" id="leads">Website applications</h2>
+    ${leadCards || '<div class="card empty">No applications yet.</div>'}`
+    : '';
   const quietCards = (quiet || [])
     .map(
       (a) => `<a href="/coach/user/${encodeURIComponent(a.email)}" class="card athlete-card" style="display:block;color:inherit;text-decoration:none">
@@ -1860,6 +1893,7 @@ function coachHomePage(user, quiet, latest, pending, pushOn, analytics) {
     ${analyticsStrip}
     ${canEdit && !pushOn ? '<div class="card push-card"><p style="margin:0 0 10px"><strong>Turn on notifications</strong> <span class="hint">so you never miss an approval, a check-in, or a message.</span></p><p style="margin:0"><button type="button" class="btn-primary" id="push-enable-btn" style="margin-top:0">Turn on notifications</button></p></div>' : ''}
     ${approvalNudge}
+    ${leadsSection}
     ${orgBreakdown}
     <h2 class="section-head" id="gone-quiet">Gone quiet</h2>
     ${quietCards || '<div class="card empty">Everyone\u2019s checking in.</div>'}
@@ -1951,7 +1985,7 @@ function playerMessagesPage(user, msgs, opts) {
     ${o.error ? `<p class="error">${esc(o.error)}</p>` : ''}
     ${o.canMessage ? `<div class="card"><form method="post" action="/messages/to-coach">
       <label>Message Coach <span class="hint-inline">(500 characters max)</span>
-        <textarea name="body" maxlength="500" required rows="3" style="width:100%;box-sizing:border-box" placeholder="Ask Bobby anything…"></textarea>
+        <textarea name="body" maxlength="500" required rows="3" style="width:100%;box-sizing:border-box" placeholder="Ask Bobby anything…">${esc(o.prefill || '')}</textarea>
       </label>
       <button class="btn-primary" type="submit" style="margin-top:8px">Send</button>
     </form></div>` : ''}
@@ -2081,16 +2115,58 @@ function coachThreadPage(user, other, msgs, opts) {
 }
 
 // Coach Programs tab: the remote program list.
-function coachProgramsPage(user, remotePrograms) {
+function coachProgramsPage(user, remotePrograms, intake) {
   const canEdit = user.role === 'coach' && user.canEdit !== false;
-  const restricted = !!(opts && opts.restricted);
   return layout({
     title: 'Programs',
     user,
     tabs: coachTabs('programs', user.approvalCount, user),
     body: `<h1 class="page-title">Programs</h1>
+    ${intakeSection(intake || {}, canEdit)}
     ${remoteProgramsSection(remotePrograms || [], canEdit)}`,
   });
+}
+
+// ---- Pre-signup intake questionnaire ----
+
+// Bobby's shareable intake link + recent questionnaires. Full-access coaches
+// only (canEdit) see the rotate button; view-only coaches can still review.
+function intakeSection(intake, canEdit) {
+  const rows = (intake.intakes || [])
+    .map((r) => {
+      const name = [r.first_name, r.last_name].filter(Boolean).join(' ') || r.email;
+      const date = r.created_at ? esc(String(r.created_at).slice(0, 10)) : '';
+      const pill = r.is_draft
+        ? '<span class="pill-draft">Draft — unreviewed</span>'
+        : r.status === 'approved'
+          ? '<span class="pill">Approved</span>'
+          : '<span class="hint-inline">pending approval</span>';
+      const waiver = r.waiver_signed_at
+        ? `<span class="pill">Waiver signed ${esc(String(r.waiver_signed_at).slice(0, 10))}</span>`
+        : '<span class="pill-warn">Waiver pending</span>';
+      return `<div class="remote-row">
+        <div><strong>${esc(name)}</strong><div class="hint-inline">${esc(r.email || '')} · ${date}</div></div>
+        <div class="remote-actions">${pill} ${waiver}
+          <a class="btn btn-sm" href="/coach/intake/${r.id}">View answers</a>
+          ${r.remote_program_id ? `<a class="btn btn-sm" href="/coach/program/${r.remote_program_id}/edit">Edit draft</a>` : ''}
+        </div>
+      </div>`;
+    })
+    .join('');
+  return `<h2 class="section-head">New athlete intake</h2>
+  <div class="card">
+    <p class="hint" style="margin-top:0">Text this link to a prospect — they fill it out, their account is created, and a draft program is built from their answers for you to review.</p>
+    <div class="intake-linkrow">
+      <input type="text" readonly value="${esc(intake.url || '')}" id="intake-link" class="input-sm" style="flex:1;min-width:0" onclick="this.select()">
+      <button type="button" class="btn btn-sm" id="intake-copy">Copy</button>
+    </div>
+    ${canEdit ? `<form method="post" action="/coach/intake/rotate" class="inline-form" style="margin-top:8px"><button class="btn btn-sm btn-quiet" type="submit">New link</button></form>` : ''}
+    <h3 class="prog-h3" style="margin-top:14px">Recent questionnaires</h3>
+    ${rows || '<div class="empty">No questionnaires yet.</div>'}
+  </div>
+  <script>
+  (function(){var b=document.getElementById('intake-copy');if(!b)return;b.addEventListener('click',function(){var i=document.getElementById('intake-link');i.select();var done=function(){b.textContent='Copied';setTimeout(function(){b.textContent='Copy'},1500)};if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(i.value).then(done).catch(function(){document.execCommand('copy');done()})}else{document.execCommand('copy');done()}});})();
+  </script>`;
 }
 
 // Coaches with dashboard access — full access or view-only. Only a full
@@ -2199,6 +2275,32 @@ function programPage(user, p, opts) {
         `<a href="/program?sub=${t.id}${day ? '&day=' + encodeURIComponent(day) : ''}" class="subtab${t.id === sub ? ' active' : ''}">${esc(t.label)}</a>`
     )
     .join('')}</nav>`;
+  // Session order (Bobby's call, Sep 2026): hitting and lifting can run in
+  // either order. The athlete or Bobby picks; tabs follow the choice.
+  const sessionOrder = o.sessionOrder === 'lifting_first' ? 'lifting_first' : 'hitting_first';
+  const hasLiftingTab = tabs.some((t) => t.id === 'lifting');
+  const orderToggle = hasLiftingTab ? `<form method="post" action="/program/session-order" class="order-toggle">
+      <input type="hidden" name="sub" value="${esc(sub)}">
+      <span class="hint-inline">Session order:</span>
+      <button type="submit" name="session_order" value="hitting_first" class="btn-small${sessionOrder === 'hitting_first' ? '' : ' btn-quiet'}">Hitting first</button>
+      <button type="submit" name="session_order" value="lifting_first" class="btn-small${sessionOrder === 'lifting_first' ? '' : ' btn-quiet'}">Lifting first</button>
+    </form>` : '';
+  // Lifting-first primer: no hitting beforehand to warm them up, so the
+  // integrated warm-up has to fully prime med ball / explosive work and
+  // heavy lifting. Hitting-first just needs the short banner.
+  const liftPrimer = sessionOrder === 'lifting_first' ? `<details class="card warmup-block" open>
+      <summary class="routine-summary"><span class="routine-station">Prime-up — lifting first</span></summary>
+      <p class="hint" style="margin:0 0 6px">No hitting beforehand today, so prime fully before med ball. Do the <strong>Mobility tab</strong> first, then:</p>
+      <ol class="warmup-list">
+        <li>Leg swings front-to-back — 10 each leg</li>
+        <li>Hip openers — 8 each side</li>
+        <li>World's greatest stretch — 5 each side</li>
+        <li>A-skips — 2 x 20 yd (in place if no space)</li>
+        <li>Bounds — 2 x 20 yd</li>
+        <li>Build-up sprints: 3 x 30 yd, each faster (last ~90%)</li>
+      </ol>
+      <p class="hint" style="margin:6px 0 0">Then med ball, then lifts — the ramp-up sets on main lifts are <strong>essential</strong> today.</p>
+    </details>` : '';
 
   // Day helpers.
   const dayPrefix = (cat) => {
@@ -2210,6 +2312,7 @@ function programPage(user, p, opts) {
     if (/med\s*ball/i.test(n)) return 'medball';
     if (/mobility/i.test(n)) return 'mobility';
     if (/prep/i.test(n)) return 'prep';
+    if (/metabol|conditioning/i.test(n)) return 'metabolic';
     return 'hit';
   };
   const inDay = (cat, d) => dayPrefix(cat).toLowerCase() === String(d || '').toLowerCase();
@@ -2242,6 +2345,13 @@ function programPage(user, p, opts) {
   // One check-off row (hitting / mobility / med ball / prep).
   const checkRow = (kind, key, drill, volume, video, extra) => {
     const done = !!checkoffs[key];
+    const swapped = (o.subs || {})[key];
+    const shown = swapped ? String(swapped.sub_name || drill) : drill;
+    const subBadge = swapped
+      ? ` <span class="sub-badge">⇄ swapped from ${esc(drill)}</span>`
+      : (kind === 'med'
+          ? ` <a class="sub-link" href="/program/substitute?name=${encodeURIComponent(drill)}&key=${encodeURIComponent(key)}&sub=${esc(sub)}&day=${encodeURIComponent(day || '')}">⇄ Substitute</a>`
+          : '');
     return `<form method="post" action="/program/check" class="checkrow${done ? ' done' : ''}">
       <input type="hidden" name="kind" value="${kind}">
       <input type="hidden" name="sub" value="${esc(sub)}">
@@ -2249,7 +2359,7 @@ function programPage(user, p, opts) {
       ${extra || ''}
       <input type="hidden" name="item_key" value="${esc(key)}">
       <button type="submit" class="checkbtn" aria-label="${done ? 'Mark not done' : 'Mark done'}">${done ? '☑' : '☐'}</button>
-      <span class="routine-name">${esc(drill || '')}</span>${volume ? `<span class="hint-inline">${esc(volume)}</span>` : ''}${watchLink(video)}
+      <span class="routine-name">${esc(shown || '')}</span>${volume ? `<span class="hint-inline">${esc(volume)}</span>` : ''}${watchLink(video)}${subBadge}
     </form>`;
   };
   const blockCard = (cat, items, kind, dayScope, extra) => {
@@ -2276,6 +2386,16 @@ function programPage(user, p, opts) {
       ${others.length && todays.length ? '<h3 class="prog-h3">Other days</h3>' : ''}
       ${others.map((c) => blockCard(c.category, c.items, 'med', dayPrefix(c.category))).join('') ||
         (!todays.length ? '<div class="card empty">No med ball work in your program.</div>' : '')}`;
+  } else if (sub === 'metabolic') {
+    const blocks = routine.filter((c) => kindOf(c.category) === 'metabolic' && realItems(c.items).length);
+    const todays = day ? blocks.filter((c) => inDay(c.category, day)) : [];
+    const others = day ? blocks.filter((c) => !inDay(c.category, day)) : blocks;
+    content = `${dayHead(true)}
+      ${(todays.map((c) => blockCard(c.category, c.items, 'met', dayPrefix(c.category))).join('')) ||
+        (day && blocks.length ? '<div class="card empty">No metabolic work for this day.</div>' : '')}
+      ${others.length && todays.length ? '<h3 class="prog-h3">Other days</h3>' : ''}
+      ${others.map((c) => blockCard(c.category, c.items, 'met', dayPrefix(c.category))).join('') ||
+        (!todays.length ? '<div class="card empty">No metabolic work in your program.</div>' : '')}`;
   } else if (sub === 'lifting' && lifting) {
     const days = (Array.isArray(lifting.days) ? lifting.days : []).filter((d) => realExercises(d.exercises).length);
     // Lifters get their med ball work INSIDE the Lifting tab — it leads the
@@ -2294,7 +2414,7 @@ function programPage(user, p, opts) {
         (mbOthers.map((c) => blockCard(c.category, c.items, 'med', dayPrefix(c.category), ldayExtra)).join('') ||
           (!mbToday.length ? '<div class="card empty">No med ball work in your program.</div>' : ''))
       : '';
-    content = `${medHtml}${medBlocks.length ? '<h3 class="prog-h3">Lifts</h3>' : ''}${liftSubTab(user, lifting, days, lday, sub, checkoffs, today, o.liftData || {})}`;
+    content = `${liftPrimer}${sessionOrder === 'hitting_first' ? `<p class="hint">Hit first, then lift — you're warm, go straight to med ball. Ramp-up sets on main lifts still apply. Lifting-only day? Full Mobility tab first.</p>` : ''}${medHtml}${medBlocks.length ? '<h3 class="prog-h3">Lifts</h3>' : ''}${liftSubTab(user, lifting, days, lday, sub, checkoffs, today, o.liftData || {}, o.subs || {})}`;
   } else {
     // HITTING (default): today's plan first — prep for the day + the day's
     // hitting blocks. Then pregame, then Focus/Grades/Strengths/Notes.
@@ -2335,6 +2455,7 @@ function programPage(user, p, opts) {
     body: `<h1 class="page-title">Your Program</h1>
     ${meta ? `<p class="lede">${meta}</p>` : ''}
     ${tabHtml}
+    ${orderToggle}
     ${content}
     <div class="card finish-card"><p style="margin:0 0 8px">Done with the work? <a href="/checkin"><strong>Log your session →</strong></a></p>
     <p class="hint-inline" style="margin:0">Work first, journal second.</p></div>`,
@@ -2343,9 +2464,13 @@ function programPage(user, p, opts) {
 
 // LIFTING sub-tab: day pills, per-exercise check-off + weight/RPE log,
 // target RPE chip, "last time" line, and a compact history view.
-function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftData) {
+// Warm-up rows render first as their own block (no logging on them).
+// Each exercise gets a mid-workout "Substitute" link; today's swaps are
+// pulled from opts.subs and shown with a marker.
+function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftData, subs) {
   const day = days[ldayIdx] || { label: '', exercises: [] };
   const dayKey = String(day.label || '');
+  const subsMap = subs || {};
   const pills = days
     .map(
       (d, i) =>
@@ -2358,10 +2483,17 @@ function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftDat
       return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     } catch (e) { return d; }
   };
+  const warmup = Array.isArray(day.warmup) ? day.warmup : [];
+  const warmupHtml = warmup.length
+    ? `<details class="card warmup-block" open><summary class="routine-summary"><span class="routine-station">Warm-up — do this first</span></summary>
+      <ol class="warmup-list">${warmup.map((w) => `<li>${esc(w)}</li>`).join('')}</ol></details>`
+    : '';
   const exRows = realExercises(day.exercises)
     .map((ex) => {
       const name = String(ex.name || '');
       const key = `lift::${dayKey}::${name}`;
+      const swapped = subsMap[key];
+      const shown = swapped ? String(swapped.sub_name || name) : name;
       const done = !!checkoffs[key];
       const logged = checkoffs[key] || {};
       const info = liftData[key] || {};
@@ -2384,6 +2516,14 @@ function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftDat
         const v = i + 1;
         return `<option value="${v}"${String(logged.rpe) === String(v) ? ' selected' : ''}>${v}</option>`;
       }).join('');
+      const subUrl = `/program/substitute?name=${encodeURIComponent(name)}&key=${encodeURIComponent(key)}&sub=lifting&lday=${ldayIdx}`;
+      const subBadge = swapped
+        ? `<span class="sub-badge">⇄ swapped from ${esc(name)}</span>
+           <form method="post" action="/program/substitute/revert" class="inline-form" style="display:inline">
+             <input type="hidden" name="key" value="${esc(key)}"><input type="hidden" name="sub" value="lifting"><input type="hidden" name="lday" value="${ldayIdx}">
+             <button class="btn-small btn-quiet" type="submit">Revert</button>
+           </form>`
+        : `<a class="sub-link" href="${subUrl}">⇄ Substitute</a>`;
       return `<div class="lift-ex${done ? ' done' : ''}">
         <form method="post" action="/program/check" class="lift-check">
           <input type="hidden" name="kind" value="lift">
@@ -2393,7 +2533,8 @@ function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftDat
           <button type="submit" class="checkbtn" aria-label="${done ? 'Mark not done' : 'Mark done'}">${done ? '☑' : '☐'}</button>
         </form>
         <div class="lift-main">
-          <div class="lift-name">${esc(name)}${sr ? ` <span class="hint-inline">${esc(sr)}</span>` : ''} ${trpe}</div>
+          <div class="lift-name">${esc(shown)}${sr ? ` <span class="hint-inline">${esc(sr)}</span>` : ''} ${trpe}</div>
+          <div class="hint-inline">${subBadge}</div>
           ${ex.notes ? `<div class="hint-inline">${esc(ex.notes)}</div>` : ''}
           ${lastHtml}
           <form method="post" action="/program/check" class="lift-log">
@@ -2413,6 +2554,7 @@ function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftDat
     .join('');
   return `<div class="day-pills">${pills}</div>
     <h3 class="prog-h3">${esc(dayKey)}</h3>
+    ${warmupHtml}
     ${exRows || '<div class="card empty">No exercises on this day yet — your coach can add them.</div>'}`;
 }
 
@@ -2497,6 +2639,8 @@ function liftingEditPage(user, lp) {
         <legend class="lift-day-legend">Day ${i + 1}</legend>
         <input type="hidden" name="lday_${i}_excount" value="${(d.exercises || []).length}" data-excount>
         <label class="lift-field">Day label <input name="lday_${i}_label" value="${esc(d.label || '')}" maxlength="40"></label>
+        <label class="lift-field">Warm-up <span class="hint-inline">(one per line — renders first on the day, no logging)</span>
+          <textarea name="lday_${i}_warmup" rows="3" style="width:100%;box-sizing:border-box" placeholder="Jump rope — 2 min&#10;Leg swings — 10 each leg">${esc((d.warmup || []).join('\n'))}</textarea></label>
         <div class="lift-ex-list" data-exlist>
         ${(d.exercises || [])
           .map(
@@ -2639,7 +2783,34 @@ function mentalGamePage(user, baseline, saved, planFailed, keys) {
 }
 
 // Coach-facing: edit a remote hitter's program.// Coach-facing: edit a remote hitter's program.
-function programEditPage(user, p, profileEmail, hasLifting) {
+// Progression read card (Sep 2026): per-lift improving/stalled status from the
+// logged weights + the data-driven next-block emphasis recommendation.
+function progressionCard(pr) {
+  const pillFor = (s) =>
+    s === 'improving' ? '<span class="pill-good">improving</span>'
+    : s === 'stalled' ? '<span class="pill-warn">stalled</span>'
+    : s === 'regressing' ? '<span class="pill-bad">regressing</span>'
+    : s === 'new' ? '<span class="pill">new</span>'
+    : '<span class="pill">holding</span>';
+  const lines = (pr.lines || [])
+    .map((l) => `<li>${pillFor(l.status)} <strong>${esc(l.name)}</strong> <span class="hint-inline">${esc(l.detail)}</span></li>`)
+    .join('');
+  const adj = (pr.adjustments || []).map((a) => `<li>${esc(a)}</li>`).join('');
+  return `<div class="card prog-read">
+    <h2 class="routine-station" style="margin-top:0">Progression — next block read</h2>
+    <p class="hint" style="margin-top:0">Block ${pr.blockNumber} · goal: ${esc(pr.trackLabel)} · arc: ${esc(pr.arcStep.label)}<br>
+    <span class="hint-inline">${esc(pr.arcStep.detail)}</span></p>
+    <p><strong>Suggested next-block emphasis: ${esc(pr.emphasisLabel)}</strong></p>
+    ${lines ? `<ul class="prog-lines">${lines}</ul>` : '<p class="hint-inline">No lifting logs yet.</p>'}
+    ${adj ? `<ul class="prog-adj">${adj}</ul>` : ''}
+    <p class="hint-inline" style="margin-bottom:0">Built from his logged weights + RPE (estimated 1RM trends). You approve the final program — this just makes the call faster.</p>
+  </div>`;
+}
+
+function programEditPage(user, p, profileEmail, hasLifting, progression, opts) {
+  const o = opts || {};
+  const blk = o.block || {};
+  const subs = o.subs || [];
   const prog = p.prog || {};
   const grades = prog.grades && typeof prog.grades === 'object' ? prog.grades : {};
   const gradeFields = ['Load', 'Path', 'Connection', 'Timing', 'Power Production']
@@ -2701,15 +2872,45 @@ function programEditPage(user, p, profileEmail, hasLifting) {
     )
     .join('');
   const editNotes = Array.isArray(prog.notes) ? prog.notes.filter(Boolean) : [];
+  const draftBanner = prog.draft
+    ? `<div class="draft-banner"><strong>DRAFT — built from the intake questionnaire.</strong> Review everything below, add your drills and cues, fix the lifting program, then save. Saving clears the draft flag.</div>`
+    : '';
+  // Progression read (Sep 2026): logged weights → improving/stalled per lift →
+  // data-driven next-block emphasis. Makes Bobby's next-block approval fast.
+  const progCard = progression ? progressionCard(progression) : '';
+  // 4-week block status + next-block staging + the athlete's self-subs.
+  const blockEnd = blk.block_start ? (() => { try { const d = new Date(blk.block_start + 'T12:00:00'); d.setDate(d.getDate() + 28); return d.toISOString().slice(0, 10); } catch (e) { return ''; } })() : '';
+  const blockCard = `<div class="card"><h3 class="card-title">Training block</h3>
+    <p class="hint" style="margin:0 0 8px">Block <strong>${esc(String(blk.block_number || 1))}</strong> · started ${esc(blk.block_start || '—')} · ends ${esc(blockEnd || '—')}</p>
+    ${blk.next_lifting_id ? `<p class="hint" style="margin:0 0 8px">Next block staged: <strong>${esc(o.nextLiftName || '')}</strong> — flips ${esc(blk.next_block_start || '')}. <a href="/coach/lifting/${blk.next_lifting_id}/edit">Review / edit it</a></p>
+    <form method="post" action="/coach/program/${p.id}/block-flip-now" class="inline-form" onsubmit="return confirm('Make the staged next block current right now?')"><button class="btn btn-sm" type="submit">Make current now</button></form>` : ''}
+    <div class="row-actions">
+      <form method="post" action="/coach/program/${p.id}/next-block" class="inline-form"><button class="btn btn-sm" type="submit">Build next block draft</button></form>
+      <form method="post" action="/coach/program/${p.id}/block-bump" class="inline-form"><button class="btn btn-sm btn-quiet" type="submit">Start new block today</button></form>
+    </div>
+    <p class="hint-inline" style="margin:8px 0 0">Next-block drafts are built from his logged lifts (progression read) + goal arc + equipment. Staged blocks flip automatically on the date.</p>
+  </div>`;
+  const subsCard = subs.length ? `<div class="card"><h3 class="card-title">Recent substitutions</h3>
+    <ul class="works-list">${subs.map((s) => `<li><span class="hint-inline">${esc(String(s.day || '').slice(0, 10))}</span> <strong>${esc(s.sub_name)}</strong> instead of ${esc(s.original_name)}${s.reason ? ` — <em>${esc(s.reason)}</em>` : ''}</li>`).join('')}</ul>
+  </div>` : '';
   return layout({
     title: `Edit program — ${p.athlete_name}`,
     user,
     tabs: coachTabs('organizations', user.approvalCount, user),
     body: `<h1 class="page-title">Program — ${esc(p.athlete_name)}</h1>
+    ${draftBanner}
+    ${progCard}
+    ${blockCard}
+    ${subsCard}
     <p><a href="/coach/organizations">← Back to organizations</a>${profileEmail ? ` · <a href="/coach/user/${encodeURIComponent(profileEmail)}">View profile →</a>` : ''}</p>
     <form method="post" action="/coach/program/${p.id}/save" class="form">
       <div class="card routine-group">
         <label class="fld">Date range<input type="text" name="date_range" value="${esc(prog.date_range || '')}" maxlength="60" placeholder="8/18–9/16"></label>
+        <label class="fld">Session order <span class="hint-inline">— which runs first when he trains</span>
+          <select name="session_order">
+            <option value="hitting_first"${(p.session_order || 'hitting_first') === 'hitting_first' ? ' selected' : ''}>Hitting first (default)</option>
+            <option value="lifting_first"${p.session_order === 'lifting_first' ? ' selected' : ''}>Lifting first</option>
+          </select></label>
         <label class="fld">Phase emphasis<input type="text" name="phase_emphasis" value="${esc(prog.phase_emphasis || '')}" maxlength="120" placeholder="Coil and Barrel Turn"></label>
         <label class="fld">The adjustment — the one thing he's working on
           <textarea name="adjustment" rows="2" maxlength="500">${esc(prog.adjustment || '')}</textarea>
@@ -2735,7 +2936,7 @@ function programEditPage(user, p, profileEmail, hasLifting) {
       </div>
       <h2 class="section-head">Training blocks</h2>
       ${hasLifting ? '<p class="hint-inline"><strong>This athlete has a lifting program</strong> — their Med Ball blocks don\'t get their own tab; they show inside the <em>Lifting</em> tab, ahead of the lifts.</p>' : ''}
-      <p class="hint-inline">Blocks named with <em>Mobility</em> feed the Mobility tab, <em>Med Ball</em> feeds the Med Ball tab (or lands inside the <em>Lifting</em> tab for athletes with a lifting program), <em>Prep</em> stays with Hitting — naming a block is how tabs appear or disappear for the athlete.</p>
+      <p class="hint-inline">Blocks named with <em>Mobility</em> feed the Mobility tab, <em>Med Ball</em> feeds the Med Ball tab (or lands inside the <em>Lifting</em> tab for athletes with a lifting program), <em>Metabolic</em> feeds the Metabolic tab, <em>Prep</em> stays with Hitting — naming a block is how tabs appear or disappear for the athlete.</p>
       <div id="prog-cats" data-next="${routine.length}">${catBlocks}</div>
       <p><button type="button" class="btn" id="prog-add-cat">+ Add block</button>
       <button type="button" class="btn" data-addcat-name="Mobility">+ Mobility block</button>
@@ -2753,6 +2954,7 @@ function remoteProgramsSection(list, canEdit) {
       const linked = r.user_email
         ? `<span class="pill">${esc(r.user_email)}</span>`
         : '<span class="hint-inline">no account yet</span>';
+      const draftPill = r.is_draft ? ' <span class="pill-draft">Draft — unreviewed</span>' : '';
       const updated = r.updated_at ? ` · updated ${esc(r.updated_at.slice(0, 10))}` : '';
       const aliasNames = String(r.aliases || '')
         .split('\n')
@@ -2785,7 +2987,7 @@ function remoteProgramsSection(list, canEdit) {
         </div>`
         : '';
       return `<div class="remote-row">
-        <div>${r.user_email ? `<strong>${athleteLink(r.user_email, esc(r.athlete_name))}</strong>` : `<strong>${esc(r.athlete_name)}</strong>`}<div class="hint-inline">${linked}${updated}</div>${aliasLine}
+        <div>${r.user_email ? `<strong>${athleteLink(r.user_email, esc(r.athlete_name))}</strong>` : `<strong>${esc(r.athlete_name)}</strong>`}${draftPill}<div class="hint-inline">${linked}${updated}</div>${aliasLine}
           ${aliasForm}
         </div>
         ${actions}
@@ -3351,6 +3553,389 @@ function settingsPage(user, opts) {
   });
 }
 
+
+// ---- Intake questionnaire views (Sep 2026) ----
+// Detailed multi-step intake. Bobby: "everything knowable about a guy" —
+// thorough, organized in sections with a progress indicator.
+
+function intakeFormPage(token, err, values) {
+  const v = values || {};
+  const ival = (n) => esc(String((v[n] != null ? v[n] : '') || ''));
+  const ivc = (n, val) => {
+    const cur = v[n];
+    const on = Array.isArray(cur) ? cur.includes(val) : String(cur || '') === String(val);
+    return on ? ' checked' : '';
+  };
+  const checkRow = (name, val, label, hint) =>
+    `<label class="pick"><input type="checkbox" name="${name}" value="${val}"${ivc(name, val)}> <span><strong>${label}</strong>${hint ? ` <span class="hint-inline">${hint}</span>` : ''}</span></label>`;
+  const step = (title, inner) => `<fieldset class="istep" data-title="${title}"><legend class="istep-title">${title}</legend>${inner}</fieldset>`;
+  const req = ' required';
+  const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  return layout({
+    title: 'Athlete intake',
+    user: null,
+    tabs: [],
+    body: `<div class="login-card card intake-card">
+      <img src="/diamond-daily-logo.jpg" class="brand-logo-full" alt="Diamond Daily">
+      <h1 class="page-title" style="margin-top:4px">Athlete intake</h1>
+      <p class="hint">This is how Coach Bobby builds your program — the more detail you give, the better it fits. Takes most guys 10–15 minutes.</p>
+      <div class="intake-progress"><div class="intake-bar"><div id="ibar"></div></div><div id="istep-label" class="hint"></div></div>
+      ${err ? `<div class="error">${esc(err)}</div>` : ''}
+      <form method="post" action="/intake/${esc(token)}/submit" class="form" id="intake-form" novalidate>
+
+      ${step('1 · About you', `
+        <label>First name<input type="text" name="first_name" value="${ival('first_name')}" maxlength="40"${req}></label>
+        <label>Last name<input type="text" name="last_name" value="${ival('last_name')}" maxlength="40"${req}></label>
+        <label>Email<input type="email" name="email" value="${ival('email')}" maxlength="120"${req}></label>
+        <label>Phone <span class="hint-inline">(so Bobby can text you)</span><input type="tel" name="phone" value="${ival('phone')}" maxlength="30"></label>
+        <label>Date of birth<input type="date" name="date_of_birth" id="dob" value="${ival('date_of_birth')}"${req}></label>
+        <div class="two-col">
+          <label>Height <span class="hint-inline">(e.g. 6'1")</span><input type="text" name="height" value="${ival('height')}" maxlength="20"></label>
+          <label>Weight <span class="hint-inline">(lbs)</span><input type="text" name="weight" value="${ival('weight')}" maxlength="20" inputmode="numeric"></label>
+        </div>
+        <div id="parent-fields" hidden>
+          <p class="hint"><strong>Under 18?</strong> A parent or guardian fills this in.</p>
+          <label>Parent/guardian full name<input type="text" name="parent_name" value="${ival('parent_name')}" maxlength="80"></label>
+          <label>Parent/guardian email<input type="email" name="parent_email" value="${ival('parent_email')}" maxlength="120"></label>
+        </div>`)}
+
+      ${step('2 · Your goals', `
+        <p class="hint" style="margin-top:0">Check everything you're after. Pick your #1 in the box below.</p>
+        <div class="pick-group">
+          ${checkRow('goals', 'Build exit velocity', 'Build exit velocity', 'hit the ball harder')}
+          ${checkRow('goals', 'Get stronger', 'Get stronger', 'overall strength')}
+          ${checkRow('goals', 'Strong but not explosive', 'Strong but not explosive', "I'm strong — I need to move fast")}
+          ${checkRow('goals', 'Stay healthy', 'Stay healthy', 'train without breaking down')}
+        </div>
+        <label>Other goals<input type="text" name="goals_other" value="${ival('goals_other')}" maxlength="200" placeholder="e.g. make varsity, add 5 mph EV"></label>
+        <label>What does success look like 90 days from now?<textarea name="goals_90" rows="3" maxlength="500" placeholder="Be specific — numbers help.">${ival('goals_90')}</textarea></label>`)}
+
+      ${step('3 · Health & injuries', `
+        <p class="hint" style="margin-top:0">Be honest here — this is how your lifting stays safe. Nothing you write benches you; it just changes the plan.</p>
+        <label>Current injuries — describe each one<textarea name="injury_current" rows="3" maxlength="1000" placeholder="e.g. right shoulder impingement, hurts on overhead pressing">${ival('injury_current')}</textarea></label>
+        <div class="two-col">
+          <label>Body area<input type="text" name="injury_area" value="${ival('injury_area')}" maxlength="200" placeholder="e.g. right shoulder"></label>
+          <label>Severity (1–10)<input type="text" name="injury_severity" value="${ival('injury_severity')}" maxlength="20" inputmode="numeric" placeholder="e.g. 4"></label>
+        </div>
+        <label>Cleared to train by a doctor?<select name="injury_cleared">
+          <option value="">—</option>
+          <option value="yes"${ivc('injury_cleared', 'yes') ? ' selected' : ''}>Yes</option>
+          <option value="no"${ivc('injury_cleared', 'no') ? ' selected' : ''}>No</option>
+          <option value="na"${ivc('injury_cleared', 'na') ? ' selected' : ''}>No injury / N/A</option>
+        </select></label>
+        <label>Past injuries or surgeries<textarea name="injury_past" rows="2" maxlength="1000" placeholder="e.g. Tommy John 2023, ankle sprain last spring">${ival('injury_past')}</textarea></label>
+        <label>Any pain or limitations right now?<textarea name="pain_now" rows="2" maxlength="500" placeholder="e.g. left knee aches after squatting deep">${ival('pain_now')}</textarea></label>
+        <label>Anything a doctor told you to avoid?<input type="text" name="doctor_notes" value="${ival('doctor_notes')}" maxlength="500"></label>`)}
+
+      ${step('4 · Training background', `
+        <div class="two-col">
+          <label>Years training baseball<input type="text" name="years_training" value="${ival('years_training')}" maxlength="20"></label>
+          <label>Lifting experience<select name="lifting_experience">
+            <option value="">—</option>
+            ${['Never lifted', 'Beginner (<1 yr)', 'Intermediate (1–3 yrs)', 'Advanced (3+ yrs)'].map((o) => `<option${ivc('lifting_experience', o) ? ' selected' : ''}>${o}</option>`).join('')}
+          </select></label>
+        </div>
+        <label>Programs you've run before<textarea name="past_programs" rows="2" maxlength="1000" placeholder="e.g. school weight room program, 5x5, Driveline, etc.">${ival('past_programs')}</textarea></label>
+        <label>What worked for you?<textarea name="what_worked" rows="2" maxlength="1000">${ival('what_worked')}</textarea></label>
+        <label>What didn't work?<textarea name="what_didnt" rows="2" maxlength="1000">${ival('what_didnt')}</textarea></label>
+        <p class="hint"><strong>Best lifts</strong> <span class="hint-inline">(if you know them — estimates are fine)</span></p>
+        <div class="three-col">
+          <label>Squat<input type="text" name="squat_max" value="${ival('squat_max')}" maxlength="20" inputmode="numeric" placeholder="lbs"></label>
+          <label>Bench<input type="text" name="bench_max" value="${ival('bench_max')}" maxlength="20" inputmode="numeric" placeholder="lbs"></label>
+          <label>Deadlift<input type="text" name="deadlift_max" value="${ival('deadlift_max')}" maxlength="20" inputmode="numeric" placeholder="lbs"></label>
+        </div>
+        <label class="pick"><input type="checkbox" name="strong_not_explosive" value="1"${ivc('strong_not_explosive', '1')}> <span><strong>I feel strong but not explosive</strong></span></label>`)}
+
+      ${step('5 · Your equipment', `
+        <p class="hint" style="margin-top:0">Check <strong>everything</strong> you can actually use week to week. Your program is built only from what you check — nothing you can't do.</p>
+        <div class="pick-group">
+          ${checkRow('equipment', 'full_gym', 'Full commercial gym', 'everything below and more')}
+          ${checkRow('equipment', 'barbell', 'Barbell + plates', '')}
+          ${checkRow('equipment', 'rack', 'Squat rack / power rack', '')}
+          ${checkRow('equipment', 'dumbbell', 'Dumbbells', '')}
+          ${checkRow('equipment', 'kettlebell', 'Kettlebells', '')}
+          ${checkRow('equipment', 'trapbar', 'Trap bar / hex bar', '')}
+          ${checkRow('equipment', 'bands', 'Resistance bands', '')}
+          ${checkRow('equipment', 'pullup_bar', 'Pull-up bar', '')}
+          ${checkRow('equipment', 'bench', 'Adjustable / flat bench', '')}
+          ${checkRow('equipment', 'medball', 'Medicine balls', '')}
+          ${checkRow('equipment', 'plyo_box', 'Plyo box', '')}
+          ${checkRow('equipment', 'sled', 'Sled / prowler', '')}
+          ${checkRow('equipment', 'cables', 'Cable machine', '')}
+          ${checkRow('equipment', 'field_space', 'Field / open space for sprints', '')}
+          ${checkRow('equipment', 'jump_rope', 'Jump rope', '')}
+        </div>
+        <label>Details — weights, limits, what's shared or crowded<textarea name="equipment_detail" rows="3" maxlength="1000" placeholder="e.g. dumbbells up to 50 lbs, home garage gym, no leg machines, med balls 6/10/14 lb">${ival('equipment_detail')}</textarea></label>`)}
+
+      ${step('6 · Availability & season', `
+        <div class="two-col">
+          <label>Days per week you can HIT <span class="hint-inline">(Bobby recommends 5–6)</span>
+            <select name="hit_days_per_week">${[1, 2, 3, 4, 5, 6, 7].map((d) => `<option value="${d}"${String(v.hit_days_per_week || 5) === String(d) ? ' selected' : ''}>${d}</option>`).join('')}</select></label>
+          <label>Days per week you can LIFT <span class="hint-inline">(Bobby recommends 4)</span>
+            <select name="lift_days_per_week">${[1, 2, 3, 4, 5, 6, 7].map((d) => `<option value="${d}"${String(v.lift_days_per_week || 4) === String(d) ? ' selected' : ''}>${d}</option>`).join('')}</select></label>
+        </div>
+        <p class="hint"><strong>Which weekdays</strong> can you train?</p>
+        <div class="pick-group pick-inline">${days.map((d) => `<label class="pick chip"><input type="checkbox" name="train_days" value="${d}"${ivc('train_days', d)}> <span>${d.slice(0, 3)}</span></label>`).join('')}</div>
+        <div class="two-col">
+          <label>Typical session length<input type="text" name="session_length" value="${ival('session_length')}" maxlength="40" placeholder="e.g. 60–90 min"></label>
+          <label>Games per week <span class="hint-inline">(in-season)</span><input type="text" name="games_per_week" value="${ival('games_per_week')}" maxlength="20" inputmode="numeric"></label>
+        </div>
+        <p class="hint"><strong>Season status</strong> <span class="hint-inline">— your blocks are built around this</span></p>
+        <div class="pick-group">
+          <label class="pick"><input type="radio" name="season_phase" value="offseason"${(!v.season_phase || v.season_phase === 'offseason') ? ' checked' : ''}> <span><strong>Off-season</strong> <span class="hint-inline">— building time</span></span></label>
+          <label class="pick"><input type="radio" name="season_phase" value="preseason"${v.season_phase === 'preseason' ? ' checked' : ''}> <span><strong>Pre-season</strong> <span class="hint-inline">— ramping up</span></span></label>
+          <label class="pick"><input type="radio" name="season_phase" value="inseason"${v.season_phase === 'inseason' ? ' checked' : ''}> <span><strong>In-season</strong> <span class="hint-inline">— maintaining, not burying you</span></span></label>
+        </div>
+        <label>Season / practice details<textarea name="season_detail" rows="2" maxlength="500" placeholder="e.g. HS season starts March, practice M–F 4–6pm">${ival('season_detail')}</textarea></label>
+        <label>Schedule constraints (school, work, travel)<textarea name="schedule_constraints" rows="2" maxlength="500">${ival('schedule_constraints')}</textarea></label>`)}
+
+      ${step('7 · Hitting resources', `
+        <p class="hint" style="margin-top:0">Be exact — Bobby programs only what you actually have. And the big one: <strong>do you have someone who can feed you consistently?</strong></p>
+        <div class="pick-group">
+          ${checkRow('has_tee', '1', 'I have a batting tee', '')}
+          ${checkRow('has_net', '1', 'I have a net', '')}
+          ${checkRow('has_cage', '1', 'I have cage access', '')}
+          ${checkRow('has_machine', '1', 'I have a pitching machine', '')}
+          ${checkRow('has_feed_partner', '1', 'I have someone who can feed me front toss / side toss consistently', 'this one matters most')}
+        </div>
+        <label>Who feeds you? How often?<input type="text" name="feed_partner_detail" value="${ival('feed_partner_detail')}" maxlength="300" placeholder="e.g. my dad, 3x a week"></label>
+        <p class="hint"><strong>Which hitting environments</strong> do you train in?</p>
+        <div class="pick-group pick-inline">
+          ${[['tee', 'Tee'], ['side_toss', 'Side toss'], ['front_toss', 'Front toss'], ['machine', 'Machine'], ['live', 'Live'], ['other', 'Other']].map(([val, label]) => `<label class="pick chip"><input type="checkbox" name="hitting_progression" value="${val}"${ivc('hitting_progression', val)}> <span>${label}</span></label>`).join('')}
+        </div>
+        <div class="two-col">
+          <label>Current exit velo <span class="hint-inline">(mph, if known)</span><input type="text" name="current_ev" value="${ival('current_ev')}" maxlength="20" inputmode="decimal"></label>
+          <label>Current bat speed <span class="hint-inline">(mph, if known)</span><input type="text" name="current_bat_speed" value="${ival('current_bat_speed')}" maxlength="20" inputmode="decimal"></label>
+        </div>`)}
+
+      ${step('8 · Program pieces', `
+        <p class="hint" style="margin-top:0">What do you want in your program?</p>
+        <div class="pick-group" data-required-group="components">
+          ${checkRow('components', 'mobility', 'Mobility', 'baseball-specific: hips, t-spine, shoulders, ankles')}
+          ${checkRow('components', 'hitting', 'Hitting', "Bobby picks your drills")}
+          ${checkRow('components', 'lifting', 'Lifting', 'med ball + explosive work included automatically')}
+          ${checkRow('components', 'medball', 'Med ball only', 'without lifting — lifters get it inside lifting')}
+          ${checkRow('components', 'metabolic', 'Metabolic / conditioning', '')}
+        </div>
+        <p class="hint" id="lift-note" hidden><strong>Lifting selected:</strong> med ball and explosive work come with it — no need to check med ball separately.</p>`)}
+
+      ${step('9 · Lifestyle', `
+        <p class="hint" style="margin-top:0">Recovery is training. This changes how hard Bobby can push you.</p>
+        <div class="two-col">
+          <label>Hours of sleep<input type="text" name="sleep_hours" value="${ival('sleep_hours')}" maxlength="20" placeholder="e.g. 7–8"></label>
+          <label>Sleep quality<select name="sleep_quality">
+            <option value="">—</option>
+            ${['Great', 'Good', 'OK', 'Poor'].map((o) => `<option${ivc('sleep_quality', o) ? ' selected' : ''}>${o}</option>`).join('')}
+          </select></label>
+        </div>
+        <label>Nutrition — what does a normal day of eating look like?<textarea name="nutrition" rows="3" maxlength="1000" placeholder="Be honest. Are you eating enough? Protein?">${ival('nutrition')}</textarea></label>
+        <label>Stress / life load<textarea name="stress" rows="2" maxlength="500" placeholder="School, work, anything heavy right now">${ival('stress')}</textarea></label>
+        <label>Anything else Bobby should know?<textarea name="other_notes" rows="3" maxlength="2000">${ival('other_notes')}</textarea></label>`)}
+
+      ${step('10 · Submit', `
+        <p class="hint" style="margin-top:0">Here's what happens next:</p>
+        <ol class="hint" style="padding-left:18px">
+          <li>Your account is created and a first-draft program is built from your answers.</li>
+          <li>Bobby reviews everything, picks your hitting drills, and finalizes the program.</li>
+          <li>You sign a training waiver, then your program unlocks.</li>
+        </ol>
+        <label class="pick"><input type="checkbox" name="agree_terms" value="1"${req}> <span>I agree to the <a href="/terms" target="_blank" rel="noopener">Terms of Service</a> and <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a>.</span></label>`)}
+
+        <div class="intake-nav">
+          <button type="button" class="btn" id="iback">← Back</button>
+          <button type="button" class="btn-primary" id="inext">Next →</button>
+          <button type="submit" class="btn-primary" id="isubmit" hidden>Build my program</button>
+        </div>
+      </form>
+      <script>
+      (function(){
+        document.documentElement.classList.add('js');
+        var steps = Array.prototype.slice.call(document.querySelectorAll('.istep'));
+        var i = 0, bar = document.getElementById('ibar'), label = document.getElementById('istep-label');
+        var back = document.getElementById('iback'), next = document.getElementById('inext'), submit = document.getElementById('isubmit');
+        function show(n){
+          i = Math.max(0, Math.min(steps.length - 1, n));
+          steps.forEach(function(s, k){ s.classList.toggle('active', k === i); });
+          bar.style.width = Math.round(((i + 1) / steps.length) * 100) + '%';
+          label.textContent = 'Step ' + (i + 1) + ' of ' + steps.length + ' — ' + steps[i].getAttribute('data-title');
+          back.hidden = (i === 0);
+          next.hidden = (i === steps.length - 1);
+          submit.hidden = (i !== steps.length - 1);
+          window.scrollTo(0, 0);
+        }
+        function validStep(){
+          var ok = true, first = null;
+          var reqs = steps[i].querySelectorAll('[required]');
+          var groups = {};
+          reqs.forEach(function(el){
+            if (el.type === 'checkbox' || el.type === 'radio') {
+              (groups[el.name] = groups[el.name] || []).push(el);
+            } else if (!String(el.value || '').trim()) { ok = false; first = first || el; el.classList.add('field-err'); }
+            else el.classList.remove('field-err');
+          });
+          Object.keys(groups).forEach(function(name){
+            var any = groups[name].some(function(el){ return el.checked; });
+            groups[name].forEach(function(el){ el.classList.toggle('field-err', !any); });
+            if (!any) { ok = false; first = first || groups[name][0]; }
+          });
+          var cg = steps[i].querySelector('[data-required-group]');
+          if (cg) {
+            var anyc = cg.querySelectorAll('input:checked').length > 0;
+            cg.classList.toggle('group-err', !anyc);
+            if (!anyc) { ok = false; first = first || cg; }
+          }
+          if (!ok && first && first.scrollIntoView) first.scrollIntoView({ block: 'center' });
+          return ok;
+        }
+        next.addEventListener('click', function(){ if (validStep()) show(i + 1); });
+        back.addEventListener('click', function(){ show(i - 1); });
+        // Under-18 parent fields
+        var dob = document.getElementById('dob'), pf = document.getElementById('parent-fields');
+        function checkDob(){
+          if (!dob.value || !pf) return;
+          var d = new Date(dob.value + 'T12:00:00'), now = new Date();
+          var age = now.getFullYear() - d.getFullYear();
+          var m = now.getMonth() - d.getMonth();
+          if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age--;
+          pf.hidden = !(age < 18);
+        }
+        if (dob) { dob.addEventListener('change', checkDob); checkDob(); }
+        // Lifting includes med ball + explosive
+        var liftCb = document.querySelector('input[name="components"][value="lifting"]');
+        var liftNote = document.getElementById('lift-note');
+        function checkLift(){ if (liftNote) liftNote.hidden = !(liftCb && liftCb.checked); }
+        if (liftCb) { liftCb.addEventListener('change', checkLift); checkLift(); }
+        show(0);
+      })();
+      </script>
+    </div>`,
+  });
+}
+
+// Coach view of one intake response + the account/program it created.
+function intakeDetailPage(user, row) {
+  const a = row.answers || {};
+  const athlete = [row.first_name, row.last_name].filter(Boolean).join(' ') || row.email;
+  const sec = (t, inner) => inner ? `<div class="card"><h3 class="card-title">${t}</h3>${inner}</div>` : '';
+  const kv = (k, val) => val ? `<div class="remote-row"><div><strong>${k}</strong></div><div style="text-align:right;max-width:60%">${esc(String(val)).replace(/\n/g, '<br>')}</div></div>` : '';
+  const list = (k, arr) => (arr && arr.length) ? kv(k, arr.join(', ')) : '';
+  const yn = (b) => b ? 'Yes' : '—';
+  const waiver = row.waiver_signed_at
+    ? `<span class="pill">Signed ${esc(String(row.waiver_signed_at).slice(0, 10))} by ${esc(row.waiver_name || '')}</span>`
+    : '<span class="pill-warn">Not signed yet</span>';
+  return layout({
+    title: 'Intake — ' + athlete,
+    user,
+    tabs: coachTabs('programs', user.approvalCount, user),
+    body: `<h1 class="page-title">Intake — ${esc(athlete)}</h1>
+    <p class="hint">Submitted ${esc(String(row.created_at).slice(0, 10))} · Status: <strong>${esc(row.status || 'pending')}</strong> · Waiver: ${waiver}</p>
+    ${row.remote_program_id ? `<p><a class="btn-primary" href="/coach/program/${row.remote_program_id}/edit" style="text-decoration:none;display:inline-block">Edit draft program</a> <a class="btn" href="/coach/players?search=${encodeURIComponent(athlete)}" style="text-decoration:none">Approve athlete</a></p>` : '<p class="hint">No program linked.</p>'}
+    ${sec('Athlete', kv('Name', athlete) + kv('Email', row.email) + kv('Phone', a.phone) + kv('Date of birth', a.date_of_birth) + kv('Height / weight', [a.height, a.weight].filter(Boolean).join(' / ')) + kv('Parent/guardian', [a.parent_name, a.parent_email].filter(Boolean).join(' · ')))}
+    ${sec('Goals', list('Goals', a.goals) + kv('Other goals', a.goals_other) + kv('90-day goal', a.goals_90) + kv('Current EV / bat speed', [a.current_ev, a.current_bat_speed].filter(Boolean).join(' / ')))}
+    ${sec('Health & injuries', kv('Current injuries', a.injury_current) + kv('Area', a.injury_area) + kv('Severity', a.injury_severity) + kv('Cleared to train', a.injury_cleared) + kv('Past injuries/surgeries', a.injury_past) + kv('Current pain', a.pain_now) + kv("Doctor's notes", a.doctor_notes))}
+    ${sec('Training background', kv('Years training', a.years_training) + kv('Lifting experience', a.lifting_experience) + kv('Past programs', a.past_programs) + kv('What worked', a.what_worked) + kv("What didn't", a.what_didnt) + kv('Best lifts', [a.squat_max && ('Squat ' + a.squat_max), a.bench_max && ('Bench ' + a.bench_max), a.deadlift_max && ('DL ' + a.deadlift_max)].filter(Boolean).join(' / ')) + kv('Strong but not explosive', a.strong_not_explosive ? 'Yes' : '—'))}
+    ${sec('Equipment', list('Checked', a.equipment) + kv('Details', a.equipment_detail))}
+    ${sec('Availability & season', list('Components', a.components) + kv('Hit days/week', a.hit_days_per_week) + kv('Lift days/week', a.lift_days_per_week) + list('Training weekdays', a.train_days) + kv('Session length', a.session_length) + kv('Games/week', a.games_per_week) + kv('Season phase', a.season_phase) + kv('Season detail', a.season_detail) + kv('Schedule constraints', a.schedule_constraints))}
+    ${sec('Hitting resources', kv('Tee', yn(a.has_tee)) + kv('Net', yn(a.has_net)) + kv('Cage', yn(a.has_cage)) + kv('Machine', yn(a.has_machine)) + kv('Feed partner', yn(a.has_feed_partner)) + kv('Feeder detail', a.feed_partner_detail) + list('Environments', a.hitting_progression))}
+    ${sec('Lifestyle', kv('Sleep', [a.sleep_hours, a.sleep_quality].filter(Boolean).join(' ')) + kv('Nutrition', a.nutrition) + kv('Stress', a.stress) + kv('Other notes', a.other_notes))}`,
+  });
+}
+
+// After intake submit: password setup before the account goes live.
+function welcomePage(token, err) {
+  return layout({
+    title: 'Set up your account',
+    user: null,
+    tabs: [],
+    body: `<div class="login-card card">
+      <img src="/diamond-daily-logo.jpg" class="brand-logo-full" alt="Diamond Daily">
+      <h1 class="page-title">You're in the queue</h1>
+      <p class="hint">Your answers are with Coach Bobby — he's building your program now. Set a password so you can log in when it's ready.</p>
+      ${err ? `<div class="error">${esc(err)}</div>` : ''}
+      <form method="post" action="/welcome/${esc(token)}" class="form">
+        <label>New password<input type="password" name="password" required minlength="8" autocomplete="new-password"></label>
+        <label>Confirm password<input type="password" name="confirm_password" required minlength="8" autocomplete="new-password"></label>
+        <button class="btn-primary" type="submit">Set password</button>
+      </form>
+    </div>`,
+  });
+}
+
+// Liability waiver. Versioned text pinned in WAIVER_* server-side; signing
+// stores the version + typed names so Bobby can see exactly what was signed.
+function waiverPage(user, err, opts) {
+  const o = opts || {};
+  const paras = (o.paragraphs || []).map((p) => `<p>${esc(p)}</p>`).join('');
+  const minor = !!o.minor;
+  return layout({
+    title: 'Training waiver',
+    user,
+    tabs: [],
+    body: `<div class="login-card card">
+      <img src="/diamond-daily-logo.jpg" class="brand-logo-full" alt="Diamond Daily">
+      <h1 class="page-title">Training waiver</h1>
+      <p class="hint">Read this before you start. Your program unlocks once it's signed.</p>
+      ${err ? `<div class="error">${esc(err)}</div>` : ''}
+      <div class="waiver-text">${paras || '<p>Waiver text unavailable — please contact your coach.</p>'}</div>
+      <form method="post" action="/waiver" class="form">
+        <label>Type your full name to sign<input type="text" name="waiver_name" required maxlength="120" placeholder="Full legal name"></label>
+        ${minor ? `<label>Parent/guardian — type your full name to co-sign (under 18)<input type="text" name="waiver_parent_name" required maxlength="120" placeholder="Parent/guardian full name"></label>` : ''}
+        <button class="btn-primary" type="submit">I understand — sign waiver</button>
+      </form>
+    </div>`,
+  });
+}
+
+// Athlete self-substitution: same movement pattern, filtered by their gear.
+function substitutePage(user, o) {
+  const opts = o.options || [];
+  const rows = opts.map((e) =>
+    `<form method="post" action="/program/substitute" class="sub-row">
+      <input type="hidden" name="key" value="${esc(o.key)}">
+      <input type="hidden" name="original" value="${esc(o.name)}">
+      <input type="hidden" name="sub_name" value="${esc(e.name)}">
+      <input type="hidden" name="sub" value="${esc(o.sub)}">
+      <input type="hidden" name="lday" value="${esc(o.lday)}">
+      <input type="hidden" name="day" value="${esc(o.day)}">
+      <div><strong>${esc(e.name)}</strong><div class="hint-inline">${esc(o.pattern || '')} pattern · fits your equipment</div></div>
+      <button class="btn-primary btn-sm" type="submit">Use this</button>
+    </form>`
+  ).join('');
+  const askBody = encodeURIComponent(`Hey Coach — I can't do ${o.name} on ${o.day || 'today'}. Can you suggest a replacement? (Reason: )`);
+  return layout({
+    title: 'Substitute exercise',
+    user,
+    tabs: userTabs('program', user),
+    body: `<h1 class="page-title">Substitute</h1>
+    <p class="hint">Swapping <strong>${esc(o.name)}</strong> — same ${esc(o.pattern || 'movement')} pattern, filtered to your equipment. Bobby sees every swap.</p>
+    ${rows || '<div class="card empty">No automatic alternatives for this one with your equipment — ask Bobby instead.</div>'}
+    ${rows ? `<div class="card"><label>Why the swap? <span class="hint-inline">(optional — Bobby sees it)</span>
+      <input type="text" id="sub-reason" maxlength="200" placeholder="e.g. shoulder cranky, gym is packed" style="width:100%;box-sizing:border-box"></label>
+    </div>` : ''}
+    <div class="card">
+      <p style="margin:0 0 10px"><strong>None of these work?</strong></p>
+      <p style="margin:0"><a class="btn-primary" href="/messages?prefill=${askBody}" style="text-decoration:none;display:inline-block">Ask Coach Bobby</a></p>
+      <p class="hint" style="margin:8px 0 0">Opens a message pre-filled with the details — just add your reason and send.</p>
+    </div>
+    <p><a href="${esc(o.back)}">← Back to program</a></p>
+    <script>
+    (function(){
+      // Attach the reason to whichever swap is tapped.
+      var reason = document.getElementById('sub-reason');
+      if (!reason) return;
+      document.querySelectorAll('form.sub-row').forEach(function(f){
+        f.addEventListener('submit', function(){
+          var h = document.createElement('input');
+          h.type = 'hidden'; h.name = 'reason'; h.value = reason.value;
+          f.appendChild(h);
+        });
+      });
+    })();
+    </script>`,
+  });
+}
+
+
 module.exports = {
   layout,
   userTabs,
@@ -3407,4 +3992,9 @@ module.exports = {
   linkify,
   settingsPage,
   DRILL_SECTIONS,
+  intakeFormPage,
+  intakeDetailPage,
+  welcomePage,
+  waiverPage,
+  substitutePage,
 };

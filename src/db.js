@@ -172,6 +172,16 @@ for (const col of ['organization_id', 'date_of_birth']) {
     db.exec(`ALTER TABLE users ADD COLUMN ${col} ${col === 'organization_id' ? 'INTEGER' : 'TEXT'};`);
   }
 }
+// Liability waiver (Sep 2026): athletes with a program sign before they can
+// open it. waiver_signed_at is an ISO timestamp; waiver_version pins the exact
+// text they agreed to; waiver_parent_name holds the co-signing parent/guardian
+// for athletes under 18.
+for (const col of ['waiver_signed_at', 'waiver_name', 'waiver_parent_name', 'waiver_version']) {
+  const cols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+  if (!cols.includes(col)) {
+    db.exec(`ALTER TABLE users ADD COLUMN ${col} TEXT;`);
+  }
+}
 
 // Teams (Sep 2026): travel programs group players into teams (14U Black,
 // 16U, …). The organization is the master account; each team has its own
@@ -667,6 +677,26 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
 CREATE INDEX IF NOT EXISTS idx_reset_user ON password_reset_tokens(user_id);
 `);
 
+// Website application leads (Sep 2026): the short public application form on
+// the sales website POSTs to /api/leads. Separate from the full intake
+// questionnaire, which stays behind Bobby's link post-call. Statuses:
+// new -> contacted -> enrolled (or archived).
+db.exec(`
+CREATE TABLE IF NOT EXISTS leads (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL DEFAULT '',
+  phone TEXT NOT NULL DEFAULT '',
+  age_level TEXT NOT NULL DEFAULT '',
+  goals TEXT NOT NULL DEFAULT '',
+  source TEXT NOT NULL DEFAULT 'website',
+  status TEXT NOT NULL DEFAULT 'new',
+  notes TEXT NOT NULL DEFAULT '',
+  submitted_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status);
+CREATE INDEX IF NOT EXISTS idx_leads_submitted ON leads(submitted_at);
+`);
+
 // Skip's durable memory per hitter: what Skip has learned about this hitter
 // over time (their best-day patterns, cues that work for them, slump fixes).
 // Written by Bobby on the hitter's coach page; injected into every Skip chat
@@ -981,6 +1011,66 @@ if (!db.prepare("SELECT value FROM settings WHERE key = 'score_tier_rename_20260
   const roughN = db.prepare("UPDATE checkins SET score_tier = 'Grind Day' WHERE score_tier = 'Rough'").run().changes;
   db.prepare("INSERT INTO settings (key, value) VALUES ('score_tier_rename_20260917', '1')").run();
   console.log(`MIGRATE_TIER_NAMES: renamed ${offN} 'Off' -> 'Building', ${roughN} 'Rough' -> 'Grind Day' on historical check-ins`);
+}
+
+// ---- Pre-signup intake questionnaire (Sep 2026) ----
+// Prospects fill out Bobby's intake form BEFORE signing up. On submit the
+// app auto-creates their athlete account, generates a baseline draft program
+// from the answers, and stores the raw answers here for Bobby's review.
+// The account stays 'pending' until Bobby reviews the draft and approves it.
+db.exec(`CREATE TABLE IF NOT EXISTS intake_responses (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER UNIQUE NOT NULL REFERENCES users(id),
+  answers_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT ''
+);`);
+db.exec('CREATE INDEX IF NOT EXISTS idx_intake_user ON intake_responses(user_id);');
+// 4-week training blocks (Sep 2026): each remote program tracks its current
+// block. block_start = ISO date the block began; block_number counts from 1;
+// block_notified_at marks when Bobby was pinged that the block ended;
+// next_lifting_id/next_block_start stage the upcoming block so it can flip
+// automatically (or be approved early by Bobby).
+// session_order (Sep 2026): 'hitting_first' (default) or 'lifting_first' —
+// Bobby or the athlete picks which runs first in a session.
+{
+  const cols = db.prepare('PRAGMA table_info(remote_programs)').all().map((c) => c.name);
+  for (const [col, ddl] of [
+    ['block_start', "TEXT DEFAULT ''"],
+    ['block_number', 'INTEGER DEFAULT 1'],
+    ['block_notified_at', "TEXT DEFAULT ''"],
+    ['next_lifting_id', 'INTEGER'],
+    ['next_block_start', "TEXT DEFAULT ''"],
+    ['session_order', "TEXT DEFAULT 'hitting_first'"],
+  ]) {
+    if (!cols.includes(col)) db.exec(`ALTER TABLE remote_programs ADD COLUMN ${col} ${ddl};`);
+  }
+}
+// Athlete self-substitutions (Sep 2026): one-tap exercise swaps mid-workout,
+// logged so Bobby sees them. day = Chicago date the swap happened.
+db.exec(`CREATE TABLE IF NOT EXISTS program_substitutions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  day TEXT NOT NULL DEFAULT '',
+  item_key TEXT NOT NULL DEFAULT '',
+  original_name TEXT NOT NULL DEFAULT '',
+  sub_name TEXT NOT NULL DEFAULT '',
+  reason TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT ''
+);`);
+db.exec('CREATE INDEX IF NOT EXISTS idx_subs_user ON program_substitutions(user_id, day);');
+// Shareable questionnaire link token (settings.intake_token). Bobby texts the
+// link to prospects; he can rotate it from the Programs page.
+{
+  try {
+    db.exec("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '');");
+    const tok = db.prepare("SELECT value FROM settings WHERE key = 'intake_token'").get();
+    if (!tok) {
+      const crypto = require('crypto');
+      db.prepare("INSERT INTO settings (key, value) VALUES ('intake_token', ?)")
+        .run(crypto.randomBytes(12).toString('hex'));
+      console.log('INTAKE: generated questionnaire link token.');
+    }
+  } catch (e) { console.warn('intake token setup skipped', e.message); }
 }
 
 module.exports = db;
