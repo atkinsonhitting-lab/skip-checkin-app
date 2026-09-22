@@ -2938,11 +2938,12 @@ const MOBILITY_TEMPLATE = [
     ['Ankle Circles', '10 each direction'],
   ]},
 ];
+// Bobby's exact registry drill names (Sep 2026) so his YouTube links attach
+// by exact match. Only drills with a Bobby-specified video belong here —
+// no guessing, no placeholders.
 const MEDBALL_TEMPLATE = [
-  ['Med Ball Rotational Throw', '3 x 6 each side', 'Throw it like a swing — rotate and transfer'],
-  ['Med Ball Chest Pass', '3 x 8', 'Explode through the chest'],
-  ['Med Ball Slam', '3 x 8', 'Full body, max intent'],
-  ['Med Ball Overhead Throw', '3 x 6', 'Extend tall, throw far'],
+  ['Med Ball Rotational Slam', '3 x 6 each side', 'Throw it like a swing — rotate and transfer'],
+  ['Med Ball Scoop Toss', '3 x 8', 'Load the hips, explode through'],
 ];
 const METABOLIC_TEMPLATE = [
   ['Build-Up Sprints', '6 x 40 yd', 'Walk back recovery', ['field']],
