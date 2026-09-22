@@ -1739,8 +1739,9 @@ function chiToday() {
   return chiDay(new Date());
 }
 // Classify a program block category into a Programs sub-tab.
-// Order is fixed per Bobby: MOBILITY -> MED BALL -> HITTING -> LIFTING.
-// Prep work always stays with Hitting.
+// Bobby's order: lifters get MOBILITY -> HITTING -> LIFTING (med ball work
+// lives INSIDE the Lifting tab); everyone else gets MOBILITY -> MED BALL ->
+// HITTING. Prep work always stays with Hitting.
 function blockKind(category) {
   const n = String(category || '');
   if (/med\s*ball/i.test(n)) return 'medball';
@@ -1765,17 +1766,23 @@ function splitProgramBlocks(p) {
   }
   return out;
 }
-// Which Programs sub-tabs an athlete gets: Mobility and Med Ball only when
-// their program actually has that content; Hitting always; Lifting only when
-// a lifting program with real exercises is assigned. Returns [{ id, label }].
+// Which Programs sub-tabs an athlete gets: Mobility only when their program
+// actually has that content; Med Ball only when they have that content AND
+// no lifting program (Bobby's rule: lifters get med ball INSIDE the Lifting
+// tab, so they get no standalone Med Ball tab); Hitting always; Lifting only
+// when a lifting program with real exercises is assigned.
+// Returns [{ id, label }].
 function programSubTabs(p, lifting) {
   const blocks = splitProgramBlocks(p);
   const tabs = [];
-  if (blocks.mobility.length) tabs.push({ id: 'mobility', label: 'Mobility' });
-  if (blocks.medball.length) tabs.push({ id: 'medball', label: 'Med Ball' });
-  tabs.push({ id: 'hitting', label: 'Hitting' });
   const liftDays = lifting && Array.isArray(lifting.days) ? lifting.days : [];
-  if (liftDays.some((d) => (Array.isArray(d.exercises) ? d.exercises : []).some((ex) => String((ex && ex.name) || '').trim()))) {
+  const hasLifting = liftDays.some((d) =>
+    (Array.isArray(d.exercises) ? d.exercises : []).some((ex) => String((ex && ex.name) || '').trim())
+  );
+  if (blocks.mobility.length) tabs.push({ id: 'mobility', label: 'Mobility' });
+  if (!hasLifting && blocks.medball.length) tabs.push({ id: 'medball', label: 'Med Ball' });
+  tabs.push({ id: 'hitting', label: 'Hitting' });
+  if (hasLifting) {
     tabs.push({ id: 'lifting', label: 'Lifting' });
   }
   return tabs;
@@ -2184,7 +2191,8 @@ app.get('/coach/program/:id/edit', requireCoach, (req, res) => {
   const p = getProgram(req.params.id);
   if (!p) return res.redirect('/coach/programs');
   const linked = db.prepare('SELECT email FROM users WHERE remote_program_id = ? LIMIT 1').get(p.id);
-  res.send(views.programEditPage(realUser(req), p, linked ? linked.email : null));
+  const lift = db.prepare('SELECT lifting_program_id FROM remote_programs WHERE id = ?').get(p.id);
+  res.send(views.programEditPage(realUser(req), p, linked ? linked.email : null, !!(lift && lift.lifting_program_id)));
 });
 
 app.post('/coach/program/:id/save', requireCoach, (req, res) => {

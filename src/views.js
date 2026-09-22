@@ -2132,9 +2132,11 @@ function dailyRoutineBlocks(prog) {
 // Hitter-facing: their training program, read-only.
 // Athlete Programs tab (Sep 2026): program-first, today-first.
 // One tab, four ordered sub-tabs (data-driven): MOBILITY -> MED BALL ->
-// HITTING -> LIFTING. Prep work stays with Hitting. Med Ball is its own
-// sub-tab. Items check off per day; lifts log weight + RPE with target RPE,
-// last-time, and history inline.
+// Programs sub-tab order per Bobby: lifters get MOBILITY -> HITTING ->
+// LIFTING, with med ball work living INSIDE the Lifting tab (ahead of the
+// lifts); everyone else gets MOBILITY -> MED BALL -> HITTING. Prep work stays
+// with Hitting. Items check off per day; lifts log weight + RPE with target
+// RPE, last-time, and history inline.
 // Athlete-facing rule (Bobby): blank rows he leaves empty in the editor never
 // reach the athlete — only items with real content render, and a block with
 // no real items doesn't appear at all.
@@ -2238,22 +2240,23 @@ function programPage(user, p, opts) {
   };
 
   // One check-off row (hitting / mobility / med ball / prep).
-  const checkRow = (kind, key, drill, volume, video) => {
+  const checkRow = (kind, key, drill, volume, video, extra) => {
     const done = !!checkoffs[key];
     return `<form method="post" action="/program/check" class="checkrow${done ? ' done' : ''}">
       <input type="hidden" name="kind" value="${kind}">
       <input type="hidden" name="sub" value="${esc(sub)}">
       <input type="hidden" name="day" value="${esc(day)}">
+      ${extra || ''}
       <input type="hidden" name="item_key" value="${esc(key)}">
       <button type="submit" class="checkbtn" aria-label="${done ? 'Mark not done' : 'Mark done'}">${done ? '☑' : '☐'}</button>
       <span class="routine-name">${esc(drill || '')}</span>${volume ? `<span class="hint-inline">${esc(volume)}</span>` : ''}${watchLink(video)}
     </form>`;
   };
-  const blockCard = (cat, items, kind, dayScope) => {
+  const blockCard = (cat, items, kind, dayScope, extra) => {
     const real = realItems(items);
     if (!real.length) return '';
     return `<details class="card routine-group" open><summary class="routine-summary"><span class="routine-station">${esc(cat)}</span></summary>${real
-      .map((it) => checkRow(kind, `${kind}::${dayScope || ''}::${cat}::${it.drill}`, it.drill, it.volume, it.video))
+      .map((it) => checkRow(kind, `${kind}::${dayScope || ''}::${cat}::${it.drill}`, it.drill, it.volume, it.video, extra))
       .join('')}</details>`;
   };
 
@@ -2275,7 +2278,23 @@ function programPage(user, p, opts) {
         (!todays.length ? '<div class="card empty">No med ball work in your program.</div>' : '')}`;
   } else if (sub === 'lifting' && lifting) {
     const days = (Array.isArray(lifting.days) ? lifting.days : []).filter((d) => realExercises(d.exercises).length);
-    content = liftSubTab(user, lifting, days, o.ldayIdx || 0, sub, checkoffs, today, o.liftData || {});
+    // Lifters get their med ball work INSIDE the Lifting tab — it leads the
+    // day's flow (med ball before lifts), day-scoped exactly like the
+    // standalone Med Ball tab, with the lifting-day carried on check-offs.
+    const lday = o.ldayIdx || 0;
+    const ldayExtra = `<input type="hidden" name="lday" value="${lday}">`;
+    const medBlocks = routine.filter((c) => kindOf(c.category) === 'medball' && realItems(c.items).length);
+    const mbToday = day ? medBlocks.filter((c) => inDay(c.category, day)) : [];
+    const mbOthers = day ? medBlocks.filter((c) => !inDay(c.category, day)) : medBlocks;
+    const medHtml = medBlocks.length
+      ? `<h3 class="prog-h3">Med Ball</h3>\n${dayHead(true)}\n` +
+        (mbToday.map((c) => blockCard(c.category, c.items, 'med', dayPrefix(c.category), ldayExtra)).join('') ||
+          (day ? '<div class="card empty">No med ball work for this day.</div>' : '')) +
+        (mbOthers.length && mbToday.length ? '<h3 class="prog-h3">Other days</h3>' : '') +
+        (mbOthers.map((c) => blockCard(c.category, c.items, 'med', dayPrefix(c.category), ldayExtra)).join('') ||
+          (!mbToday.length ? '<div class="card empty">No med ball work in your program.</div>' : ''))
+      : '';
+    content = `${medHtml}${medBlocks.length ? '<h3 class="prog-h3">Lifts</h3>' : ''}${liftSubTab(user, lifting, days, lday, sub, checkoffs, today, o.liftData || {})}`;
   } else {
     // HITTING (default): today's plan first — prep for the day + the day's
     // hitting blocks. Then pregame, then Focus/Grades/Strengths/Notes.
@@ -2620,7 +2639,7 @@ function mentalGamePage(user, baseline, saved, planFailed, keys) {
 }
 
 // Coach-facing: edit a remote hitter's program.// Coach-facing: edit a remote hitter's program.
-function programEditPage(user, p, profileEmail) {
+function programEditPage(user, p, profileEmail, hasLifting) {
   const prog = p.prog || {};
   const grades = prog.grades && typeof prog.grades === 'object' ? prog.grades : {};
   const gradeFields = ['Load', 'Path', 'Connection', 'Timing', 'Power Production']
@@ -2715,7 +2734,8 @@ function programEditPage(user, p, profileEmail) {
         </label>
       </div>
       <h2 class="section-head">Training blocks</h2>
-      <p class="hint-inline">Blocks named with <em>Mobility</em> feed the Mobility tab, <em>Med Ball</em> the Med Ball tab, <em>Prep</em> stays with Hitting — naming a block is how tabs appear or disappear for the athlete.</p>
+      ${hasLifting ? '<p class="hint-inline"><strong>This athlete has a lifting program</strong> — their Med Ball blocks don\'t get their own tab; they show inside the <em>Lifting</em> tab, ahead of the lifts.</p>' : ''}
+      <p class="hint-inline">Blocks named with <em>Mobility</em> feed the Mobility tab, <em>Med Ball</em> feeds the Med Ball tab (or lands inside the <em>Lifting</em> tab for athletes with a lifting program), <em>Prep</em> stays with Hitting — naming a block is how tabs appear or disappear for the athlete.</p>
       <div id="prog-cats" data-next="${routine.length}">${catBlocks}</div>
       <p><button type="button" class="btn" id="prog-add-cat">+ Add block</button>
       <button type="button" class="btn" data-addcat-name="Mobility">+ Mobility block</button>
