@@ -3,6 +3,7 @@
 // DB_PATH env var overrides the default ./skip.db location.
 const path = require('path');
 const { DatabaseSync } = require('node:sqlite');
+const videoLinks = require('./video_links');
 
 const dbPath = process.env.DB_PATH || path.join(__dirname, '..', 'skip.db');
 const db = new DatabaseSync(dbPath);
@@ -408,6 +409,11 @@ db.exec(`CREATE TABLE IF NOT EXISTS remote_programs (
       delete p.days;
       if (!Array.isArray(p.notes)) p.notes = [];
       if (!Array.isArray(p.schedule)) p.schedule = [];
+      // Attach video links from Bobby's drill registry on the way in
+      // (YouTube for mobility/med-ball, Drive library for hitting/prep).
+      // The video library is empty on a fresh seed, so only the registry
+      // matches here; the library sync auto-links the rest later.
+      try { videoLinks.attachVideoLinks(p, []); } catch (e) { /* registry missing */ }
       if (!p.grades || typeof p.grades !== 'object') p.grades = {};
       if (!Array.isArray(p.strengths)) p.strengths = [];
       if (!p.cues || typeof p.cues !== 'object') p.cues = { movement: '', timing: '', game: '' };
@@ -493,6 +499,56 @@ db.exec(`CREATE TABLE IF NOT EXISTS remote_programs (
         }
       }
     } catch (e) { /* leave the program as-is */ }
+  }
+  // One-time: seed empty program schedules from the sheet-synced seed JSONs
+  // (carries Sam's Day 1 = Monday etc. over), then never again — the app DB
+  // is the source of truth and Bobby edits schedules in the coach editor.
+  // Guarded by a settings flag so his in-app edits are never overwritten.
+  {
+    const fs = require('fs');
+    try {
+      db.exec('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT \'\');');
+      const done = db.prepare("SELECT value FROM settings WHERE key = 'schedule_seed_v1'").get();
+      if (!done) {
+        const rows = db.prepare('SELECT id, athlete_name, program_json FROM remote_programs').all();
+        for (const row of rows) {
+          let prog = {};
+          try { prog = JSON.parse(row.program_json || '{}'); } catch (e) { continue; }
+          const sched = Array.isArray(prog.schedule) ? prog.schedule : [];
+          const hasSched = sched.some((s) => {
+            const label = Array.isArray(s) ? s[1] : (s && (s.day_label || s.label));
+            return String(label || '').trim();
+          });
+          if (hasSched) continue;
+          const seedFile = String(row.athlete_name || '').toLowerCase().replace(/[^a-z]+/g, '_').replace(/^_|_$/g, '') + '.json';
+          const fp = path.join(__dirname, 'seed_programs', seedFile);
+          if (!fs.existsSync(fp)) continue;
+          const seed = JSON.parse(fs.readFileSync(fp, 'utf8'));
+          if (Array.isArray(seed.schedule) && seed.schedule.length) {
+            prog.schedule = seed.schedule;
+            db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?')
+              .run(JSON.stringify(prog), new Date().toISOString(), row.id);
+            console.log(`Schedule seeded for ${row.athlete_name}.`);
+          }
+        }
+        db.prepare("INSERT INTO settings (key, value) VALUES ('schedule_seed_v1', '1')").run();
+      }
+    } catch (e) { console.warn('schedule seed skipped', e.message); }
+  }
+  // One-time: attach video links to program items from Bobby's drill registry
+  // + the synced video library. Only fills items with no link and no manual
+  // decision; his in-app edits always win. Guarded by a settings flag; the
+  // library sync re-runs auto-linking on every sync after this.
+  {
+    try {
+      db.exec('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT \'\');');
+      const done = db.prepare("SELECT value FROM settings WHERE key = 'video_links_v1'").get();
+      if (!done) {
+        const r = videoLinks.autoLinkAllPrograms(db, videoLinks.getLibraryRows(db));
+        console.log(`Video links attached: ${r.linked} items across ${r.programs} programs.`);
+        db.prepare("INSERT INTO settings (key, value) VALUES ('video_links_v1', '1')").run();
+      }
+    } catch (e) { console.warn('video link migration skipped', e.message); }
   }
   // Backfill: match accounts by full name, honoring aliases
   // (runs every boot; idempotent).

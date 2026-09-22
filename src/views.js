@@ -152,7 +152,7 @@ function userTabs(active, user) {
   // Bobby's remote hitters only — nobody else ever sees these tabs.
   if (isRemote) {
     tabs.push({ href: '/program/routine', label: 'Routine', active: active === 'routine' });
-    tabs.push({ href: '/videos', label: 'Videos', active: active === 'videos' });
+    tabs.push({ href: '/videos', label: 'Remote Library', active: active === 'videos' });
   } else {
     // Personal routine editor for every other hitter — one Routine tab, never two.
     tabs.push({ href: '/routine', label: 'Routine', active: active === 'routine' });
@@ -191,7 +191,7 @@ function coachTabs(active, approvalCount, user) {
     { href: '/coach/my-players', label: 'My Players', active: active === 'my-players' },
     { href: '/coach/hitters', label: 'All Players', active: active === 'hitters' },
     { href: '/coach/messages', label: 'Messages', active: active === 'messages', badge: user && user.unreadMessages > 0 ? String(user.unreadMessages) : null },
-    { href: '/coach/videos', label: 'Videos', active: active === 'videos' },
+    { href: '/coach/videos', label: 'Remote Library', active: active === 'videos' },
     { href: '/coach/organizations', label: 'Organizations', active: active === 'organizations' },
     { href: '/coach/skip', label: 'Train Skip', active: active === 'skip' },
     { href: '/coach/approvals', label: 'Approvals', active: active === 'approvals', badge: approvalCount > 0 ? String(approvalCount) : null },
@@ -2135,6 +2135,14 @@ function dailyRoutineBlocks(prog) {
 // HITTING -> LIFTING. Prep work stays with Hitting. Med Ball is its own
 // sub-tab. Items check off per day; lifts log weight + RPE with target RPE,
 // last-time, and history inline.
+// Athlete-facing rule (Bobby): blank rows he leaves empty in the editor never
+// reach the athlete — only items with real content render, and a block with
+// no real items doesn't appear at all.
+const realItems = (items) =>
+  (Array.isArray(items) ? items : []).filter((it) => String((it && it.drill) || '').trim());
+const realExercises = (exs) =>
+  (Array.isArray(exs) ? exs : []).filter((ex) => String((ex && ex.name) || '').trim());
+
 function programPage(user, p, opts) {
   const prog = p.prog || {};
   const o = opts || {};
@@ -2148,6 +2156,30 @@ function programPage(user, p, opts) {
   const weekday = o.weekday || '';
   const autoDay = o.autoDay || '';
   const isToday = !!o.isToday;
+  const videoLib = o.videoLib || {};
+
+  // Resolve a stored item video URL to its href: Drive URLs open the in-app
+  // library watch page when the video is in Bobby's library (and visible);
+  // YouTube and anything else open directly. Hidden library videos show no
+  // link at all.
+  const videoHref = (url) => {
+    const u = String(url || '').trim();
+    if (!u) return '';
+    const dm = /drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/.exec(u);
+    if (dm) {
+      const v = videoLib[dm[1]];
+      if (v && !v.hidden) return '/videos/watch/' + v.id;
+      if (v && v.hidden) return '';
+      return u;
+    }
+    return u;
+  };
+  const watchLink = (video) => {
+    const href = videoHref(video);
+    if (!href) return '';
+    const ext = /^https?:\/\//i.test(href);
+    return ` <a class="watch-link" href="${esc(href)}"${ext ? ' target="_blank" rel="noopener"' : ''} aria-label="Watch video">&#9654; <span>Watch</span></a>`;
+  };
 
   const grades = prog.grades && typeof prog.grades === 'object' ? prog.grades : {};
   const gradeChips = Object.entries(grades)
@@ -2180,12 +2212,15 @@ function programPage(user, p, opts) {
   };
   const inDay = (cat, d) => dayPrefix(cat).toLowerCase() === String(d || '').toLowerCase();
 
-  // Rest day? (schedule maps today to OFF / Rest)
-  const schedArr = Array.isArray(prog.schedule) ? prog.schedule : [];
-  const schedToday = schedArr.find(
-    (s) => String(s.weekday || '').toLowerCase() === String(weekday).toLowerCase()
-  );
-  const isRest = schedToday && /^(off|rest)/i.test(String(schedToday.day_label || '').trim());
+  // Rest day? (schedule maps today to OFF / Rest). Sheet entries are
+  // [weekday, label] pairs; tolerate { weekday, day_label } objects too.
+  const schedEntry = (s) =>
+    Array.isArray(s)
+      ? { weekday: String(s[0] || '').trim(), label: String(s[1] || '').trim() }
+      : { weekday: String((s && s.weekday) || '').trim(), label: String((s && (s.day_label || s.label)) || '').trim() };
+  const schedArr = (Array.isArray(prog.schedule) ? prog.schedule : []).map(schedEntry);
+  const schedToday = schedArr.find((s) => s.weekday.toLowerCase() === String(weekday).toLowerCase());
+  const isRest = schedToday && /^(off|rest)/i.test(schedToday.label);
 
   // Compact day header + manual day picker (GET form, no clunky JS).
   const dayHead = (showPicker) => {
@@ -2203,7 +2238,7 @@ function programPage(user, p, opts) {
   };
 
   // One check-off row (hitting / mobility / med ball / prep).
-  const checkRow = (kind, key, drill, volume) => {
+  const checkRow = (kind, key, drill, volume, video) => {
     const done = !!checkoffs[key];
     return `<form method="post" action="/program/check" class="checkrow${done ? ' done' : ''}">
       <input type="hidden" name="kind" value="${kind}">
@@ -2211,22 +2246,25 @@ function programPage(user, p, opts) {
       <input type="hidden" name="day" value="${esc(day)}">
       <input type="hidden" name="item_key" value="${esc(key)}">
       <button type="submit" class="checkbtn" aria-label="${done ? 'Mark not done' : 'Mark done'}">${done ? '☑' : '☐'}</button>
-      <span class="routine-name">${esc(drill || '')}</span>${volume ? `<span class="hint-inline">${esc(volume)}</span>` : ''}
+      <span class="routine-name">${esc(drill || '')}</span>${volume ? `<span class="hint-inline">${esc(volume)}</span>` : ''}${watchLink(video)}
     </form>`;
   };
-  const blockCard = (cat, items, kind, dayScope) =>
-    `<details class="card routine-group" open><summary class="routine-summary"><span class="routine-station">${esc(cat)}</span></summary>${(items || [])
-      .map((it) => checkRow(kind, `${kind}::${dayScope || ''}::${cat}::${it.drill}`, it.drill, it.volume))
+  const blockCard = (cat, items, kind, dayScope) => {
+    const real = realItems(items);
+    if (!real.length) return '';
+    return `<details class="card routine-group" open><summary class="routine-summary"><span class="routine-station">${esc(cat)}</span></summary>${real
+      .map((it) => checkRow(kind, `${kind}::${dayScope || ''}::${cat}::${it.drill}`, it.drill, it.volume, it.video))
       .join('')}</details>`;
+  };
 
   let content = '';
   if (sub === 'mobility') {
-    const blocks = routine.filter((c) => kindOf(c.category) === 'mobility' && (c.items || []).length);
+    const blocks = routine.filter((c) => kindOf(c.category) === 'mobility' && realItems(c.items).length);
     content = `${dayHead(false)}
       <p class="lede">Do this first, every day — then get after the work below.</p>
       ${blocks.map((c) => blockCard(c.category, c.items, 'mob')).join('') || '<div class="card empty">No mobility work in your program.</div>'}`;
   } else if (sub === 'medball') {
-    const blocks = routine.filter((c) => kindOf(c.category) === 'medball' && (c.items || []).length);
+    const blocks = routine.filter((c) => kindOf(c.category) === 'medball' && realItems(c.items).length);
     const todays = day ? blocks.filter((c) => inDay(c.category, day)) : [];
     const others = day ? blocks.filter((c) => !inDay(c.category, day)) : blocks;
     content = `${dayHead(true)}
@@ -2236,18 +2274,18 @@ function programPage(user, p, opts) {
       ${others.map((c) => blockCard(c.category, c.items, 'med', dayPrefix(c.category))).join('') ||
         (!todays.length ? '<div class="card empty">No med ball work in your program.</div>' : '')}`;
   } else if (sub === 'lifting' && lifting) {
-    const days = Array.isArray(lifting.days) ? lifting.days : [];
+    const days = (Array.isArray(lifting.days) ? lifting.days : []).filter((d) => realExercises(d.exercises).length);
     content = liftSubTab(user, lifting, days, o.ldayIdx || 0, sub, checkoffs, today, o.liftData || {});
   } else {
     // HITTING (default): today's plan first — prep for the day + the day's
     // hitting blocks. Then pregame, then Focus/Grades/Strengths/Notes.
     const dayBlocks = routine.filter(
-      (c) => (c.items || []).length && (kindOf(c.category) === 'hit' || kindOf(c.category) === 'prep') &&
+      (c) => realItems(c.items).length && (kindOf(c.category) === 'hit' || kindOf(c.category) === 'prep') &&
              (!day || inDay(c.category, day) || !dayPrefix(c.category))
     );
     const daySpecific = dayBlocks.filter((c) => day && inDay(c.category, day));
     const flat = dayBlocks.filter((c) => !dayPrefix(c.category));
-    const pregame = routine.filter((c) => (c.items || []).length && /^pregame/i.test(dayPrefix(c.category)) && kindOf(c.category) !== 'mobility' && kindOf(c.category) !== 'medball');
+    const pregame = routine.filter((c) => realItems(c.items).length && /^pregame/i.test(dayPrefix(c.category)) && kindOf(c.category) !== 'mobility' && kindOf(c.category) !== 'medball');
     const prepToday = daySpecific.filter((c) => kindOf(c.category) === 'prep');
     const hitToday = daySpecific.filter((c) => kindOf(c.category) === 'hit');
     content = `${dayHead(true)}
@@ -2301,7 +2339,7 @@ function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftDat
       return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     } catch (e) { return d; }
   };
-  const exRows = (Array.isArray(day.exercises) ? day.exercises : [])
+  const exRows = realExercises(day.exercises)
     .map((ex) => {
       const name = String(ex.name || '');
       const key = `lift::${dayKey}::${name}`;
@@ -2478,16 +2516,37 @@ function liftingEditPage(user, lp) {
 }
 // Hitter-facing: their daily routine — the every-day blocks of their program.
 // Remote athletes only.
-function programRoutinePage(user, p) {
+function programRoutinePage(user, p, videoLib) {
   const prog = p.prog || {};
   const blocks = dailyRoutineBlocks(prog);
+  const lib = videoLib || {};
+  const routineHref = (url) => {
+    const u = String(url || '').trim();
+    if (!u) return '';
+    const dm = /drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/.exec(u);
+    if (dm) {
+      const v = lib[dm[1]];
+      if (v && !v.hidden) return '/videos/watch/' + v.id;
+      if (v && v.hidden) return '';
+      return u;
+    }
+    return u;
+  };
   const sectionCard = (name, items) => {
-    const rows = (items || [])
-      .map(
-        (it) => `<div class="routine-row"><span class="routine-name">${esc(it.drill || '')}</span>${
+    const real = realItems(items);
+    if (!real.length) return '';
+    const rows = real
+      .map((it) => {
+        const href = routineHref(it.video);
+        const ext = /^https?:\/\//i.test(href);
+        return `<div class="routine-row"><span class="routine-name">${esc(it.drill || '')}</span>${
           it.volume ? `<span class="hint-inline">${esc(it.volume)}</span>` : ''
-        }</div>`
-      )
+        }${
+          href
+            ? ` <a class="watch-link" href="${esc(href)}"${ext ? ' target="_blank" rel="noopener"' : ''} aria-label="Watch video">&#9654; <span>Watch</span></a>`
+            : ''
+        }</div>`;
+      })
       .join('');
     return `<details class="card routine-group" open><summary class="routine-summary"><span class="routine-station">${esc(name || 'Training')}</span></summary>${rows}</details>`;
   };
@@ -2571,9 +2630,30 @@ function programEditPage(user, p, profileEmail) {
     )
     .join('');
   const routine = Array.isArray(prog.routine) ? prog.routine : [];
+  const itemLine = (it) => {
+    const parts = [it.drill || ''];
+    if (it.volume || it.video) parts.push(it.volume || '');
+    if (it.video) parts.push(it.video);
+    return parts.join(' | ');
+  };
+  const linkStatus = (items) => {
+    let auto = 0,
+      manual = 0,
+      none = 0;
+    for (const it of items || []) {
+      if (it.video) (it.video_source === 'manual' ? manual++ : auto++);
+      else none++;
+    }
+    return { auto, manual, none };
+  };
   const catBlocks = routine
-    .map(
-      (c, i) => `<div class="card routine-group prog-cat" data-cat>
+    .map((c, i) => {
+      const st = linkStatus(c.items);
+      const statusBits = [];
+      if (st.auto) statusBits.push(`${st.auto} auto-linked`);
+      if (st.manual) statusBits.push(`${st.manual} manual`);
+      if (st.none) statusBits.push(`${st.none} need a link`);
+      return `<div class="card routine-group prog-cat" data-cat>
         <div class="cat-head-row">
           <span class="hint-inline">Block ${i + 1}</span>
           <span class="cat-move">
@@ -2582,12 +2662,13 @@ function programEditPage(user, p, profileEmail) {
           </span>
         </div>
         <label class="fld">Category<input type="text" name="cat_${i}_name" value="${esc(c.category || '')}" maxlength="60"></label>
-        <label class="fld">Drills — one per line, as <em>Drill</em> or <em>Drill | volume</em>
-          <textarea name="cat_${i}_items" rows="4">${esc((c.items || []).map((it) => (it.volume ? `${it.drill} | ${it.volume}` : it.drill)).join('\n'))}</textarea>
+        <label class="fld">Drills — one per line, as <em>Drill</em>, <em>Drill | volume</em>, or <em>Drill | volume | video link</em>
+          <textarea name="cat_${i}_items" rows="4">${esc((c.items || []).map(itemLine).join('\n'))}</textarea>
         </label>
+        <div class="hint-inline">🔗 ${statusBits.join(' · ') || 'no drills'}. Paste a YouTube or library URL after the last | to set a link; delete a link to keep it blank. New library videos auto-link on their own — your links are never overwritten.</div>
         <button type="button" class="btn btn-danger btn-sm" data-remove-cat>Remove category</button>
-      </div>`
-    )
+      </div>`;
+    })
     .join('');
   const cues = prog.cues && typeof prog.cues === 'object' ? prog.cues : {};
   const editSchedMap = {};
@@ -2728,14 +2809,14 @@ function videosPage(user, cats, activeCat, videos) {
     )
     .join('');
   return layout({
-    title: 'Training Videos',
+    title: 'Remote Library',
     user,
     tabs: userTabs('videos', user),
-    body: `<h1 class="page-title">Training Videos</h1>
+    body: `<h1 class="page-title">Remote Library</h1>
     ${cats.length ? `<input type="search" id="video-search" class="searchbar" placeholder="Search videos\u2026" autocomplete="off">` : ''}
     <div class="pill-row">${pills}</div>
     <div class="video-grid">${cards || '<div class="card empty">No videos yet — they\u2019ll appear here after the next sync.</div>'}</div>
-    <div class="card empty" id="video-no-match" hidden>No videos match that search.</div>
+    <div class="card empty" id="video-no-match" hidden>No library items match that search.</div>
 `,
   });
 }
@@ -2762,11 +2843,11 @@ function librarySection(library) {
     ? `Last synced ${esc(library.lastSync.slice(0, 16).replace('T', ' '))}`
     : 'Not synced yet';
   const total = cats.reduce((t, c) => t + c.n, 0);
-  return `<h2 class="section-head">Video library</h2>
+  return `<h2 class="section-head">Remote Library</h2>
   <div class="card">
     <div class="hint-inline">${total} file${total === 1 ? '' : 's'} · ${syncLine} · syncs automatically from Drive</div>
     ${rows || '<div class="empty">Empty.</div>'}
-    <div style="margin-top:10px"><a class="btn-small" href="/coach/library">Open video library</a></div>
+    <div style="margin-top:10px"><a class="btn-small" href="/coach/library">Open Remote Library</a></div>
   </div>`;
 }
 
@@ -2810,15 +2891,15 @@ function coachLibraryPage(user, cats, activeCat, videos, playing) {
        <div class="video-player"><iframe src="https://drive.google.com/file/d/${encodeURIComponent(playing.drive_file_id)}/preview" allow="autoplay; fullscreen" allowfullscreen></iframe></div>`
     : '';
   return layout({
-    title: 'Video library',
+    title: 'Remote Library',
     user,
     tabs: coachTabs('videos', user.approvalCount, user),
     body: `<p><a href="/coach">\u2190 Dashboard</a></p>
-    <h1 class="page-title">Video library</h1>
-    <div class="hint-inline">Renames and hidden videos are yours only — the Drive sync never overwrites them. New Drive files appear here automatically.</div>
+    <h1 class="page-title">Remote Library</h1>
+    <div class="hint-inline">Renames and hidden items are yours only — the Drive sync never overwrites them. New Drive files and PDFs appear here automatically.</div>
     ${player}
     <div class="pill-row">${pills}</div>
-    ${rows || '<div class="card empty">No videos in this category yet.</div>'}`,
+    ${rows || '<div class="card empty">No items in this category yet.</div>'}`,
   });
 }
 

@@ -19,6 +19,7 @@ const SQLiteStore = require('./store');
 const data = require('./data');
 const views = require('./views');
 const brain = require('./brain');
+const videoLinks = require('./video_links');
 const { seedUsers, writeCredentialsFile, userCount } = require('./seed');
 
 // Bobby's own organization — his 4 remote hitters, Talk to Skip on, free
@@ -1563,6 +1564,21 @@ app.get('/', requireLogin, (req, res) => {
 // value — chips toggle and manual edits work exactly as usual. Returns a
 // sections object ({prep, tee, sideToss, frontToss, bp, machine, other}) of
 // comma-joined strings, all blank when there's nothing to pre-fill.
+// Schedule entries come from Bobby's sheets as [weekday, day-label] pairs
+// (e.g. ["Monday","Day 1"], ["Sunday","OFF"]); tolerate { weekday, day_label }
+// objects too. Always returns { weekday, label }.
+function schedEntry(s) {
+  if (Array.isArray(s)) {
+    return { weekday: String(s[0] || '').trim(), label: String(s[1] || '').trim() };
+  }
+  if (s && typeof s === 'object') {
+    return {
+      weekday: String(s.weekday || '').trim(),
+      label: String(s.day_label || s.label || '').trim(),
+    };
+  }
+  return { weekday: '', label: '' };
+}
 function todayProgramPrefill(userId, now) {
   const blank = {};
   for (const s of DRILL_SECTIONS) blank[s.key] = [];
@@ -1599,13 +1615,13 @@ function todayProgramPrefill(userId, now) {
     if (name.toLowerCase() === 'daily routine') daily.push(...drills);
     else if (name) dayCats.push([name, drills]);
   }
-  const sched = Array.isArray(prog.schedule) ? prog.schedule : [];
+  const sched = (Array.isArray(prog.schedule) ? prog.schedule : []).map(schedEntry);
   const weekday = chiWeekdayFmt.format(now || new Date());
-  const entry = sched.find((e) => Array.isArray(e) && String(e[0]).toLowerCase() === weekday.toLowerCase());
-  if (entry && /^(off|rest)$/i.test(String(entry[1] || '').trim())) return joinSecs(blank); // rest day
+  const entry = sched.find((e) => e.weekday.toLowerCase() === weekday.toLowerCase());
+  if (entry && /^(off|rest)$/i.test(entry.label)) return joinSecs(blank); // rest day
   const extra = []; // [sectionKey, drill]
-  if (entry && String(entry[1] || '').trim()) {
-    const label = String(entry[1]).trim().toLowerCase();
+  if (entry && entry.label) {
+    const label = entry.label.toLowerCase();
     for (const [name, drills] of dayCats) {
       if (name.toLowerCase().startsWith(label)) {
         const key = sectionForCategory(name);
@@ -1736,8 +1752,13 @@ function splitProgramBlocks(p) {
   const prog = (p && p.prog) || {};
   const routine = Array.isArray(prog.routine) ? prog.routine : [];
   const out = { mobility: [], medball: [], prep: [], hit: [] };
+  // Bobby's rule: blocks with no real items (blank rows he left empty) don't
+  // exist for the athlete — they neither render nor create tabs.
+  const realItems = (items) =>
+    (Array.isArray(items) ? items : []).filter((it) => String((it && it.drill) || '').trim());
   for (const c of routine) {
-    if (!c || !Array.isArray(c.items) || c.items.length === 0) continue;
+    const items = realItems(c && c.items);
+    if (!items.length) continue;
     const k = blockKind(c.category);
     if (k === 'prep') out.prep.push(c);
     else out[k].push(c);
@@ -1746,14 +1767,17 @@ function splitProgramBlocks(p) {
 }
 // Which Programs sub-tabs an athlete gets: Mobility and Med Ball only when
 // their program actually has that content; Hitting always; Lifting only when
-// a lifting program is assigned. Returns [{ id, label }].
+// a lifting program with real exercises is assigned. Returns [{ id, label }].
 function programSubTabs(p, lifting) {
   const blocks = splitProgramBlocks(p);
   const tabs = [];
   if (blocks.mobility.length) tabs.push({ id: 'mobility', label: 'Mobility' });
   if (blocks.medball.length) tabs.push({ id: 'medball', label: 'Med Ball' });
   tabs.push({ id: 'hitting', label: 'Hitting' });
-  if (lifting) tabs.push({ id: 'lifting', label: 'Lifting' });
+  const liftDays = lifting && Array.isArray(lifting.days) ? lifting.days : [];
+  if (liftDays.some((d) => (Array.isArray(d.exercises) ? d.exercises : []).some((ex) => String((ex && ex.name) || '').trim()))) {
+    tabs.push({ id: 'lifting', label: 'Lifting' });
+  }
   return tabs;
 }
 // Distinct day labels across a program's blocks, in first-seen order
@@ -1769,16 +1793,16 @@ function programDayLabels(p) {
   }
   return seen;
 }
-// Auto-detected "current day": today's Chicago weekday -> scheduled day label.
+// Auto-detected "current day": today's Chicago weekday -> the athlete's
+// scheduled day label from THEIR sheet (e.g. Sam: Tuesday -> Day 2).
+// Returns '' when the program has no schedule for today (caller falls back
+// to the first day label).
 function programCurrentDay(p) {
   const prog = (p && p.prog) || {};
-  const schedule = Array.isArray(prog.schedule) ? prog.schedule : [];
+  const schedule = (Array.isArray(prog.schedule) ? prog.schedule : []).map(schedEntry);
   const weekday = new Date().toLocaleDateString('en-US', { weekday: 'long', timeZone: 'America/Chicago' });
-  const hit = schedule.find(
-    (s) => String(s.weekday || '').toLowerCase() === weekday.toLowerCase() &&
-           String(s.day_label || '').trim()
-  );
-  return hit ? String(hit.day_label).trim() : '';
+  const hit = schedule.find((s) => s.weekday.toLowerCase() === weekday.toLowerCase() && s.label);
+  return hit ? hit.label : '';
 }
 function getLifting(id) {
   if (!id) return null;
@@ -1799,6 +1823,7 @@ function getCheckoffs(userId, day) {
   for (const r of rows) map[r.item_key] = r;
   return map;
 }
+
 // Most recent logged lift for an exercise (weight/RPE). Prefers an earlier
 // day ("what you did last time"); falls back to any earlier log today.
 function lastLiftLog(userId, itemKey, today) {
@@ -1887,7 +1912,13 @@ app.get('/program', requireLogin, (req, res) => {
   const today = chiToday();
   const checkoffs = getCheckoffs(req.user.id, today);
   // Lifting day selection + per-exercise last-time/history for the current day.
-  const liftDays = lifting && Array.isArray(lifting.days) ? lifting.days : [];
+  // Blank days (no real exercises) never reach the athlete — not as pills,
+  // not as content.
+  const liftDays = lifting && Array.isArray(lifting.days)
+    ? lifting.days.filter((d) =>
+        (Array.isArray(d.exercises) ? d.exercises : []).some((ex) => String((ex && ex.name) || '').trim())
+      )
+    : [];
   const ldayIdx = liftDays.length ? Math.max(0, Math.min(liftDays.length - 1, parseInt(req.query.lday, 10) || 0)) : 0;
   const liftData = {};
   if (sub === 'lifting' && liftDays[ldayIdx]) {
@@ -1901,8 +1932,21 @@ app.get('/program', requireLogin, (req, res) => {
     weekday: new Date().toLocaleDateString('en-US', { weekday: 'long', timeZone: 'America/Chicago' }),
     isToday: !reqDay || (autoDay && reqDay.toLowerCase() === autoDay.toLowerCase()),
     ldayIdx, liftData,
+    videoLib: videoLibMap(),
   }));
 });
+
+// drive_file_id -> { id, hidden }: resolves a program item's stored video URL
+// to the in-app library watch page when the video is in Bobby's library.
+function videoLibMap() {
+  const map = {};
+  try {
+    for (const v of db.prepare('SELECT id, drive_file_id, hidden FROM video_library').all()) {
+      if (v.drive_file_id) map[v.drive_file_id] = { id: v.id, hidden: !!v.hidden };
+    }
+  } catch (e) { /* library table not ready */ }
+  return map;
+}
 
 // Check off / log a program item. Posts from the athlete's Programs tab:
 // kind=hit|mob|med|lift, item_key, plus weight/rpe for lifts. Re-posting an
@@ -2131,7 +2175,7 @@ app.get('/program/routine', requireLogin, (req, res) => {
   if (!req.user.remoteProgramId) return res.redirect('/');
   const p = getProgram(req.user.remoteProgramId);
   if (!p) return res.redirect('/');
-  res.send(views.programRoutinePage(req.user, p));
+  res.send(views.programRoutinePage(req.user, p, videoLibMap()));
 });
 
 // Coach: edit a remote hitter's program.
@@ -2170,11 +2214,22 @@ app.post('/coach/program/:id/save', requireCoach, (req, res) => {
     game: String(b.cue_game || '').trim().slice(0, 300),
   };
   const cats = [];
+  const curByCat = {};
+  for (const cb of (prog.routine || [])) curByCat[String((cb && cb.category) || '')] = cb;
   for (const k of Object.keys(b)) {
     const m = k.match(/^cat_(\d+)_name$/);
     if (m) {
       const name = String(b[k] || '').trim().slice(0, 60);
       if (!name) continue;
+      // Pool of the block's current items (matched by drill name) so an
+      // unchanged link keeps its auto/manual origin; any add, change, or
+      // clear of a link is Bobby's manual decision.
+      const pool = (((curByCat[name] || {}).items) || []).map((it) => ({
+        drill: String((it && it.drill) || ''),
+        video: String((it && it.video) || ''),
+        source: String((it && it.video_source) || ''),
+        used: false,
+      }));
       const items = String(b[`cat_${m[1]}_items`] || '')
         .split('\n')
         .map((line) => {
@@ -2184,6 +2239,17 @@ app.post('/coach/program/:id/save', requireCoach, (req, res) => {
           const item = { drill };
           const vol = (parts[1] || '').trim().slice(0, 60);
           if (vol) item.volume = vol;
+          const rawLink = (parts[2] || '').trim().slice(0, 300);
+          const link = /^https?:\/\//i.test(rawLink) ? rawLink : '';
+          if (link) item.video = link;
+          const prev = pool.find((pp) => !pp.used && pp.drill === drill);
+          if (prev) {
+            prev.used = true;
+            const src = link === prev.video ? prev.source : 'manual';
+            if (src) item.video_source = src;
+          } else if (link) {
+            item.video_source = 'manual';
+          }
           return item;
         })
         .filter(Boolean)
@@ -2412,7 +2478,16 @@ app.post('/api/library/sync', (req, res) => {
     `INSERT INTO library_sync_state (key, value) VALUES ('last_sync_at', ?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`
   ).run(now);
-  res.json({ ok: true, count: ids.length });
+  // New videos just landed — auto-link program items worded closely to them.
+  // Manual coach links always win: only items with no link and no manual
+  // decision get filled.
+  let autoLinked = 0;
+  try {
+    const r = videoLinks.autoLinkAllPrograms(db, videoLinks.getLibraryRows(db));
+    autoLinked = r.linked;
+    if (r.linked) console.log(`Auto-linked ${r.linked} program items to new library videos.`);
+  } catch (e) { console.warn('auto-link skipped', e.message); }
+  res.json({ ok: true, count: ids.length, auto_linked: autoLinked });
 });
 
 // Brain entries endpoint for the VM agent — guarded by shared secret.

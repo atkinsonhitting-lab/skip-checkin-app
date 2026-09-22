@@ -790,3 +790,9 @@ a.stat-card { padding: 14px 8px; }
 .lift-ex-edit input.wide { flex: 3; min-width: 120px; }
 .cat-head-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
 .cat-move { display: flex; gap: 4px; }
+
+/* Program item video links (Sep 2026): tappable Watch affordance on the row. */
+.watch-link { display: inline-flex; align-items: center; gap: 5px; margin-left: 10px; padding: 7px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--bg2); color: var(--text); font-size: 13px; font-weight: 700; white-space: nowrap; flex-shrink: 0; }
+.watch-link:active { background: var(--red); border-color: var(--red); color: #fff; }
+.checkrow .watch-link { margin-left: auto; }
+.routine-row .watch-link { margin-left: auto; }
