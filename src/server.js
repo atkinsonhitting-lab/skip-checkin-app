@@ -1717,6 +1717,118 @@ function getProgram(id) {
   if (!prog || typeof prog !== 'object') prog = {};
   return { id: row.id, athlete_name: row.athlete_name, updated_at: row.updated_at, prog };
 }
+// ---- Programs tab: lifting + check-offs (Sep 2026) ----
+// Chicago date string (YYYY-MM-DD) used as the check-off day key.
+function chiToday() {
+  return chiDay(new Date());
+}
+// Classify a program block category into a Programs sub-tab.
+// Order is fixed per Bobby: MOBILITY -> MED BALL -> HITTING -> LIFTING.
+// Prep work always stays with Hitting.
+function blockKind(category) {
+  const n = String(category || '');
+  if (/med\s*ball/i.test(n)) return 'medball';
+  if (/mobility/i.test(n)) return 'mobility';
+  if (/prep/i.test(n)) return 'prep';
+  return 'hit';
+}
+function splitProgramBlocks(p) {
+  const prog = (p && p.prog) || {};
+  const routine = Array.isArray(prog.routine) ? prog.routine : [];
+  const out = { mobility: [], medball: [], prep: [], hit: [] };
+  for (const c of routine) {
+    if (!c || !Array.isArray(c.items) || c.items.length === 0) continue;
+    const k = blockKind(c.category);
+    if (k === 'prep') out.prep.push(c);
+    else out[k].push(c);
+  }
+  return out;
+}
+// Which Programs sub-tabs an athlete gets: Mobility and Med Ball only when
+// their program actually has that content; Hitting always; Lifting only when
+// a lifting program is assigned. Returns [{ id, label }].
+function programSubTabs(p, lifting) {
+  const blocks = splitProgramBlocks(p);
+  const tabs = [];
+  if (blocks.mobility.length) tabs.push({ id: 'mobility', label: 'Mobility' });
+  if (blocks.medball.length) tabs.push({ id: 'medball', label: 'Med Ball' });
+  tabs.push({ id: 'hitting', label: 'Hitting' });
+  if (lifting) tabs.push({ id: 'lifting', label: 'Lifting' });
+  return tabs;
+}
+// Distinct day labels across a program's blocks, in first-seen order
+// (e.g. "Day 1", "Day 2", "Pregame").
+function programDayLabels(p) {
+  const prog = (p && p.prog) || {};
+  const routine = Array.isArray(prog.routine) ? prog.routine : [];
+  const seen = [];
+  for (const c of routine) {
+    const m = /^([A-Za-z]+ ?\d+|Pregame)/i.exec(String(c.category || '').trim());
+    const label = m ? m[1].trim() : null;
+    if (label && !seen.some((s) => s.toLowerCase() === label.toLowerCase())) seen.push(label);
+  }
+  return seen;
+}
+// Auto-detected "current day": today's Chicago weekday -> scheduled day label.
+function programCurrentDay(p) {
+  const prog = (p && p.prog) || {};
+  const schedule = Array.isArray(prog.schedule) ? prog.schedule : [];
+  const weekday = new Date().toLocaleDateString('en-US', { weekday: 'long', timeZone: 'America/Chicago' });
+  const hit = schedule.find(
+    (s) => String(s.weekday || '').toLowerCase() === weekday.toLowerCase() &&
+           String(s.day_label || '').trim()
+  );
+  return hit ? String(hit.day_label).trim() : '';
+}
+function getLifting(id) {
+  if (!id) return null;
+  const row = db.prepare('SELECT * FROM lifting_programs WHERE id = ?').get(Number(id));
+  if (!row) return null;
+  let pj = {};
+  try { pj = JSON.parse(row.program_json || '{}'); } catch (e) { pj = {}; }
+  if (!pj || typeof pj !== 'object') pj = {};
+  if (!Array.isArray(pj.days)) pj.days = [];
+  return { id: row.id, name: row.name, is_template: row.is_template, days: pj.days, notes: pj.notes || [] };
+}
+// Today's check-offs for an athlete, keyed by item_key.
+function getCheckoffs(userId, day) {
+  const rows = db
+    .prepare('SELECT * FROM program_checkoffs WHERE user_id = ? AND day = ?')
+    .all(userId, day);
+  const map = {};
+  for (const r of rows) map[r.item_key] = r;
+  return map;
+}
+// Most recent logged lift for an exercise (weight/RPE). Prefers an earlier
+// day ("what you did last time"); falls back to any earlier log today.
+function lastLiftLog(userId, itemKey, today) {
+  let r = db
+    .prepare(
+      `SELECT * FROM program_checkoffs
+       WHERE user_id = ? AND item_key = ? AND day < ? AND (weight IS NOT NULL OR rpe IS NOT NULL)
+       ORDER BY day DESC LIMIT 1`
+    )
+    .get(userId, itemKey, today);
+  if (!r) {
+    r = db
+      .prepare(
+        `SELECT * FROM program_checkoffs
+         WHERE user_id = ? AND item_key = ? AND day <= ? AND (weight IS NOT NULL OR rpe IS NOT NULL)
+         ORDER BY day DESC, id DESC LIMIT 1`
+      )
+      .get(userId, itemKey, today);
+  }
+  return r || null;
+}
+function liftHistory(userId, itemKey, limit) {
+  return db
+    .prepare(
+      `SELECT * FROM program_checkoffs
+       WHERE user_id = ? AND item_key = ? AND (weight IS NOT NULL OR rpe IS NOT NULL)
+       ORDER BY day DESC, id DESC LIMIT ?`
+    )
+    .all(userId, itemKey, limit || 8);
+}
 // Find the remote program for a hitter's name, honoring aliases
 // ("Samuel Chapman" links to the "Sam Chapman" program).
 function remoteProgramForName(name) {
@@ -1755,7 +1867,83 @@ app.get('/program', requireLogin, (req, res) => {
   if (!req.user.remoteProgramId) return res.redirect('/');
   const p = getProgram(req.user.remoteProgramId);
   if (!p) return res.redirect('/');
-  res.send(views.programPage(req.user, p));
+  // Sub-tab: mobility / medball / hitting / lifting (data-driven; default = first).
+  const prog = p.prog || {};
+  const liftingId = db.prepare('SELECT lifting_program_id FROM remote_programs WHERE id = ?').get(p.id);
+  const lifting = getLifting(liftingId && liftingId.lifting_program_id);
+  const tabs = programSubTabs(p, lifting);
+  const tabIds = tabs.map((t) => t.id);
+  const reqSub = String(req.query.sub || '').toLowerCase();
+  const sub = tabIds.includes(reqSub) ? reqSub : tabIds[0];
+  // Day: manual pick (?day=) or auto-detected from the schedule (weekday -> day label).
+  const labels = programDayLabels(p);
+  const rawAuto = programCurrentDay(p);
+  const restToday = /^(off|rest)/i.test(String(rawAuto || '').trim());
+  const autoDay = restToday ? '' : rawAuto;
+  const reqDay = String(req.query.day || '').trim();
+  const day = labels.some((l) => l.toLowerCase() === reqDay.toLowerCase())
+    ? labels.find((l) => l.toLowerCase() === reqDay.toLowerCase())
+    : (autoDay || labels[0] || '');
+  const today = chiToday();
+  const checkoffs = getCheckoffs(req.user.id, today);
+  // Lifting day selection + per-exercise last-time/history for the current day.
+  const liftDays = lifting && Array.isArray(lifting.days) ? lifting.days : [];
+  const ldayIdx = liftDays.length ? Math.max(0, Math.min(liftDays.length - 1, parseInt(req.query.lday, 10) || 0)) : 0;
+  const liftData = {};
+  if (sub === 'lifting' && liftDays[ldayIdx]) {
+    for (const ex of liftDays[ldayIdx].exercises || []) {
+      const key = 'lift::' + String((liftDays[ldayIdx].label || '')) + '::' + String(ex.name || '');
+      liftData[key] = { last: lastLiftLog(req.user.id, key, today), history: liftHistory(req.user.id, key, 8) };
+    }
+  }
+  res.send(views.programPage(req.user, p, {
+    tabs, sub, day, autoDay, labels, today, checkoffs, lifting,
+    weekday: new Date().toLocaleDateString('en-US', { weekday: 'long', timeZone: 'America/Chicago' }),
+    isToday: !reqDay || (autoDay && reqDay.toLowerCase() === autoDay.toLowerCase()),
+    ldayIdx, liftData,
+  }));
+});
+
+// Check off / log a program item. Posts from the athlete's Programs tab:
+// kind=hit|mob|med|lift, item_key, plus weight/rpe for lifts. Re-posting an
+// already-done item updates it (lift log); posting with no payload clears it.
+app.post('/program/check', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.status(403).send('Coaches cannot log program work.');
+  if (!req.user.remoteProgramId) return res.status(403).send('No program assigned.');
+  if (req.user.viewAs) return res.status(403).send('View-as is read-only.');
+  const kind = String(req.body.kind || '').slice(0, 10);
+  const itemKey = String(req.body.item_key || '').slice(0, 300);
+  const sub = String(req.body.sub || 'hitting').slice(0, 20);
+  const day = String(req.body.day || '').slice(0, 30);
+  if (!kind || !itemKey) return res.redirect('/program');
+  const today = chiToday();
+  const existing = db
+    .prepare('SELECT * FROM program_checkoffs WHERE user_id = ? AND day = ? AND item_key = ?')
+    .get(req.user.id, today, itemKey);
+  const weightRaw = String(req.body.weight || '').trim();
+  const rpeRaw = String(req.body.rpe || '').trim();
+  const weight = weightRaw === '' ? null : Number(weightRaw);
+  const rpe = rpeRaw === '' ? null : Math.max(1, Math.min(10, parseInt(rpeRaw, 10) || 0)) || null;
+  if (existing) {
+    // Already done: with a lift log payload, update it; otherwise toggle off.
+    if (kind === 'lift' && (weight !== null || rpe !== null)) {
+      db.prepare('UPDATE program_checkoffs SET weight = ?, rpe = ? WHERE id = ?').run(weight, rpe, existing.id);
+    } else {
+      db.prepare('DELETE FROM program_checkoffs WHERE id = ?').run(existing.id);
+    }
+  } else {
+    db.prepare(
+      'INSERT INTO program_checkoffs (user_id, day, kind, item_key, weight, rpe, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run(req.user.id, today, kind, itemKey, weight, rpe, new Date().toISOString());
+  }
+  const back =
+    '/program?sub=' +
+    encodeURIComponent(sub) +
+    (day ? '&day=' + encodeURIComponent(day) : '') +
+    (sub === 'lifting' && req.body.lday != null && String(req.body.lday) !== ''
+      ? '&lday=' + encodeURIComponent(String(req.body.lday))
+      : '');
+  res.redirect(back);
 });
 
 // ---- Push notifications ----
@@ -2083,6 +2271,100 @@ app.post('/coach/remote/unlink', requireCoach, (req, res) => {
   const id = Number(req.body.id);
   if (id) db.prepare('UPDATE users SET remote_program_id = NULL WHERE remote_program_id = ?').run(id);
   res.redirect('/coach/programs');
+});
+
+// ---- Lifting programs (Sep 2026) ----
+// Coach-only: templates, athlete assignments, and the per-athlete lifting
+// editor. requireCoach already 403s view-only coaches.
+function requireLiftingCoach(req, res, next) {
+  if (req.user.role !== 'coach') return res.status(403).send('Coaches only.');
+  if (!req.user.canEdit) return res.status(403).send('View-only coaches cannot change programs.');
+  next();
+}
+function liftingProgramsList() {
+  return db.prepare('SELECT * FROM lifting_programs ORDER BY is_template DESC, name').all().map((r) => ({
+    id: r.id, name: r.name, is_template: r.is_template,
+    days: (() => { try { return JSON.parse(r.program_json || '{}').days || []; } catch (e) { return []; } })(),
+  }));
+}
+app.get('/coach/lifting', requireLiftingCoach, (req, res) => {
+  res.send(views.liftingProgramsPage(req.user, {
+    templates: liftingProgramsList().filter((l) => l.is_template),
+    programs: liftingProgramsList().filter((l) => !l.is_template),
+    assignments: remoteProgramList(),
+  }));
+});
+app.post('/coach/lifting/create', requireLiftingCoach, (req, res) => {
+  const name = String(req.body.name || '').trim().slice(0, 80);
+  if (!name) return res.redirect('/coach/lifting');
+  const isTemplate = req.body.is_template ? 1 : 0;
+  const info = db
+    .prepare('INSERT INTO lifting_programs (name, is_template, program_json, updated_at) VALUES (?, ?, ?, ?)')
+    .run(name, JSON.stringify({ days: [{ label: 'Day A', exercises: [] }], notes: [] }), new Date().toISOString());
+  res.redirect('/coach/lifting/' + info.lastInsertRowid + '/edit');
+});
+// Assign a template to an athlete: copies the template into a private,
+// per-athlete program (later tweaks never touch the template), then links it.
+app.post('/coach/lifting/assign', requireLiftingCoach, (req, res) => {
+  const templateId = Number(req.body.template_id);
+  const programId = Number(req.body.program_id);
+  const tpl = getLifting(templateId);
+  if (!tpl || !tpl.is_template || !programId) return res.redirect('/coach/lifting');
+  const athlete = db.prepare('SELECT athlete_name FROM remote_programs WHERE id = ?').get(programId);
+  const copyName = tpl.name + ' — ' + (athlete ? athlete.athlete_name : 'athlete');
+  const info = db
+    .prepare('INSERT INTO lifting_programs (name, is_template, program_json, updated_at) VALUES (?, 0, ?, ?)')
+    .run(copyName, JSON.stringify({ days: tpl.days, notes: tpl.notes }), new Date().toISOString());
+  db.prepare('UPDATE remote_programs SET lifting_program_id = ? WHERE id = ?').run(info.lastInsertRowid, programId);
+  res.redirect('/coach/lifting/' + info.lastInsertRowid + '/edit');
+});
+app.post('/coach/lifting/unassign', requireLiftingCoach, (req, res) => {
+  const programId = Number(req.body.program_id);
+  if (programId) db.prepare('UPDATE remote_programs SET lifting_program_id = NULL WHERE id = ?').run(programId);
+  res.redirect('/coach/lifting');
+});
+app.post('/coach/lifting/delete', requireLiftingCoach, (req, res) => {
+  const id = Number(req.body.id);
+  if (id) {
+    db.prepare('UPDATE remote_programs SET lifting_program_id = NULL WHERE lifting_program_id = ?').run(id);
+    db.prepare('DELETE FROM lifting_programs WHERE id = ?').run(id);
+  }
+  res.redirect('/coach/lifting');
+});
+app.get('/coach/lifting/:id/edit', requireLiftingCoach, (req, res) => {
+  const lp = getLifting(req.params.id);
+  if (!lp) return res.redirect('/coach/lifting');
+  res.send(views.liftingEditPage(req.user, lp));
+});
+app.post('/coach/lifting/:id/save', requireLiftingCoach, (req, res) => {
+  const lp = getLifting(req.params.id);
+  if (!lp) return res.redirect('/coach/lifting');
+  const name = String(req.body.name || '').trim().slice(0, 80) || lp.name;
+  const days = [];
+  for (let i = 0; i < 14; i++) {
+    const label = String(req.body['lday_' + i + '_label'] || '').trim().slice(0, 40);
+    const exCount = req.body['lday_' + i + '_excount'];
+    if (!label && !exCount) continue;
+    const exercises = [];
+    const n = Math.min(40, Number(exCount) || 0);
+    for (let j = 0; j < n; j++) {
+      const exName = String(req.body['lex_' + i + '_' + j + '_name'] || '').trim().slice(0, 120);
+      if (!exName) continue;
+      const trpe = String(req.body['lex_' + i + '_' + j + '_trpe'] || '').trim();
+      exercises.push({
+        name: exName,
+        sets: String(req.body['lex_' + i + '_' + j + '_sets'] || '').trim().slice(0, 12),
+        reps: String(req.body['lex_' + i + '_' + j + '_reps'] || '').trim().slice(0, 24),
+        target_rpe: trpe && /^[1-9]$|^10$/.test(trpe) ? Number(trpe) : '',
+        notes: String(req.body['lex_' + i + '_' + j + '_notes'] || '').trim().slice(0, 200),
+      });
+    }
+    days.push({ label: label || ('Day ' + String.fromCharCode(65 + i)), exercises });
+  }
+  db.prepare('UPDATE lifting_programs SET name = ?, program_json = ?, updated_at = ? WHERE id = ?').run(
+    name, JSON.stringify({ days, notes: lp.notes }), new Date().toISOString(), lp.id
+  );
+  res.redirect('/coach/lifting');
 });
 
 // ---- Video library: Bobby's Development System, synced from Drive by the
@@ -3260,9 +3542,11 @@ function coachQuietHitters(stats) {
 function remoteProgramList() {
   return db
     .prepare(
-      `SELECT p.id, p.athlete_name, p.aliases, p.updated_at,
+      `SELECT p.id, p.athlete_name, p.aliases, p.updated_at, p.lifting_program_id,
+              lp.name AS lifting_name,
               (SELECT email FROM users WHERE remote_program_id = p.id LIMIT 1) AS user_email
-       FROM remote_programs p ORDER BY p.athlete_name`
+       FROM remote_programs p LEFT JOIN lifting_programs lp ON lp.id = p.lifting_program_id
+       ORDER BY p.athlete_name`
     )
     .all();
 }

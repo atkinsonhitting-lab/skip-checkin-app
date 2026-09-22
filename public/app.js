@@ -364,26 +364,55 @@
   (function progEditor() {
     var wrap = document.getElementById('prog-cats');
     if (!wrap) return;
-    var addBtn = document.getElementById('prog-add-cat');
     var next = parseInt(wrap.getAttribute('data-next') || '0', 10);
-    if (addBtn) {
-      addBtn.addEventListener('click', function () {
-        var div = document.createElement('div');
-        div.className = 'card routine-group prog-cat';
-        div.setAttribute('data-cat', '');
-        div.innerHTML =
-          '<label class="fld">Category<input type="text" name="cat_' + next + '_name" maxlength="60"></label>' +
-          '<label class="fld">Drills — one per line, as <em>Drill</em> or <em>Drill | volume</em>' +
-          '<textarea name="cat_' + next + '_items" rows="4"></textarea></label>' +
-          '<button type="button" class="btn btn-danger btn-sm" data-remove-cat>Remove category</button>';
-        wrap.appendChild(div);
-        next++;
-      });
+    function addCat(presetName) {
+      var div = document.createElement('div');
+      div.className = 'card routine-group prog-cat';
+      div.setAttribute('data-cat', '');
+      div.innerHTML =
+        '<div class="cat-head-row"><span class="hint-inline">Block</span>' +
+        '<span class="cat-move"><button type="button" class="btn btn-sm" data-move-cat="-1" title="Move block up">↑</button>' +
+        '<button type="button" class="btn btn-sm" data-move-cat="1" title="Move block down">↓</button></span></div>' +
+        '<label class="fld">Category<input type="text" name="cat_' + next + '_name" maxlength="60" value="' +
+        String(presetName || '').replace(/"/g, '&quot;') + '"></label>' +
+        '<label class="fld">Drills — one per line, as <em>Drill</em> or <em>Drill | volume</em>' +
+        '<textarea name="cat_' + next + '_items" rows="4"></textarea></label>' +
+        '<button type="button" class="btn btn-danger btn-sm" data-remove-cat>Remove category</button>';
+      wrap.appendChild(div);
+      next++;
+      div.scrollIntoView({ block: 'nearest' });
     }
+    var addBtn = document.getElementById('prog-add-cat');
+    if (addBtn) addBtn.addEventListener('click', function () { addCat(''); });
+    document.querySelectorAll('[data-addcat-name]').forEach(function (b) {
+      b.addEventListener('click', function () { addCat(b.getAttribute('data-addcat-name')); });
+    });
     wrap.addEventListener('click', function (e) {
       if (e.target && e.target.hasAttribute('data-remove-cat')) {
         var card = e.target.closest('[data-cat]');
         if (card) card.remove();
+        return;
+      }
+      // Move block up/down: swap the field VALUES with the neighbor card.
+      // (The save handler reads cat_N_name by index, so swapping values
+      // reorders the saved program without renumbering fields.)
+      if (e.target && e.target.hasAttribute('data-move-cat')) {
+        var dir = parseInt(e.target.getAttribute('data-move-cat'), 10);
+        var card = e.target.closest('[data-cat]');
+        if (!card) return;
+        var sib = dir < 0 ? card.previousElementSibling : card.nextElementSibling;
+        while (sib && !sib.hasAttribute('data-cat')) sib = dir < 0 ? sib.previousElementSibling : sib.nextElementSibling;
+        if (!sib) return;
+        var aName = card.querySelector('input[name$="_name"]');
+        var aItems = card.querySelector('textarea');
+        var bName = sib.querySelector('input[name$="_name"]');
+        var bItems = sib.querySelector('textarea');
+        if (!aName || !bName) return;
+        var t1 = aName.value, t2 = aItems ? aItems.value : '';
+        aName.value = bName.value;
+        if (aItems) aItems.value = bItems ? bItems.value : '';
+        bName.value = t1;
+        if (bItems) bItems.value = t2;
       }
     });
   })();
@@ -506,3 +535,103 @@
     if (e.key === 'Escape' && document.body.classList.contains('drawer-open')) close();
   });
 })();
+
+  // ---- Compact day picker: <select data-autosubmit> submits its form ----
+  document.addEventListener('change', function (e) {
+    if (e.target && e.target.hasAttribute && e.target.hasAttribute('data-autosubmit')) {
+      var f = e.target.closest('form');
+      if (f) f.submit();
+    }
+  });
+
+  // ---- Lifting program editor (coach): days + per-exercise rows ----
+  (function liftEditor() {
+    var form = document.getElementById('lift-form');
+    if (!form) return;
+    var daysWrap = document.getElementById('lift-days');
+    var dayCount = parseInt(window.__liftEditDays || '0', 10) || daysWrap.querySelectorAll('[data-lift-day]').length;
+    function exRowHtml(i, j) {
+      var rpe = '<option value="">—</option>';
+      for (var v = 1; v <= 10; v++) rpe += '<option value="' + v + '">' + v + '</option>';
+      return '<div class="lift-ex-edit" data-exrow>' +
+        '<input name="lex_' + i + '_' + j + '_name" placeholder="Exercise" maxlength="120" required>' +
+        '<input name="lex_' + i + '_' + j + '_sets" placeholder="Sets" maxlength="12" class="num">' +
+        '<input name="lex_' + i + '_' + j + '_reps" placeholder="Reps" maxlength="24" class="num">' +
+        '<select name="lex_' + i + '_' + j + '_trpe" title="Target RPE">' + rpe + '</select>' +
+        '<input name="lex_' + i + '_' + j + '_notes" placeholder="Cue / note" maxlength="200" class="wide">' +
+        '<button type="button" class="btn btn-sm btn-danger" data-rmex>✕</button></div>';
+    }
+    function renumberDay(fs) {
+      var i = parseInt(fs.getAttribute('data-lift-day'), 10);
+      var rows = fs.querySelectorAll('[data-exrow]');
+      rows.forEach(function (row, j) {
+        row.querySelectorAll('input, select').forEach(function (inp) {
+          var m = inp.name.match(/^lex_\d+_\d+_(.+)$/);
+          if (m) inp.name = 'lex_' + i + '_' + j + '_' + m[1];
+        });
+      });
+      var cnt = fs.querySelector('[data-excount]');
+      if (cnt) cnt.value = rows.length;
+    }
+    daysWrap.addEventListener('click', function (e) {
+      var t = e.target;
+      if (!t) return;
+      if (t.hasAttribute('data-addex')) {
+        var i = parseInt(t.getAttribute('data-addex'), 10);
+        var fs = daysWrap.querySelector('[data-lift-day="' + i + '"]');
+        if (!fs) return;
+        var list = fs.querySelector('[data-exlist]');
+        var j = list.querySelectorAll('[data-exrow]').length;
+        var tmp = document.createElement('div');
+        tmp.innerHTML = exRowHtml(i, j);
+        list.appendChild(tmp.firstChild);
+        renumberDay(fs);
+        return;
+      }
+      if (t.hasAttribute('data-rmex')) {
+        var row = t.closest('[data-exrow]');
+        var fs2 = t.closest('[data-lift-day]');
+        if (row) row.remove();
+        if (fs2) renumberDay(fs2);
+        return;
+      }
+      if (t.hasAttribute('data-rmday')) {
+        var fs3 = t.closest('[data-lift-day]');
+        if (fs3 && window.confirm('Remove this day and its exercises?')) {
+          fs3.remove();
+          var fss = daysWrap.querySelectorAll('[data-lift-day]');
+          fss.forEach(function (f, ni) {
+            var oi = parseInt(f.getAttribute('data-lift-day'), 10);
+            if (oi !== ni) {
+              f.setAttribute('data-lift-day', String(ni));
+              f.querySelectorAll('input[name^="lday_"]').forEach(function (inp) {
+                inp.name = inp.name.replace(/^lday_\d+_/, 'lday_' + ni + '_');
+              });
+              f.querySelectorAll('[data-addex]').forEach(function (b) { b.setAttribute('data-addex', String(ni)); });
+            }
+          });
+          dayCount = fss.length;
+          fss.forEach(renumberDay);
+        }
+      }
+    });
+    var addDay = document.getElementById('lift-add-day');
+    if (addDay) {
+      addDay.addEventListener('click', function () {
+        if (dayCount >= 14) return;
+        var i = dayCount;
+        var fs = document.createElement('fieldset');
+        fs.className = 'card lift-day';
+        fs.setAttribute('data-lift-day', String(i));
+        fs.innerHTML =
+          '<legend class="lift-day-legend">Day ' + (i + 1) + '</legend>' +
+          '<input type="hidden" name="lday_' + i + '_excount" value="0" data-excount>' +
+          '<label class="lift-field">Day label <input name="lday_' + i + '_label" maxlength="40" placeholder="Day ' + String.fromCharCode(65 + i) + '"></label>' +
+          '<div class="lift-ex-list" data-exlist></div>' +
+          '<div class="row-actions"><button type="button" class="btn small" data-addex="' + i + '">+ Exercise</button> ' +
+          '<button type="button" class="btn btn-sm btn-danger" data-rmday>Remove day</button></div>';
+        daysWrap.appendChild(fs);
+        dayCount++;
+      });
+    }
+  })();

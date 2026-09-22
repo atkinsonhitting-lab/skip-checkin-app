@@ -736,3 +736,57 @@ a.stat-card { padding: 14px 8px; }
   font-size: 17px; line-height: 1; cursor: pointer; padding: 2px 7px;
 }
 .drill-token-x:active { color: var(--red); }
+
+/* ---- Programs tab: sub-tabs, day header, check-offs (Sep 2026) ---- */
+.prog-subtabs { display: flex; gap: 6px; margin: 12px 0 4px; overflow-x: auto; }
+.subtab { flex: 1; text-align: center; padding: 10px 4px; border-radius: 10px; background: var(--bg2); border: 1px solid var(--line); color: var(--text); font-weight: 800; font-size: 13px; text-transform: uppercase; letter-spacing: 0.4px; text-decoration: none; white-space: nowrap; }
+.subtab.active { background: var(--red); border-color: var(--red); color: #fff; }
+.day-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 14px 0 10px; }
+.day-now { font-size: 15px; font-weight: 700; color: var(--muted); }
+.day-label { font-size: 26px; font-weight: 800; }
+.day-alsotoday { font-size: 13px; color: var(--muted); margin-top: 2px; }
+.daypick { margin: 0; }
+.daypick select { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg2); color: var(--text); font-weight: 700; font-size: 14px; }
+.prog-h3 { font-size: 16px; font-weight: 800; margin: 16px 0 8px; }
+.checkrow { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); margin: 0; }
+.checkrow:last-child { border-bottom: none; }
+.checkrow.done .routine-name { text-decoration: line-through; opacity: 0.55; }
+.checkbtn { background: none; border: none; font-size: 22px; line-height: 1; cursor: pointer; padding: 2px; color: var(--text); }
+.finish-card { margin-top: 18px; border-color: var(--red); }
+
+/* ---- Lifting sub-tab ---- */
+.lift-ex { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.lift-ex:last-child { border-bottom: none; }
+.lift-check { margin: 0; }
+.lift-main { flex: 1; min-width: 0; }
+.lift-name { font-weight: 800; font-size: 15px; }
+.lift-ex.done .lift-name { text-decoration: line-through; opacity: 0.55; }
+.rpe-chip { display: inline-block; font-size: 11px; font-weight: 800; background: var(--bg2); border: 1px solid var(--line); border-radius: 20px; padding: 2px 8px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.3px; }
+.lift-last { font-size: 13px; color: var(--muted); margin: 3px 0; }
+.lift-last.dim { opacity: 0.7; font-style: italic; }
+.lift-log { display: flex; gap: 6px; align-items: center; margin: 6px 0 0; flex-wrap: wrap; }
+.lift-log input[name="weight"] { width: 76px; padding: 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg2); color: var(--text); font-size: 14px; }
+.lift-log select { padding: 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg2); color: var(--text); font-size: 14px; }
+.lift-hist { margin-top: 6px; font-size: 13px; }
+.lift-hist summary { cursor: pointer; color: var(--muted); font-weight: 700; }
+.hist-list { list-style: none; margin: 6px 0 0; padding: 0; }
+.hist-list li { padding: 3px 0; border-bottom: 1px dashed var(--line); font-size: 13px; }
+.hist-list li:last-child { border-bottom: none; }
+
+/* ---- Coach lifting pages ---- */
+.lift-tpl { margin-bottom: 10px; }
+.lift-tpl-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+.row-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+.lift-day { margin-bottom: 12px; }
+.lift-day-legend { font-weight: 800; padding: 0 6px; }
+.lift-field { display: block; font-size: 13px; font-weight: 700; color: var(--muted); margin-bottom: 8px; }
+.lift-field input { display: block; width: 100%; margin-top: 4px; padding: 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg2); color: var(--text); font-size: 14px; }
+.lift-ex-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.lift-ex-edit { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.lift-ex-edit input { padding: 7px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg2); color: var(--text); font-size: 13px; }
+.lift-ex-edit input[name$="_name"] { flex: 2; min-width: 130px; }
+.lift-ex-edit input.num { width: 56px; }
+.lift-ex-edit select { padding: 7px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg2); color: var(--text); font-size: 13px; }
+.lift-ex-edit input.wide { flex: 3; min-width: 120px; }
+.cat-head-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.cat-move { display: flex; gap: 4px; }

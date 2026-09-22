@@ -38,7 +38,9 @@ function fmtDate(iso) {
 const TABBAR_HREFS = ['/', '/checkin', '/messages', '/notebook', '/chat'];
 // Remote-program players already work from their program: the tab bar shows
 // Program in the Messages slot. Messages stays in their sidebar drawer.
-const REMOTE_TABBAR_HREFS = ['/', '/checkin', '/program', '/notebook', '/chat'];
+// Bottom tab bar for Bobby's remote hitters only (mobile). Program comes
+// before Check In — the program is the point of the app for these guys.
+const REMOTE_TABBAR_HREFS = ['/', '/program', '/checkin', '/notebook', '/chat'];
 // Coach tab bar (Sep 2026, Bobby: Messages in the tab bar instead of Train
 // Skip): Bobby's coaching loop — Home (attention), My Players, Approvals
 // (badge), Messages (badge). Train Skip, Programs, Videos, Finances, and
@@ -134,18 +136,21 @@ ${user && user.role === 'coach' && user.canEdit === false ? '<div class="viewonl
 }
 
 function userTabs(active, user) {
+  const isRemote = !!(user && user.remoteProgramId);
   const tabs = [
     { href: '/', label: 'Home', active: active === 'home' },
-    { href: '/checkin', label: 'Check In', active: active === 'checkin' },
   ];
+  // Program-first for athletes with an assigned remote/hybrid program:
+  // Programs comes before Check In; everyone else keeps the old layout.
+  if (isRemote) tabs.push({ href: '/program', label: 'Program', active: active === 'program' });
+  tabs.push({ href: '/checkin', label: 'Check In', active: active === 'checkin' });
   // Messaging tab is for organization players only (Bobby's rule) — standalone
   // athletes don't get the tab at all.
   if (user && user.organizationId) {
     tabs.push({ href: '/messages', label: 'Messages', active: active === 'messages', badge: user.unreadMessages > 0 ? String(user.unreadMessages) : null });
   }
   // Bobby's remote hitters only — nobody else ever sees these tabs.
-  if (user && user.remoteProgramId) {
-    tabs.push({ href: '/program', label: 'Program', active: active === 'program' });
+  if (isRemote) {
     tabs.push({ href: '/program/routine', label: 'Routine', active: active === 'routine' });
     tabs.push({ href: '/videos', label: 'Videos', active: active === 'videos' });
   } else {
@@ -192,10 +197,11 @@ function coachTabs(active, approvalCount, user) {
     { href: '/coach/approvals', label: 'Approvals', active: active === 'approvals', badge: approvalCount > 0 ? String(approvalCount) : null },
     { href: '/settings', label: 'Settings', active: active === 'settings' },
   ];
-  // Finances is Bobby's page: full-access global coaches only. Cam (view-only)
-  // and organization coaches never see it.
+  // Lifting programs + Finances are Bobby's pages: full-access global coaches
+  // only. Cam (view-only) and organization coaches never see them.
   if (user && user.role === 'coach' && !user.organizationId && user.canEdit !== false) {
-    tabs.splice(6, 0, { href: '/coach/finances', label: 'Finances', active: active === 'finances' });
+    tabs.splice(6, 0, { href: '/coach/lifting', label: 'Lifting', active: active === 'lifting' });
+    tabs.splice(7, 0, { href: '/coach/finances', label: 'Finances', active: active === 'finances' });
   }
   return tabs;
 }
@@ -2124,157 +2130,352 @@ function dailyRoutineBlocks(prog) {
 }
 
 // Hitter-facing: their training program, read-only.
-function programPage(user, p) {
+// Athlete Programs tab (Sep 2026): program-first, today-first.
+// One tab, four ordered sub-tabs (data-driven): MOBILITY -> MED BALL ->
+// HITTING -> LIFTING. Prep work stays with Hitting. Med Ball is its own
+// sub-tab. Items check off per day; lifts log weight + RPE with target RPE,
+// last-time, and history inline.
+function programPage(user, p, opts) {
   const prog = p.prog || {};
+  const o = opts || {};
+  const tabs = o.tabs || [{ id: 'hitting', label: 'Hitting' }];
+  const sub = o.sub || 'hitting';
+  const day = o.day || '';
+  const labels = o.labels || [];
+  const today = o.today || '';
+  const checkoffs = o.checkoffs || {};
+  const lifting = o.lifting || null;
+  const weekday = o.weekday || '';
+  const autoDay = o.autoDay || '';
+  const isToday = !!o.isToday;
+
   const grades = prog.grades && typeof prog.grades === 'object' ? prog.grades : {};
   const gradeChips = Object.entries(grades)
     .map(([k, v]) => `<span class="grade-chip"><strong>${esc(k)}</strong> ${esc(String(v))}</span>`)
     .join('');
   const strengths = Array.isArray(prog.strengths) ? prog.strengths.filter(Boolean) : [];
   const routine = Array.isArray(prog.routine) ? prog.routine : [];
-  const sectionCard = (name, items) => {
-    const rows = (items || [])
-      .map(
-        (it) => `<div class="routine-row"><span class="routine-name">${esc(it.drill || '')}</span>${
-          it.volume ? `<span class="hint-inline">${esc(it.volume)}</span>` : ''
-        }</div>`
-      )
-      .join('');
-    return `<details class="card routine-group" open><summary class="routine-summary"><span class="routine-station">${esc(name || 'Training')}</span></summary>${rows}</details>`;
-  };
-  const everyDayFirst = dailyRoutineBlocks(prog);
-  const everyDaySet = new Set(everyDayFirst);
-  const routineHtml = routine.filter((c) => !everyDaySet.has(c)).map((c) => sectionCard(c.category, c.items)).join('');
-  const schedMap = {};
-  for (const pair of Array.isArray(prog.schedule) ? prog.schedule : []) {
-    if (Array.isArray(pair) && pair[0]) schedMap[String(pair[0])] = String(pair[1] || '');
-  }
-  // ---- Day-based training navigator ----
-  // Blocks are grouped by day label ("Day 1 — Med Ball"). The hitter picks a
-  // weekday (Mon–Fri, defaulting to today) and sees that whole day in one spot.
-  const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-  const dayLabelRe = /^(Day \d+)(?:\s*[\u2014\u2013-]\s*(.+))?$/i;
-  const everyDayBlocks = everyDayFirst;
-  const everyDayCats = everyDaySet;
-  const daySections = {};
-  const pregameSections = [];
-  const flatBlocks = [];
-  for (const c of routine) {
-    if (everyDayCats.has(c)) continue;
-    const cat = String(c.category || '');
-    const pg = cat.match(/^pregame(?:\s*[\u2014\u2013-]\s*(.+))?$/i);
-    if (pg) {
-      pregameSections.push({ section: (pg[1] || '').trim(), items: c.items || [] });
-      continue;
-    }
-    const m = cat.match(dayLabelRe);
-    if (m) {
-      const lbl = 'Day ' + m[1].replace(/\D+/g, '');
-      (daySections[lbl] = daySections[lbl] || []).push({ section: (m[2] || '').trim(), items: c.items || [] });
-      continue;
-    }
-    flatBlocks.push(c);
-  }
-  const hasPregame = pregameSections.length > 0;
-  const dayLabels = Object.keys(daySections).sort(
-    (a, b) => parseInt(a.replace(/\D+/g, ''), 10) - parseInt(b.replace(/\D+/g, ''), 10)
-  );
-  const hasWeekdaySched = WEEKDAYS.some((d) => schedMap[d]);
-  const trainMode = hasWeekdaySched ? 'week' : dayLabels.length ? 'labels' : 'flat';
-  const panelForLabel = (label) => {
-    if (/^off$/i.test(String(label || '').trim())) {
-      return `<div class="card"><p style="margin:0">OFF — rest up.</p></div>`;
-    }
-    const cards = [];
-    const dm = String(label || '').match(/^day\s*(\d+)$/i);
-    if (dm) {
-      for (const sec of daySections['Day ' + dm[1]] || []) {
-        cards.push(sectionCard(sec.section || 'Day ' + dm[1], sec.items));
-      }
-    }
-    for (const c of flatBlocks) cards.push(sectionCard(c.category, c.items));
-    if (!cards.length) return `<div class="card empty">Nothing scheduled for this day.</div>`;
-    return cards.join('');
-  };
-  const pregamePanel = () => {
-    const cards = [];
-    for (const c of everyDayBlocks) cards.push(sectionCard(c.category, c.items));
-    for (const sec of pregameSections) cards.push(sectionCard(sec.section || 'Pregame', sec.items));
-    if (!cards.length) return `<div class="card empty">Nothing here yet.</div>`;
-    return cards.join('');
-  };
-  let trainingNav = '';
-  if (trainMode === 'flat') {
-    trainingNav = routine.length ? `<div id="training" class="prog-anchor">${routineHtml}</div>` : '';
-  } else {
-    const pillDays = trainMode === 'week' ? [...WEEKDAYS] : [...dayLabels];
-    if (hasPregame) pillDays.push('Pregame');
-    const pillHtml = pillDays
-      .map((d) =>
-        d === 'Pregame'
-          ? `<button type="button" class="day-pill pregame-pill" data-daypill="Pregame">Pregame</button>`
-          : `<button type="button" class="day-pill" data-daypill="${esc(d)}">${esc(trainMode === 'week' ? d.slice(0, 3) : d)}</button>`
-      )
-      .join('');
-    const panelHtml = pillDays
-      .map((d) => {
-        if (d === 'Pregame') {
-          return `<div data-daypanel="Pregame" hidden><div class="prog-day-head">Pregame <span class="hint-inline">· game day</span></div>${pregamePanel()}</div>`;
-        }
-        const label = trainMode === 'week' ? schedMap[d] || '' : d;
-        const head = trainMode === 'week' ? `${esc(d)}${label ? ` <span class="hint-inline">· ${esc(label)}</span>` : ''}` : esc(label);
-        return `<div data-daypanel="${esc(d)}" hidden><div class="prog-day-head">${head}</div>${panelForLabel(label)}</div>`;
-      })
-      .join('');
-    trainingNav = `<div id="training" class="prog-anchor">
-      <div class="day-pills">${pillHtml}</div>
-      ${panelHtml}
-    </div>`;
-  }
-  const schedRows = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-    .filter((d) => schedMap[d])
-    .map(
-      (d) =>
-        `<div class="cue-row"><span class="cue-label">${esc(d.slice(0, 3))}</span><span>${esc(schedMap[d])}</span></div>`
-    )
-    .join('');
-  const progNotes = Array.isArray(prog.notes) ? prog.notes.filter(Boolean) : [];
   const meta = [prog.date_range, prog.phase_emphasis].filter(Boolean).map(esc).join(' · ');
-  const nav = [
-    ['focus', 'Focus', !!prog.adjustment],
-    ['grades', 'Grades', !!gradeChips],
-    ['strengths', 'Strengths', strengths.length > 0],
-    ['training', 'Training', routine.length > 0],
-    ['schedule', 'Schedule', trainMode === 'flat' && !!schedRows],
-    ['notes', 'Notes', progNotes.length > 0],
-  ].filter(([, , show]) => show);
-  const navHtml = nav.length
-    ? `<nav class="prog-nav">${nav.map(([id, label]) => `<a href="#${id}">${esc(label)}</a>`).join('')}</nav>`
-    : '';
+  const progNotes = Array.isArray(prog.notes) ? prog.notes.filter(Boolean) : [];
+
+  // Sub-tab nav: MOBILITY -> MED BALL -> HITTING -> LIFTING (only what he has).
+  const tabHtml = `<nav class="prog-subtabs">${tabs
+    .map(
+      (t) =>
+        `<a href="/program?sub=${t.id}${day ? '&day=' + encodeURIComponent(day) : ''}" class="subtab${t.id === sub ? ' active' : ''}">${esc(t.label)}</a>`
+    )
+    .join('')}</nav>`;
+
+  // Day helpers.
+  const dayPrefix = (cat) => {
+    const m = /^([A-Za-z]+ ?\d+|Pregame)/i.exec(String(cat || '').trim());
+    return m ? m[1].trim() : '';
+  };
+  const kindOf = (cat) => {
+    const n = String(cat || '');
+    if (/med\s*ball/i.test(n)) return 'medball';
+    if (/mobility/i.test(n)) return 'mobility';
+    if (/prep/i.test(n)) return 'prep';
+    return 'hit';
+  };
+  const inDay = (cat, d) => dayPrefix(cat).toLowerCase() === String(d || '').toLowerCase();
+
+  // Rest day? (schedule maps today to OFF / Rest)
+  const schedArr = Array.isArray(prog.schedule) ? prog.schedule : [];
+  const schedToday = schedArr.find(
+    (s) => String(s.weekday || '').toLowerCase() === String(weekday).toLowerCase()
+  );
+  const isRest = schedToday && /^(off|rest)/i.test(String(schedToday.day_label || '').trim());
+
+  // Compact day header + manual day picker (GET form, no clunky JS).
+  const dayHead = (showPicker) => {
+    const picker = showPicker && labels.length > 1
+      ? `<form method="get" action="/program" class="daypick"><input type="hidden" name="sub" value="${esc(sub)}"><select name="day" data-autosubmit aria-label="Pick a program day">${labels
+          .map((l) => `<option value="${esc(l)}"${l.toLowerCase() === String(day).toLowerCase() ? ' selected' : ''}>${esc(l)}</option>`)
+          .join('')}</select></form>`
+      : '';
+    const big = isRest && isToday
+      ? `<div class="day-now">Today · ${esc(weekday)}</div><div class="day-label">Rest day — recover.</div>`
+      : isToday
+        ? `<div class="day-now">Today · ${esc(weekday)}</div><div class="day-label">${esc(day || 'Your program')}</div>`
+        : `<div class="day-now">Viewing · ${esc(day || 'Your program')}</div>${autoDay ? `<div class="day-alsotoday">Today is ${esc(autoDay)} — switch back anytime.</div>` : ''}`;
+    return `<div class="day-head">${big}${picker}</div>`;
+  };
+
+  // One check-off row (hitting / mobility / med ball / prep).
+  const checkRow = (kind, key, drill, volume) => {
+    const done = !!checkoffs[key];
+    return `<form method="post" action="/program/check" class="checkrow${done ? ' done' : ''}">
+      <input type="hidden" name="kind" value="${kind}">
+      <input type="hidden" name="sub" value="${esc(sub)}">
+      <input type="hidden" name="day" value="${esc(day)}">
+      <input type="hidden" name="item_key" value="${esc(key)}">
+      <button type="submit" class="checkbtn" aria-label="${done ? 'Mark not done' : 'Mark done'}">${done ? '☑' : '☐'}</button>
+      <span class="routine-name">${esc(drill || '')}</span>${volume ? `<span class="hint-inline">${esc(volume)}</span>` : ''}
+    </form>`;
+  };
+  const blockCard = (cat, items, kind, dayScope) =>
+    `<details class="card routine-group" open><summary class="routine-summary"><span class="routine-station">${esc(cat)}</span></summary>${(items || [])
+      .map((it) => checkRow(kind, `${kind}::${dayScope || ''}::${cat}::${it.drill}`, it.drill, it.volume))
+      .join('')}</details>`;
+
+  let content = '';
+  if (sub === 'mobility') {
+    const blocks = routine.filter((c) => kindOf(c.category) === 'mobility' && (c.items || []).length);
+    content = `${dayHead(false)}
+      <p class="lede">Do this first, every day — then get after the work below.</p>
+      ${blocks.map((c) => blockCard(c.category, c.items, 'mob')).join('') || '<div class="card empty">No mobility work in your program.</div>'}`;
+  } else if (sub === 'medball') {
+    const blocks = routine.filter((c) => kindOf(c.category) === 'medball' && (c.items || []).length);
+    const todays = day ? blocks.filter((c) => inDay(c.category, day)) : [];
+    const others = day ? blocks.filter((c) => !inDay(c.category, day)) : blocks;
+    content = `${dayHead(true)}
+      ${(todays.map((c) => blockCard(c.category, c.items, 'med', dayPrefix(c.category))).join('')) ||
+        (day && blocks.length ? '<div class="card empty">No med ball work for this day.</div>' : '')}
+      ${others.length && todays.length ? '<h3 class="prog-h3">Other days</h3>' : ''}
+      ${others.map((c) => blockCard(c.category, c.items, 'med', dayPrefix(c.category))).join('') ||
+        (!todays.length ? '<div class="card empty">No med ball work in your program.</div>' : '')}`;
+  } else if (sub === 'lifting' && lifting) {
+    const days = Array.isArray(lifting.days) ? lifting.days : [];
+    content = liftSubTab(user, lifting, days, o.ldayIdx || 0, sub, checkoffs, today, o.liftData || {});
+  } else {
+    // HITTING (default): today's plan first — prep for the day + the day's
+    // hitting blocks. Then pregame, then Focus/Grades/Strengths/Notes.
+    const dayBlocks = routine.filter(
+      (c) => (c.items || []).length && (kindOf(c.category) === 'hit' || kindOf(c.category) === 'prep') &&
+             (!day || inDay(c.category, day) || !dayPrefix(c.category))
+    );
+    const daySpecific = dayBlocks.filter((c) => day && inDay(c.category, day));
+    const flat = dayBlocks.filter((c) => !dayPrefix(c.category));
+    const pregame = routine.filter((c) => (c.items || []).length && /^pregame/i.test(dayPrefix(c.category)) && kindOf(c.category) !== 'mobility' && kindOf(c.category) !== 'medball');
+    const prepToday = daySpecific.filter((c) => kindOf(c.category) === 'prep');
+    const hitToday = daySpecific.filter((c) => kindOf(c.category) === 'hit');
+    content = `${dayHead(true)}
+      ${isRest && isToday ? '<div class="card"><p style="margin:0">No work scheduled — rest, recover, come back tomorrow.</p></div>' : `
+      ${prepToday.map((c) => blockCard(c.category, c.items, 'hit', day)).join('')}
+      ${hitToday.map((c) => blockCard(c.category, c.items, 'hit', day)).join('')}
+      ${!daySpecific.length && !flat.length ? '<div class="card empty">Nothing scheduled for this day.</div>' : ''}
+      ${flat.length ? `<h3 class="prog-h3">Every day</h3>${flat.map((c) => blockCard(c.category, c.items, 'hit', '')).join('')}` : ''}
+      ${pregame.length ? `<h3 class="prog-h3">Pregame</h3>${pregame.map((c) => blockCard(c.category, c.items, 'hit', dayPrefix(c.category))).join('')}` : ''}`}
+      ${programSection('The focus', prog.adjustment ? `<p>${esc(prog.adjustment)}</p>` : '', 'focus')}
+      ${programSection('Grades', gradeChips ? `<div class="grade-row">${gradeChips}</div>` : '', 'grades')}
+      ${programSection(
+        'Strengths',
+        strengths.length ? `<ul class="works-list">${strengths.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '',
+        'strengths'
+      )}
+      ${programSection(
+        'Notes',
+        progNotes.length ? `<ul class="works-list">${progNotes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '',
+        'notes'
+      )}`;
+  }
+
   return layout({
     title: 'Your Program',
     user,
     tabs: userTabs('program', user),
     body: `<h1 class="page-title">Your Program</h1>
     ${meta ? `<p class="lede">${meta}</p>` : ''}
-    ${navHtml}
-    ${programSection('The focus', prog.adjustment ? `<p>${esc(prog.adjustment)}</p>` : '', 'focus')}
-    ${programSection('Grades', gradeChips ? `<div class="grade-row">${gradeChips}</div>` : '', 'grades')}
-    ${programSection(
-      'Strengths',
-      strengths.length ? `<ul class="works-list">${strengths.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '',
-      'strengths'
-    )}
-    ${trainingNav}
-    ${trainMode === 'flat' ? programSection('Schedule', schedRows ? `<div class="cue-list">${schedRows}</div>` : '', 'schedule') : ''}
-    ${programSection(
-      'Notes',
-      progNotes.length ? `<ul class="works-list">${progNotes.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '',
-      'notes'
-    )}`,
+    ${tabHtml}
+    ${content}
+    <div class="card finish-card"><p style="margin:0 0 8px">Done with the work? <a href="/checkin"><strong>Log your session →</strong></a></p>
+    <p class="hint-inline" style="margin:0">Work first, journal second.</p></div>`,
   });
 }
 
+// LIFTING sub-tab: day pills, per-exercise check-off + weight/RPE log,
+// target RPE chip, "last time" line, and a compact history view.
+function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftData) {
+  const day = days[ldayIdx] || { label: '', exercises: [] };
+  const dayKey = String(day.label || '');
+  const pills = days
+    .map(
+      (d, i) =>
+        `<a href="/program?sub=lifting&lday=${i}" class="day-pill${i === ldayIdx ? ' active' : ''}">${esc(d.label || 'Day ' + (i + 1))}</a>`
+    )
+    .join('');
+  const fmtDay = (d) => {
+    try {
+      const dt = new Date(d + 'T12:00:00');
+      return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    } catch (e) { return d; }
+  };
+  const exRows = (Array.isArray(day.exercises) ? day.exercises : [])
+    .map((ex) => {
+      const name = String(ex.name || '');
+      const key = `lift::${dayKey}::${name}`;
+      const done = !!checkoffs[key];
+      const logged = checkoffs[key] || {};
+      const info = liftData[key] || {};
+      const last = info.last || null;
+      const hist = Array.isArray(info.history) ? info.history : [];
+      const sr = [ex.sets, ex.reps].filter(Boolean).join(' × ');
+      const trpe = ex.target_rpe ? `<span class="rpe-chip">Target RPE ${esc(String(ex.target_rpe))}</span>` : '';
+      const lastHtml = last
+        ? `<div class="lift-last">Last: <strong>${last.weight != null ? esc(String(last.weight)) + ' lbs' : '—'}</strong>${last.rpe != null ? ` · RPE ${esc(String(last.rpe))}` : ''} <span class="hint-inline">· ${esc(fmtDay(last.day))}</span></div>`
+        : `<div class="lift-last dim">First time logging this one — set the tone.</div>`;
+      const histHtml = hist.length
+        ? `<ul class="hist-list">${hist
+            .map(
+              (h) =>
+                `<li><span class="hint-inline">${esc(fmtDay(h.day))}</span> ${h.weight != null ? esc(String(h.weight)) + ' lbs' : '—'}${h.rpe != null ? ` · RPE ${esc(String(h.rpe))}` : ''}</li>`
+            )
+            .join('')}</ul>`
+        : '<div class="hint-inline">No logs yet.</div>';
+      const rpeOpts = Array.from({ length: 10 }, (_, i) => {
+        const v = i + 1;
+        return `<option value="${v}"${String(logged.rpe) === String(v) ? ' selected' : ''}>${v}</option>`;
+      }).join('');
+      return `<div class="lift-ex${done ? ' done' : ''}">
+        <form method="post" action="/program/check" class="lift-check">
+          <input type="hidden" name="kind" value="lift">
+          <input type="hidden" name="sub" value="lifting">
+          <input type="hidden" name="lday" value="${ldayIdx}">
+          <input type="hidden" name="item_key" value="${esc(key)}">
+          <button type="submit" class="checkbtn" aria-label="${done ? 'Mark not done' : 'Mark done'}">${done ? '☑' : '☐'}</button>
+        </form>
+        <div class="lift-main">
+          <div class="lift-name">${esc(name)}${sr ? ` <span class="hint-inline">${esc(sr)}</span>` : ''} ${trpe}</div>
+          ${ex.notes ? `<div class="hint-inline">${esc(ex.notes)}</div>` : ''}
+          ${lastHtml}
+          <form method="post" action="/program/check" class="lift-log">
+            <input type="hidden" name="kind" value="lift">
+            <input type="hidden" name="sub" value="lifting">
+            <input type="hidden" name="lday" value="${ldayIdx}">
+            <input type="hidden" name="item_key" value="${esc(key)}">
+            <input name="weight" type="number" inputmode="decimal" step="any" min="0" max="2000" placeholder="lbs"
+              value="${logged.weight != null ? esc(String(logged.weight)) : ''}" aria-label="Weight in pounds">
+            <select name="rpe" aria-label="Actual RPE 1 to 10"><option value="">RPE</option>${rpeOpts}</select>
+            <button type="submit" class="btn btn-sm">${done ? 'Update' : 'Log'}</button>
+          </form>
+          <details class="lift-hist"><summary>History</summary>${histHtml}</details>
+        </div>
+      </div>`;
+    })
+    .join('');
+  return `<div class="day-pills">${pills}</div>
+    <h3 class="prog-h3">${esc(dayKey)}</h3>
+    ${exRows || '<div class="card empty">No exercises on this day yet — your coach can add them.</div>'}`;
+}
+
+// Coach: lifting programs overview — templates + per-athlete assignments.
+function liftingProgramsPage(user, data) {
+  const { templates, programs, assignments } = data;
+  const tplCards = templates
+    .map(
+      (t) => `<div class="card lift-tpl">
+        <div class="lift-tpl-head"><strong>${esc(t.name)}</strong>
+        <span class="hint-inline">${t.days.length} day${t.days.length === 1 ? '' : 's'} · template</span></div>
+        <div class="hint-inline">${t.days.map((d) => esc(d.label) + ' (' + (d.exercises || []).length + ')').join(' · ')}</div>
+        <div class="row-actions">
+          <a class="btn btn-sm" href="/coach/lifting/${t.id}/edit">Edit</a>
+          <form method="post" action="/coach/lifting/assign" class="inline-form">
+            <input type="hidden" name="template_id" value="${t.id}">
+            <select name="program_id" required><option value="">Assign to athlete…</option>
+              ${assignments.map((a) => `<option value="${a.id}">${esc(a.athlete_name)}${a.lifting_name ? ' (has: ' + esc(a.lifting_name) + ')' : ''}</option>`).join('')}
+            </select>
+            <button type="submit" class="btn btn-sm">Assign copy</button>
+          </form>
+          <form method="post" action="/coach/lifting/delete" class="inline-form" onsubmit="return confirm('Delete template ${esc(t.name)}? Assigned athlete copies are kept.')">
+            <input type="hidden" name="id" value="${t.id}"><button type="submit" class="btn btn-sm btn-danger">Delete</button>
+          </form>
+        </div>
+      </div>`
+    )
+    .join('');
+  const rows = assignments
+    .map((a) => {
+      const lp = programs.find((x) => a.lifting_program_id === x.id);
+      return `<div class="coach-row">
+        <div><strong>${esc(a.athlete_name)}</strong>
+        <div class="hint-inline">${a.user_email ? esc(a.user_email) : 'no login yet'}</div></div>
+        <div class="row-actions">
+          ${lp
+            ? `<span class="hint-inline">${esc(lp.name)}</span>
+               <a class="btn btn-sm" href="/coach/lifting/${lp.id}/edit">Edit lifts</a>
+               <form method="post" action="/coach/lifting/unassign" class="inline-form"><input type="hidden" name="program_id" value="${a.id}"><button type="submit" class="btn btn-sm">Unassign</button></form>`
+            : `<form method="post" action="/coach/lifting/assign" class="inline-form">
+                 <input type="hidden" name="program_id" value="${a.id}">
+                 <select name="template_id" required><option value="">Assign template…</option>
+                   ${templates.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join('')}
+                 </select>
+                 <button type="submit" class="btn btn-sm">Assign</button>
+               </form>`}
+        </div>
+      </div>`;
+    })
+    .join('');
+  return layout({
+    title: 'Lifting Programs',
+    user,
+    tabs: coachTabs('lifting', 0, user),
+    body: `<h1 class="page-title">Lifting Programs</h1>
+    <p class="lede">Templates are starters — assigning one makes a private copy for that athlete, so tweaks never touch the template or another guy's program.</p>
+    <div class="card"><h3 style="margin-top:0">New ${templates.length || programs.length ? 'program' : 'program'}</h3>
+      <form method="post" action="/coach/lifting/create" class="inline-form">
+        <input name="name" placeholder="Program name" required maxlength="80" style="min-width:200px">
+        <label class="hint-inline"><input type="checkbox" name="is_template" value="1"> Save as template</label>
+        <button type="submit" class="btn btn-sm">Create &amp; edit</button>
+      </form></div>
+    <h2 class="section-title">Templates</h2>
+    ${tplCards || '<div class="card empty">No templates yet.</div>'}
+    <h2 class="section-title">Athletes</h2>
+    ${rows || '<div class="card empty">No remote programs yet.</div>'}`,
+  });
+}
+
+// Coach: per-athlete / template lifting editor — compact day + exercise rows.
+function liftingEditPage(user, lp) {
+  const days = Array.isArray(lp.days) ? lp.days : [];
+  const rpeOpts = (sel) =>
+    `<option value="">—</option>` +
+    Array.from({ length: 10 }, (_, i) => {
+      const v = i + 1;
+      return `<option value="${v}"${String(sel) === String(v) ? ' selected' : ''}>${v}</option>`;
+    }).join('');
+  const dayCards = days
+    .map(
+      (d, i) => `<fieldset class="card lift-day" data-lift-day="${i}">
+        <legend class="lift-day-legend">Day ${i + 1}</legend>
+        <input type="hidden" name="lday_${i}_excount" value="${(d.exercises || []).length}" data-excount>
+        <label class="lift-field">Day label <input name="lday_${i}_label" value="${esc(d.label || '')}" maxlength="40"></label>
+        <div class="lift-ex-list" data-exlist>
+        ${(d.exercises || [])
+          .map(
+            (ex, j) => `<div class="lift-ex-edit" data-exrow>
+              <input name="lex_${i}_${j}_name" value="${esc(ex.name || '')}" placeholder="Exercise" maxlength="120" required>
+              <input name="lex_${i}_${j}_sets" value="${esc(ex.sets || '')}" placeholder="Sets" maxlength="12" class="num">
+              <input name="lex_${i}_${j}_reps" value="${esc(ex.reps || '')}" placeholder="Reps" maxlength="24" class="num">
+              <select name="lex_${i}_${j}_trpe" title="Target RPE">${rpeOpts(ex.target_rpe)}</select>
+              <input name="lex_${i}_${j}_notes" value="${esc(ex.notes || '')}" placeholder="Cue / note" maxlength="200" class="wide">
+              <button type="button" class="btn btn-sm btn-danger" data-rmex>✕</button>
+            </div>`
+          )
+          .join('')}
+        </div>
+        <div class="row-actions"><button type="button" class="btn btn-sm" data-addex="${i}">+ Exercise</button>
+        <button type="button" class="btn btn-sm btn-danger" data-rmday>Remove day</button></div>
+      </fieldset>`
+    )
+    .join('');
+  return layout({
+    title: 'Edit ' + lp.name,
+    user,
+    tabs: coachTabs('lifting', 0, user),
+    body: `<h1 class="page-title">${lp.is_template ? 'Template' : 'Lifting program'}: ${esc(lp.name)}</h1>
+    <form method="post" action="/coach/lifting/${lp.id}/save" id="lift-form">
+      <div class="card"><label class="lift-field">Program name <input name="name" value="${esc(lp.name)}" maxlength="80" required></label></div>
+      <div id="lift-days">${dayCards}</div>
+      <div class="row-actions" style="margin:12px 0">
+        <button type="button" class="btn" id="lift-add-day">+ Add day</button>
+        <button type="submit" class="btn primary">Save lifting program</button>
+        <a class="btn" href="/coach/lifting">Cancel</a>
+      </div>
+    </form>
+    <script>window.__liftEditDays = ${days.length};</script>`,
+  });
+}
 // Hitter-facing: their daily routine — the every-day blocks of their program.
 // Remote athletes only.
 function programRoutinePage(user, p) {
@@ -2373,6 +2574,13 @@ function programEditPage(user, p, profileEmail) {
   const catBlocks = routine
     .map(
       (c, i) => `<div class="card routine-group prog-cat" data-cat>
+        <div class="cat-head-row">
+          <span class="hint-inline">Block ${i + 1}</span>
+          <span class="cat-move">
+            <button type="button" class="btn btn-sm" data-move-cat="-1" title="Move block up">↑</button>
+            <button type="button" class="btn btn-sm" data-move-cat="1" title="Move block down">↓</button>
+          </span>
+        </div>
         <label class="fld">Category<input type="text" name="cat_${i}_name" value="${esc(c.category || '')}" maxlength="60"></label>
         <label class="fld">Drills — one per line, as <em>Drill</em> or <em>Drill | volume</em>
           <textarea name="cat_${i}_items" rows="4">${esc((c.items || []).map((it) => (it.volume ? `${it.drill} | ${it.volume}` : it.drill)).join('\n'))}</textarea>
@@ -2426,8 +2634,11 @@ function programEditPage(user, p, profileEmail) {
         </label>
       </div>
       <h2 class="section-head">Training blocks</h2>
+      <p class="hint-inline">Blocks named with <em>Mobility</em> feed the Mobility tab, <em>Med Ball</em> the Med Ball tab, <em>Prep</em> stays with Hitting — naming a block is how tabs appear or disappear for the athlete.</p>
       <div id="prog-cats" data-next="${routine.length}">${catBlocks}</div>
-      <p><button type="button" class="btn" id="prog-add-cat">+ Add block</button></p>
+      <p><button type="button" class="btn" id="prog-add-cat">+ Add block</button>
+      <button type="button" class="btn" data-addcat-name="Mobility">+ Mobility block</button>
+      <button type="button" class="btn" data-addcat-name="Med Ball">+ Med ball block</button></p>
       <p><button type="submit" class="btn btn-primary">Save program</button></p>
     </form>
 `,
@@ -2459,6 +2670,11 @@ function remoteProgramsSection(list, canEdit) {
       const actions = canEdit
         ? `<div class="remote-actions">
           <a class="btn btn-sm" href="/coach/program/${r.id}/edit">Edit program</a>
+          ${
+            r.lifting_name
+              ? `<a class="btn btn-sm" href="/coach/lifting">🏋 ${esc(r.lifting_name)}</a>`
+              : `<a class="btn btn-sm" href="/coach/lifting">+ Lifting</a>`
+          }
           ${
             r.user_email
               ? `<form method="post" action="/coach/remote/unlink" class="inline-form"><input type="hidden" name="id" value="${r.id}"><button class="btn btn-sm" type="submit">Unlink</button></form>`
@@ -3081,6 +3297,8 @@ module.exports = {
   programRoutinePage,
   mentalGamePage,
   programEditPage,
+  liftingProgramsPage,
+  liftingEditPage,
   videosPage,
   videoWatchPage,
   coachLibraryPage,

@@ -520,6 +520,43 @@ db.exec(`CREATE TABLE IF NOT EXISTS remote_programs (
   }
 }
 
+// ---- Lifting programs (Sep 2026) ----
+// Bobby writes lifting programs for his remote/hybrid guys. Templates are
+// reusable starters he assigns to an athlete (assign = private copy, so
+// tweaks for one guy never touch the template or another guy's program).
+// Athletes see their lifting program as the LIFTING sub-tab of Programs,
+// log weight + RPE per exercise, and get "last time" + history per exercise.
+db.exec(`CREATE TABLE IF NOT EXISTS lifting_programs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT UNIQUE NOT NULL,
+  is_template INTEGER NOT NULL DEFAULT 0,
+  program_json TEXT NOT NULL DEFAULT '{}',
+  updated_at TEXT NOT NULL DEFAULT ''
+);`);
+// Which lifting program an athlete's remote program points at (NULL = none).
+{
+  const cols = db.prepare('PRAGMA table_info(remote_programs)').all().map((c) => c.name);
+  if (!cols.includes('lifting_program_id')) {
+    db.exec('ALTER TABLE remote_programs ADD COLUMN lifting_program_id INTEGER;');
+  }
+}
+// Daily check-offs + lift logging. One row per athlete/day/item; weight and
+// rpe are only used for lifting exercises (kind='lift').
+db.exec(`CREATE TABLE IF NOT EXISTS program_checkoffs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  day TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  item_key TEXT NOT NULL,
+  weight REAL,
+  rpe INTEGER,
+  created_at TEXT NOT NULL DEFAULT '',
+  UNIQUE(user_id, day, item_key)
+);`);
+db.exec('CREATE INDEX IF NOT EXISTS idx_checkoffs_user_key ON program_checkoffs(user_id, item_key, day);');
+// NOTE: starter lifting templates are seeded after the settings table is
+// created below (guarded by a settings flag).
+
 // Video library: Bobby's "Atkinson Hitting Development System" Drive folder,
 // synced in by the VM cron (see workspace/video-library-sync). Remote
 // hitters only.
@@ -595,6 +632,64 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL DEFAULT ''
 );
 `);
+
+// Starter lifting templates (Sep 2026): seeded once, guarded by a settings
+// flag so a deleted template is never resurrected and Bobby's in-app edits
+// are never overwritten.
+{
+  let seeded = null;
+  try { seeded = db.prepare("SELECT value FROM settings WHERE key = 'lifting_templates_seeded'").get(); } catch (e) { /* table just created */ }
+  if (!seeded) {
+    const now = new Date().toISOString();
+    const ins = db.prepare(
+      'INSERT INTO lifting_programs (name, is_template, program_json, updated_at) VALUES (?, 1, ?, ?)'
+    );
+    const ex = (name, sets, reps, target_rpe, notes) => ({
+      name, sets: String(sets), reps: String(reps), target_rpe: target_rpe || '', notes: notes || '',
+    });
+    const templates = [
+      {
+        name: 'Full-Body A/B',
+        days: [
+          { label: 'Day A', exercises: [
+            ex('Trap Bar Deadlift', '4', '5', 8, 'Hinge, brace, drive the floor away'),
+            ex('DB Bench Press', '3', '8', 7, ''),
+            ex('Chest-Supported DB Row', '3', '10', 7, ''),
+            ex('Pallof Press', '3', '10 each side', 6, ''),
+          ]},
+          { label: 'Day B', exercises: [
+            ex('Front Squat', '4', '6', 8, 'Elbows high, knees forward'),
+            ex('Overhead Press', '3', '8', 7, ''),
+            ex('Lat Pulldown', '3', '10', 7, ''),
+            ex("Farmer's Carry", '3', '40 yards', 6, ''),
+          ]},
+        ],
+      },
+      {
+        name: 'Upper / Lower',
+        days: [
+          { label: 'Upper', exercises: [
+            ex('Bench Press', '4', '6', 8, ''),
+            ex('Bent-Over Row', '4', '8', 8, 'Chest over the plate'),
+            ex('DB Overhead Press', '3', '10', 7, ''),
+            ex('Face Pull', '3', '12', 6, ''),
+          ]},
+          { label: 'Lower', exercises: [
+            ex('Back Squat', '4', '6', 8, ''),
+            ex('Romanian Deadlift', '3', '8', 7, 'Feel the hamstrings load'),
+            ex('Bulgarian Split Squat', '3', '10 each', 7, ''),
+            ex('Hanging Knee Raise', '3', '12', 6, ''),
+          ]},
+        ],
+      },
+    ];
+    for (const t of templates) {
+      ins.run(t.name, JSON.stringify({ days: t.days, notes: [] }), now);
+    }
+    db.prepare("INSERT INTO settings (key, value) VALUES ('lifting_templates_seeded', '1')").run();
+    console.log('Seeded lifting templates: Full-Body A/B, Upper / Lower.');
+  }
+}
 
 // One-time cleanup (Sep 15 2026): Bobby asked to remove ALL test accounts
 // except test@atkinsonhitting.com. Keeps every coach account and that one
