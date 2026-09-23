@@ -164,6 +164,8 @@ function userTabs(active, user) {
   if (isRemote) {
     tabs.push({ href: '/messages', label: 'Messages', active: active === 'messages', badge: user && user.unreadMessages > 0 ? String(user.unreadMessages) : null });
   }
+  // Bobby (Sep 23 2026): Settings back in the sidebar drawer (not the bottom bar).
+  tabs.push({ href: '/settings', label: 'Settings', active: active === 'settings' });
   // Organizations can turn Talk to Skip off for their players: no tab, no FAB,
   // no bottom-bar icon (all three key off this tab list).
   if (user && user.skipChatDisabled) {

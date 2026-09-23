@@ -1180,6 +1180,16 @@ db.exec(`CREATE TABLE IF NOT EXISTS mental_answers (
   }
 }
 
+// Fresh daily content (Sep 23 2026, Bobby): a brand-new Bible verse + mental
+// exercise every day, never repeating. Generated at 4am Chicago; the old
+// rotation pools stay as fallback if generation fails.
+db.exec(`CREATE TABLE IF NOT EXISTS daily_content (
+  day TEXT PRIMARY KEY,
+  verse_json TEXT NOT NULL DEFAULT '{}',
+  exercise_json TEXT NOT NULL DEFAULT '{}',
+  generated_at TEXT NOT NULL DEFAULT ''
+);`);
+
 // Subscriptions (Sep 15 2026): account-level billing state lives here once
 // payments launch. Settings reads it (plan + End subscription); the cancel
 // route flips an active sub to canceled. No provider wired up yet.

@@ -448,6 +448,8 @@ function deleteOrgLogoFile(logoPath) {
     const inPerson = ensureOrg(INPERSON, "Bobby's org — in-person guys");
     const remote = ensureOrg(REMOTE, 'Founder org — free forever, exempt from billing');
     db.prepare('UPDATE organizations SET is_mine = 1 WHERE id IN (?, ?)').run(inPerson.id, remote.id);
+    // Bobby, Sep 23 2026: his in-person guys get Talk to Skip too — always on for his orgs.
+    db.prepare('UPDATE organizations SET skip_enabled = 1 WHERE is_mine = 1').run();
 
     // Branding mirror: same logo + colors on both programs. Whichever org has
     // a logo wins; fill blanks only, never overwrite existing branding.
@@ -2701,7 +2703,15 @@ const MENTAL_EXERCISES = [
   },
 ];
 function todayMentalExercise() {
-  // Chicago weekday: 0=Sunday..6=Saturday
+  // Fresh daily content (Sep 23 2026, Bobby): new exercise every day, never
+  // repeating. Falls back to the weekly rotation if generation hasn't run.
+  try {
+    const row = db.prepare('SELECT exercise_json FROM daily_content WHERE day = ?').get(todayChicagoDate());
+    if (row && row.exercise_json) {
+      const e = JSON.parse(row.exercise_json);
+      if (e && e.title && e.action) return e;
+    }
+  } catch (e) {}
   const chi = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' }));
   return MENTAL_EXERCISES[chi.getDay()];
 }
@@ -2835,10 +2845,75 @@ const BIBLE_VERSES = [
   },
 ];
 function todayBibleVerse() {
+  // Fresh daily content (Sep 23 2026, Bobby): new verse every day, never
+  // repeating. Falls back to the rotation pool if generation hasn't run.
+  try {
+    const row = db.prepare('SELECT verse_json FROM daily_content WHERE day = ?').get(todayChicagoDate());
+    if (row && row.verse_json) {
+      const v = JSON.parse(row.verse_json);
+      if (v && v.ref && v.text) return v;
+    }
+  } catch (e) {}
   const chi = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' }));
   const start = new Date(chi.getFullYear(), 0, 0);
   const dayOfYear = Math.floor((chi - start) / 86400000);
   return BIBLE_VERSES[dayOfYear % BIBLE_VERSES.length];
+}
+
+// Fresh daily content generation (Sep 23 2026, Bobby): one Gemini call makes
+// BOTH today's verse and today's mental exercise. Runs at 4am Chicago via the
+// background loop — athletes never wait on it.
+const DAILY_CONTENT_SYSTEM = `You create daily content for a baseball mental-game app used by teenage hitters. Your voice: a direct, no-fluff hitting coach talking in the cage. Short sentences. Zero corporate polish. Never preachy, never cheesy.
+Rules: mirror, don't fix. Mental before physical. Never invent mechanical causes. Never suggest hitting drills. Never diagnose. Build confidence from evidence, not hype.`;
+async function generateDailyContent() {
+  const today = todayChicagoDate();
+  if (db.prepare('SELECT 1 FROM daily_content WHERE day = ?').get(today)) return false;
+  // Never repeat: feed recent refs/titles so the model picks fresh ones.
+  let recent = [];
+  try {
+    recent = db.prepare('SELECT verse_json, exercise_json FROM daily_content ORDER BY day DESC LIMIT 60').all()
+      .flatMap((r) => {
+        const out = [];
+        try { const v = JSON.parse(r.verse_json || '{}'); if (v.ref) out.push('verse: ' + v.ref); } catch (e) {}
+        try { const e2 = JSON.parse(r.exercise_json || '{}'); if (e2.title) out.push('exercise: ' + e2.title); } catch (e) {}
+        return out;
+      });
+  } catch (e) {}
+  const noRepeat = recent.length ? `\nRecently used (NEVER repeat any of these):\n${recent.join('\n')}` : '';
+  const prompt = `Create today's content. Return ONLY valid JSON, no markdown, no commentary, with exactly these two keys:
+{
+  "verse": { "ref": "Book 1:2-3", "text": "full verse text", "theme": "2-4 words", "explanation": "2-3 sentences, plain talk", "baseball": "2-3 sentences tying it to baseball", "life": "2-3 sentences for life off the field" },
+  "exercise": { "key": "short-slug", "title": "Short Title", "book": "one of: Afremow, Mack, Dorfman, Ravizza, Goggins, Grover, Holiday, Bassham", "concept": "3-4 sentences teaching the idea in plain talk", "baseball": "2-3 sentences tying it to baseball", "action": "one concrete thing to do today, specific" }
+}
+Verse: pick a real Bible verse about competition, resilience, discipline, focus, courage, or trusting the work. Quote the text accurately.
+Exercise: teach ONE concrete mental-game idea from these books — Afremow (The Champion's Mind: feed the good wolf, 3 post-game questions, mental scorecard), Mack (Mind Gym: 3x5 card, A.C.T. backward, breath + keyword, switch the channel), Dorfman (process goals, judge approach not results, quality thoughts), Ravizza (signal lights, RAMP-C, 15 seconds between pitches, flush it), Goggins (40% rule, cookie jar, accountability mirror, AAR), Grover (relentless, done-next, results over approval), Holiday (obstacle is the way, perception/action/will, follow the process), Bassham (mental program: anticipation/action/reinforcement, picture the positive). Make it fresh — a new angle, not a rehash.${noRepeat}`;
+  const raw = await geminiText(DAILY_CONTENT_SYSTEM, prompt, 1500);
+  const m = raw.match(/\{[\s\S]*\}/);
+  if (!m) throw new Error('daily_content_parse');
+  const parsed = JSON.parse(m[0]);
+  if (!parsed.verse || !parsed.verse.ref || !parsed.exercise || !parsed.exercise.title) throw new Error('daily_content_shape');
+  db.prepare('INSERT OR REPLACE INTO daily_content (day, verse_json, exercise_json, generated_at) VALUES (?, ?, ?, ?)')
+    .run(today, JSON.stringify(parsed.verse), JSON.stringify(parsed.exercise), new Date().toISOString());
+  return true;
+}
+// 4am Chicago generation (Bobby, Sep 23 2026): once past 4:00am and today's
+// row is missing, generate it. Runs inside the existing 5-minute loop.
+let lastDailyContentDay = '';
+async function ensureDailyContent() {
+  try {
+    const nowDay = chiDay(new Date());
+    if (lastDailyContentDay === nowDay) return;
+    const chiNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+    if (chiNow.getHours() < 4) return;
+    if (db.prepare('SELECT 1 FROM daily_content WHERE day = ?').get(nowDay)) {
+      lastDailyContentDay = nowDay;
+      return;
+    }
+    await generateDailyContent();
+    lastDailyContentDay = nowDay;
+  } catch (e) {
+    console.warn('daily content generation failed (fallback rotation in use):', e.message);
+  }
 }
 const MENTAL_PLAN_SYSTEM = `You are Coach Skip, a direct no-fluff hitting coach writing a hitter's personal mental-game plan. You just gauged where his head is at. Write the plan TO him ("you"). Be specific — use his exact words back at him. No generic advice.
 
@@ -7734,8 +7809,10 @@ async function ratePendingJournals() {
 // ---- Daily Bible study alert (7am Chicago, Sep 23 2026, Bobby) ----
 // Opt-ins only (users.bible_study = 1). Sammy/Tommy can never be opted in —
 // the popup excludes them, and this query only trusts the flag.
+// Also runs the 4am daily-content generation check (fresh verse + exercise).
 let lastBibleDay = '';
 setInterval(async () => {
+  ensureDailyContent().catch(() => {});
   if (!pushEnabled) return;
   try {
     const nowDay = chiDay(new Date());
