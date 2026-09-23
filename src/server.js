@@ -2087,6 +2087,7 @@ app.get('/program', requireLogin, requireWaiver, (req, res) => {
   }
   res.send(views.programPage(req.user, p, {
     tabs, sub, day, autoDay, labels, today, checkoffs, lifting,
+    sched: (prog.schedule || []).map((s) => [s[0], s[1]]),
     weekday: new Date().toLocaleDateString('en-US', { weekday: 'long', timeZone: 'America/Chicago' }),
     isToday: !reqDay || (autoDay && reqDay.toLowerCase() === autoDay.toLowerCase()),
     ldayIdx, liftData,
@@ -3680,20 +3681,26 @@ function parseIntakeBody(b) {
     bench_max: s(b.bench_max, 20),
     deadlift_max: s(b.deadlift_max, 20),
     strong_not_explosive: yn(b.strong_not_explosive),
-    // Equipment (specific)
-    equipment: arr(b.equipment),
+    // Equipment — questionnaire asks what they DON'T have (cleaner); convert
+    // to the equipment tags the lifting builder needs.
+    missing_equipment: arr(b.missing_equipment),
     equipment_detail: s(b.equipment_detail, 1000),
     // Availability & season
     components: arr(b.components),
     hit_days_per_week: Math.min(7, Math.max(1, parseInt(b.hit_days_per_week, 10) || 5)),
     lift_days_per_week: Math.min(7, Math.max(1, parseInt(b.lift_days_per_week, 10) || 4)),
     train_days: arr(b.train_days).filter((d) => WEEKDAYS.includes(d)),
+    weekly_days: arr(b.weekly_days).filter((d) => ['recovery_day', 'mobility_day'].includes(d)),
     session_length: s(b.session_length, 40),
     schedule_constraints: s(b.schedule_constraints, 500),
     season_phase: ['offseason', 'preseason', 'inseason'].includes(b.season_phase) ? b.season_phase : 'offseason',
     season_detail: s(b.season_detail, 500),
     games_per_week: s(b.games_per_week, 20),
-    // Hitting resources (explicit)
+    // Hitting resources — questionnaire asks what they DON'T have; convert
+    // to the have/has booleans the builder needs (missing_equipment has the
+    // same shape for backward-compat reads).
+    missing_hitting: arr(b.missing_hitting),
+    equipment: arr(b.equipment),
     has_tee: yn(b.has_tee),
     has_net: yn(b.has_net),
     has_cage: yn(b.has_cage),
@@ -3711,37 +3718,93 @@ function parseIntakeBody(b) {
     other_notes: s(b.other_notes, 2000),
   };
 }
-// Baseline program scaffold from intake answers. Structure + templates are
-// the app's job; Bobby fills in his hitting drills/cues in the editor.
-// Mobility is the baseball template (hips/t-spine/shoulders/ankles), med ball
-// and metabolic are equipment-filtered templates. Hitting day blocks are empty
-// on purpose — but labeled with the environments he actually has so Bobby
-// never programs machine work for a guy with no machine and no partner.
+// Baseline program scaffold from intake answers (Sep 2026). Structure +
+// templates are the app's job; Bobby fills in his real hitting drills/cues
+// in the editor. The week is a real calendar: every weekday gets a program
+// day, Recovery, Mobility Day, or OFF. Mobility is the baseball template
+// (hips/t-spine/shoulders/ankles), med ball is equipment-filtered. Hitting
+// days get a real base template built ONLY from what the athlete actually
+// has (tee/net/cage/machine, a reliable feeder, season phase, goals) —
+// never a mechanical diagnosis, just a feasible scaffold Bobby finalizes.
+function buildHittingBase(a, nDays, env) {
+  const blocks = [];
+  const inSeason = a.season_phase === 'inseason';
+  const r = (off, inS) => (inSeason ? inS : off);
+  const goal = String(((a.goals || [])[0]) || '').toLowerCase();
+  const wantsVelo = /exit|velo|power|drive/.test(goal);
+  for (let i = 0; i < nDays; i++) {
+    const items = [];
+    items.push({ drill: 'Tee — rhythm round', prescription: '10 swings, easy — find your move' });
+    items.push({ drill: 'Tee drill work — Bobby picks', prescription: r('3 rounds × 10', '2 rounds × 8') });
+    if (env.hasFeeder) items.push({ drill: 'Front toss / side toss', prescription: r('4 rounds × 10', '3 rounds × 10') });
+    if (env.hasMachine) items.push({ drill: 'Machine rounds', prescription: r('3 rounds × 12', '2 rounds × 10') });
+    else if (env.hasCage) items.push({ drill: 'Cage BP', prescription: r('3 rounds × 12', '2 rounds × 10') });
+    if (wantsVelo && !inSeason) items.push({ drill: 'Intent round — move it', prescription: '1 round × 8, max intent, full rest between swings' });
+    items.push({ drill: 'Game swings', prescription: r('15 swings — compete every pitch', '10 swings — compete every pitch') });
+    if (!env.hasFeeder && !env.hasMachine && !env.hasCage) {
+      items.push({ drill: 'NOTE — tee + net only this cycle', prescription: 'No feeder, machine, or cage on file — Bobby will adjust', notes: '' });
+    }
+    blocks.push({ category: 'Day ' + (i + 1) + ' — Hitting', items });
+  }
+  return blocks;
+}
+function recoveryDayBlock() {
+  return {
+    category: 'Recovery',
+    items: [
+      { drill: 'Easy walk or bike', prescription: '20–30 min, conversational pace — flush, not train' },
+      { drill: 'Full mobility flow (Mobility tab)', prescription: '1 easy pass — nothing forced' },
+      { drill: 'Breathing — downshift', prescription: '5 min nasal breathing, long exhales' },
+    ],
+  };
+}
 function buildIntakeProgram(a, athleteName) {
   const prog = blankProgram(athleteName);
   prog.draft = true;
   prog.draft_source = 'intake';
   const tags = equipmentTags(a);
   const has = (c) => a.components.includes(c);
-  // Schedule: checked training days -> Day 1..N (Monday-first).
+  // Hitting resources — new rows store what they DON'T have; old rows kept
+  // the has_* booleans. missing_* wins when present.
+  const useMissing = Array.isArray(a.missing_hitting);
+  const missHit = new Set(useMissing ? a.missing_hitting : []);
+  const env = {
+    hasTee: useMissing ? !missHit.has('tee') : !!a.has_tee,
+    hasNet: useMissing ? !missHit.has('net') : !!a.has_net,
+    hasCage: useMissing ? !missHit.has('cage') : !!a.has_cage,
+    hasMachine: useMissing ? !missHit.has('machine') : !!a.has_machine,
+    hasFeeder: useMissing ? !missHit.has('feed_partner') : !!a.has_feed_partner,
+  };
+  const envs = [];
+  if (env.hasTee) envs.push('tee');
+  if (env.hasNet) envs.push('net');
+  if (env.hasCage) envs.push('cage');
+  if (env.hasMachine) envs.push('machine');
+  envs.push(env.hasFeeder ? 'front/side toss (has feeder)' : 'NO feed partner — tee/net/cage work only');
+  // The week as a calendar: training days -> Day 1..N (Monday-first), then
+  // recovery / mobility days onto free weekdays, everything else OFF.
   const ordered = WEEKDAYS.filter((d) => a.train_days.includes(d));
   const n = Math.min(ordered.length || a.hit_days_per_week, a.hit_days_per_week);
   const useDays = ordered.slice(0, n);
   prog.schedule = useDays.map((d, i) => [d, 'Day ' + (i + 1)]);
-  if (has('mobility')) for (const b of mobilityBlocks(tags)) prog.routine.push(b);
-  // Hitting environments he actually has — drives which drills are feasible.
-  const envs = [];
-  if (a.has_tee) envs.push('tee');
-  if (a.has_net) envs.push('net');
-  if (a.has_cage) envs.push('cage');
-  if (a.has_machine) envs.push('machine');
-  if (a.has_feed_partner) envs.push('front/side toss (has feeder)');
-  else envs.push('NO feed partner — tee/net/cage work only');
-  if (has('hitting')) {
-    for (let i = 0; i < useDays.length; i++) {
-      prog.routine.push({ category: 'Day ' + (i + 1) + ' — Hitting', items: [] });
-    }
+  const freeDays = WEEKDAYS.filter((d) => !prog.schedule.some((s) => s[0] === d));
+  let fi = 0;
+  let hasRecovery = false;
+  let hasMobilityDay = false;
+  if (a.weekly_days.includes('recovery_day') && freeDays[fi]) {
+    prog.schedule.push([freeDays[fi], 'Recovery']);
+    fi++;
+    hasRecovery = true;
   }
+  if (a.weekly_days.includes('mobility_day') && freeDays[fi]) {
+    prog.schedule.push([freeDays[fi], 'Mobility Day']);
+    fi++;
+    hasMobilityDay = true;
+  }
+  for (; fi < freeDays.length; fi++) prog.schedule.push([freeDays[fi], 'OFF']);
+  if (has('mobility')) for (const b of mobilityBlocks(tags)) prog.routine.push(b);
+  if (has('hitting')) for (const b of buildHittingBase(a, useDays.length, env)) prog.routine.push(b);
+  if (hasRecovery) prog.routine.push(recoveryDayBlock());
   // Med ball: lifters get it bundled inside the Lifting tab (the block lives
   // in the routine and the athlete view renders it there); non-lifters who
   // checked it get the standalone Med Ball tab.
@@ -3756,7 +3819,8 @@ function buildIntakeProgram(a, athleteName) {
   if (a.goals_90) flags.push('90-day goal: ' + a.goals_90);
   if (a.hitting_progression.length) flags.push('Hitting progression: ' + a.hitting_progression.join(', '));
   if (a.lifting_experience) flags.push('Lifting experience: ' + a.lifting_experience);
-  flags.push('Equipment: ' + ((a.equipment || []).join(', ') || 'bodyweight only'));
+  const missEq = Array.isArray(a.missing_equipment) ? a.missing_equipment : null;
+  flags.push('Equipment: ' + (missEq ? (missEq.length ? 'has everything except: ' + missEq.join(', ') : 'has everything') : ((a.equipment || []).join(', ') || 'bodyweight only')));
   if (a.equipment_detail) flags.push('Equipment detail: ' + a.equipment_detail);
   flags.push('Hitting resources: ' + envs.join(' · '));
   if (a.feed_partner_detail) flags.push('Feeder: ' + a.feed_partner_detail);
@@ -3798,6 +3862,17 @@ const EQ_MAP = {
 };
 function equipmentTags(a) {
   const tags = new Set(['bodyweight']);
+  // New questionnaire (Sep 2026): athlete lists what they DON'T have —
+  // everything else is assumed available.
+  if (a && Array.isArray(a.missing_equipment)) {
+    const missing = new Set(a.missing_equipment);
+    for (const [key, ts] of Object.entries(EQ_MAP)) {
+      if (key === 'full_gym' || missing.has(key)) continue;
+      for (const t of ts) tags.add(t);
+    }
+    return tags;
+  }
+  // Backward compat: old intake rows checked what they HAVE.
   for (const e of (a && a.equipment) || []) {
     for (const t of EQ_MAP[e] || []) tags.add(t);
   }

@@ -122,9 +122,13 @@ function matchDrillVideo(drill, libRows) {
   return bestScore > 0 ? best : '';
 }
 
-// Bobby's rule (Sep 2026): med ball work links to YouTube, never the
-// in-app drill library. Registry-only match for med ball items — the library
-// fuzzy fallback is for hitting drills, not med ball.
+// Bobby's rule (Sep 2026): lifting, mobility, and med ball are ALL YouTube
+// videos — never the in-app drill library. Registry-only match for those
+// items; the library fuzzy fallback is for hitting drills only.
+function youTubeOnlyCategory(cat) {
+  const c = String(cat || '');
+  return /med\s*ball/i.test(c) || /mobility/i.test(c) || /recovery/i.test(c);
+}
 function matchRegistryOnly(drill) {
   const reg = registry();
   const linkKeys = Object.keys(reg.links);
@@ -152,12 +156,13 @@ function attachVideoLinks(prog, libRows) {
   let count = 0;
   const blocks = prog && Array.isArray(prog.routine) ? prog.routine : [];
   for (const c of blocks) {
-    const isMedBall = /med\s*ball/i.test(String((c && c.category) || ''));
+    const ytOnly = youTubeOnlyCategory(c && c.category);
     for (const it of (c && c.items) || []) {
       if (!it || it.video) continue;
       if (it.video_source === 'manual') continue;
-      // Med ball: YouTube via Bobby's registry only — never the library.
-      const url = isMedBall ? matchRegistryOnly(it.drill) : matchDrillVideo(it.drill, libRows);
+      // Lifting / mobility / med ball / recovery: YouTube via Bobby's
+      // registry only — never the Drive library. Hitting keeps the library.
+      const url = ytOnly ? matchRegistryOnly(it.drill) : matchDrillVideo(it.drill, libRows);
       if (url) {
         it.video = url;
         it.video_source = 'auto';
@@ -168,9 +173,33 @@ function attachVideoLinks(prog, libRows) {
   return count;
 }
 
-// One-time repair (Sep 2026): med ball items that were auto-linked to the
-// drill library (Drive/in-app) get re-pointed at Bobby's YouTube registry
-// links. Manual links are never touched.
+// One-time repair (Sep 2026): mobility + recovery items that were auto-linked
+// to the drill library (Drive/in-app) get re-pointed at Bobby's YouTube
+// registry links; non-YouTube auto-links with no registry match are cleared.
+// Manual links are never touched.
+function repairMobilityLinks(prog) {
+  let fixed = 0;
+  let purged = 0;
+  const blocks = prog && Array.isArray(prog.routine) ? prog.routine : [];
+  const isYT = (u) => /^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\//i.test(String(u || ''));
+  for (const c of blocks) {
+    const cat = String((c && c.category) || '');
+    if (!/mobility/i.test(cat) && !/recovery/i.test(cat)) continue;
+    for (const it of (c && c.items) || []) {
+      if (!it || it.video_source === 'manual' || !it.video) continue;
+      const yt = matchRegistryOnly(it.drill);
+      if (yt && it.video !== yt) {
+        it.video = yt;
+        it.video_source = 'auto';
+        fixed++;
+      } else if (!yt && !isYT(it.video)) {
+        it.video = '';
+        purged++;
+      }
+    }
+  }
+  return { fixed, purged };
+}
 function repairMedBallLinks(prog) {
   let fixed = 0;
   const blocks = prog && Array.isArray(prog.routine) ? prog.routine : [];
@@ -236,6 +265,7 @@ module.exports = {
   matchRegistryOnly,
   attachVideoLinks,
   repairMedBallLinks,
+  repairMobilityLinks,
   getLibraryRows,
   autoLinkAllPrograms,
 };

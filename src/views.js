@@ -1833,8 +1833,7 @@ function coachHomeManage(user, quiet, latest, pending, pushOn, leads, myGuys) {
       <span class="ppl-main"><strong>${esc(a.name)}</strong>
       <span class="hint-inline">gone quiet · ${a.daysAgo}d</span></span>
       <span class="org-chev" aria-hidden="true">›</span></a>`).join('');
-  const attention = (pendingRow || quietRows)
-    ? `<h2 class="section-head">Needs attention</h2><div class="card ppl-list">${pendingRow}${quietRows}</div>` : '';
+  const attention = '';
   const checkRows = (latest || []).map((c) =>
     `<a class="ppl-row" href="${c.athlete_email ? '/coach/user/' + encodeURIComponent(c.athlete_email) : '/coach/hitters'}">
       <span class="ppl-main"><strong>${esc(c.athlete_name || c.athlete_email || 'Check-in')}</strong>
@@ -2596,6 +2595,28 @@ function programPage(user, p, opts) {
     return `<div class="day-head">${big}${picker}</div>`;
   };
 
+  // Interactive week calendar (Sep 2026): the full Mon–Sun schedule as a
+  // tappable strip. Today is highlighted; OFF days are dimmed and not links.
+  // "Mobility Day" opens the Mobility tab — the day's work IS the mobility
+  // flow. Everything else opens the day's blocks.
+  const weekStrip = () => {
+    if (!schedArr.length) return '';
+    const order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const cells = order.map((wd) => {
+      const s = schedArr.find((x) => x.weekday.toLowerCase() === wd.toLowerCase());
+      const lab = s ? s.label : '';
+      const isToday = wd.toLowerCase() === String(weekday).toLowerCase();
+      const isOff = /^(off|rest)/i.test(lab) || !lab;
+      const tab = /mobility day/i.test(lab) ? 'mobility' : sub;
+      const inner = `<span class="ws-dow">${wd.slice(0, 3)}</span><span class="ws-lab">${esc(lab || '—')}</span>`;
+      const cls = `ws-cell${isToday ? ' ws-today' : ''}${isOff ? ' ws-off' : ''}`;
+      return isOff
+        ? `<span class="${cls}">${inner}</span>`
+        : `<a class="${cls}" href="/program?sub=${esc(tab)}&day=${encodeURIComponent(lab)}">${inner}</a>`;
+    }).join('');
+    return `<div class="week-strip" role="navigation" aria-label="Your week">${cells}</div>`;
+  };
+
   // One check-off row (hitting / mobility / med ball / prep).
   const checkRow = (kind, key, drill, volume, video, extra) => {
     const done = !!checkoffs[key];
@@ -2726,6 +2747,7 @@ function programPage(user, p, opts) {
     body: `<h1 class="page-title">Your Program</h1>
     ${meta ? `<p class="lede">${meta}</p>` : ''}
     ${tabHtml}
+    ${weekStrip()}
     ${orderToggle}
     ${content}
     <div class="card finish-card"><p style="margin:0 0 8px">Done with the work? <a href="/checkin"><strong>Log your session →</strong></a></p>
@@ -3642,8 +3664,11 @@ function programEditPage(user, p, profileEmail, hasLifting, progression, opts) {
   }
   const schedFields = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
     .map(
-      (d, i) =>
-        `<label class="fld fld-inline">${esc(d)}<input type="text" name="sched_${i}" value="${esc(editSchedMap[d] || '')}" maxlength="40" placeholder="Day 1 / OFF"></label>`
+      (d, i) => {
+        const cur = editSchedMap[d] || '';
+        const isOff = /^(off|rest)/i.test(cur);
+        return `<label class="sched-cal-cell${isOff ? ' is-off' : ''}"><span class="sched-cal-dow">${esc(d.slice(0, 3))}</span><input type="text" name="sched_${i}" value="${esc(cur)}" maxlength="40" placeholder="OFF"></label>`;
+      }
     )
     .join('');
   const editNotes = Array.isArray(prog.notes) ? prog.notes.filter(Boolean) : [];
@@ -3703,7 +3728,7 @@ function programEditPage(user, p, profileEmail, hasLifting, progression, opts) {
         <label class="fld">Timing<input type="text" name="cue_timing" value="${esc(cues.timing || '')}" maxlength="300"></label>
         <label class="fld">Game<input type="text" name="cue_game" value="${esc(cues.game || '')}" maxlength="300"></label>
       </div>
-      <div class="card routine-group"><h2 class="routine-station">Weekly schedule</h2><div class="grade-edit-row">${schedFields}</div></div>
+      <div class="card routine-group"><h2 class="routine-station">Weekly schedule</h2><p class="hint">One cell per day — type <strong>Day 1</strong>, <strong>Recovery</strong>, <strong>Mobility Day</strong>, or <strong>OFF</strong>. This is the athlete's week.</p><div class="sched-cal">${schedFields}</div></div>
       <div class="card routine-group">
         <label class="fld">Notes — one per line
           <textarea name="notes" rows="3">${esc(editNotes.join('\n'))}</textarea>
@@ -4364,6 +4389,27 @@ function intakeFormPage(token, err, values, opts) {
   };
   const checkRow = (name, val, label, hint) =>
     `<label class="pick"><input type="checkbox" name="${name}" value="${val}"${ivc(name, val)}> <span><strong>${label}</strong>${hint ? ` <span class="hint-inline">${hint}</span>` : ''}</span></label>`;
+  // "What DON'T you have?" picker (Sep 2026): a dropdown + Add button that
+  // stacks removable chips. Cleaner than 15 checkboxes; baseline assumption
+  // is the athlete has everything, they only list what's missing.
+  const noHavePicker = (name, options, placeholder) => {
+    const cur = Array.isArray(v[name]) ? v[name] : (v[name] ? [v[name]] : []);
+    const labelOf = (val) => (options.find(([ov]) => ov === val) || [val, val])[1];
+    const chips = cur
+      .filter((x) => options.some(([ov]) => ov === x))
+      .map((x) => `<span class="nohave-chip"><input type="hidden" name="${name}" value="${x}">${esc(labelOf(x))} <button type="button" class="nohave-x" aria-label="Remove">×</button></span>`)
+      .join('');
+    return `<div class="nohave" data-field="${name}">
+      <div class="nohave-row">
+        <select class="nohave-select" aria-label="${esc(placeholder || "What don't you have?")}">
+          <option value="">${esc(placeholder || "What don't you have? Pick one…")}</option>
+          ${options.map(([val, label]) => `<option value="${val}">${label}</option>`).join('')}
+        </select>
+        <button type="button" class="btn nohave-add">Add</button>
+      </div>
+      <div class="nohave-chips">${chips}</div>
+    </div>`;
+  };
   const step = (title, inner) => `<fieldset class="istep" data-title="${title}"><legend class="istep-title">${title}</legend>${inner}</fieldset>`;
   const req = ' required';
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -4444,24 +4490,23 @@ function intakeFormPage(token, err, values, opts) {
         <label class="pick"><input type="checkbox" name="strong_not_explosive" value="1"${ivc('strong_not_explosive', '1')}> <span><strong>I feel strong but not explosive</strong></span></label>`)}
 
       ${step('5 · Your equipment', `
-        <p class="hint" style="margin-top:0">Check <strong>everything</strong> you can actually use week to week. Your program is built only from what you check — nothing you can't do.</p>
-        <div class="pick-group">
-          ${checkRow('equipment', 'full_gym', 'Full commercial gym', 'everything below and more')}
-          ${checkRow('equipment', 'barbell', 'Barbell + plates', '')}
-          ${checkRow('equipment', 'rack', 'Squat rack / power rack', '')}
-          ${checkRow('equipment', 'dumbbell', 'Dumbbells', '')}
-          ${checkRow('equipment', 'kettlebell', 'Kettlebells', '')}
-          ${checkRow('equipment', 'trapbar', 'Trap bar / hex bar', '')}
-          ${checkRow('equipment', 'bands', 'Resistance bands', '')}
-          ${checkRow('equipment', 'pullup_bar', 'Pull-up bar', '')}
-          ${checkRow('equipment', 'bench', 'Adjustable / flat bench', '')}
-          ${checkRow('equipment', 'medball', 'Medicine balls', '')}
-          ${checkRow('equipment', 'plyo_box', 'Plyo box', '')}
-          ${checkRow('equipment', 'sled', 'Sled / prowler', '')}
-          ${checkRow('equipment', 'cables', 'Cable machine', '')}
-          ${checkRow('equipment', 'field_space', 'Field / open space for sprints', '')}
-          ${checkRow('equipment', 'jump_rope', 'Jump rope', '')}
-        </div>
+        <p class="hint" style="margin-top:0">Assume you have <strong>everything</strong> — just add what you <strong>don't</strong> have. Your program is built only from what's left.</p>
+        ${noHavePicker('missing_equipment', [
+          ['barbell', 'Barbell + plates'],
+          ['rack', 'Squat rack / power rack'],
+          ['dumbbell', 'Dumbbells'],
+          ['kettlebell', 'Kettlebells'],
+          ['trapbar', 'Trap bar / hex bar'],
+          ['bands', 'Resistance bands'],
+          ['pullup_bar', 'Pull-up bar'],
+          ['bench', 'Adjustable / flat bench'],
+          ['medball', 'Medicine balls'],
+          ['plyo_box', 'Plyo box'],
+          ['sled', 'Sled / prowler'],
+          ['cables', 'Cable machine'],
+          ['field_space', 'Field / open space for sprints'],
+          ['jump_rope', 'Jump rope'],
+        ], "What equipment DON'T you have? Pick one…")}
         <label>Details — weights, limits, what's shared or crowded<textarea name="equipment_detail" rows="3" maxlength="1000" placeholder="e.g. dumbbells up to 50 lbs, home garage gym, no leg machines, med balls 6/10/14 lb">${ival('equipment_detail')}</textarea></label>`)}
 
       ${step('6 · Availability & season', `
@@ -4471,8 +4516,12 @@ function intakeFormPage(token, err, values, opts) {
           <label>Days per week you can LIFT <span class="hint-inline">(Bobby recommends 4)</span>
             <select name="lift_days_per_week">${[1, 2, 3, 4, 5, 6, 7].map((d) => `<option value="${d}"${String(v.lift_days_per_week || 4) === String(d) ? ' selected' : ''}>${d}</option>`).join('')}</select></label>
         </div>
-        <p class="hint"><strong>Which weekdays</strong> can you train?</p>
-        <div class="pick-group pick-inline">${days.map((d) => `<label class="pick chip"><input type="checkbox" name="train_days" value="${d}"${ivc('train_days', d)}> <span>${d.slice(0, 3)}</span></label>`).join('')}</div>
+        <p class="hint"><strong>Which weekdays</strong> can you train? <span class="hint-inline">Tap the days.</span></p>
+        <div class="cal-week" role="group" aria-label="Training weekdays">${days.map((d) => `<label class="cal-day"><input type="checkbox" name="train_days" value="${d}"${ivc('train_days', d)}><span class="cal-dow">${d[0]}</span><span class="cal-dname">${d.slice(0, 3)}</span></label>`).join('')}</div>
+        <p class="hint"><strong>Recovery / mobility days</strong> <span class="hint-inline">— scheduled into your week like training days</span></p>
+        <div class="pick-group pick-inline">
+          ${[['recovery_day', 'Recovery day'], ['mobility_day', 'Pure mobility day']].map(([val, label]) => `<label class="pick chip"><input type="checkbox" name="weekly_days" value="${val}"${ivc('weekly_days', val)}> <span>${label}</span></label>`).join('')}
+        </div>
         <div class="two-col">
           <label>Typical session length<input type="text" name="session_length" value="${ival('session_length')}" maxlength="40" placeholder="e.g. 60–90 min"></label>
           <label>Games per week <span class="hint-inline">(in-season)</span><input type="text" name="games_per_week" value="${ival('games_per_week')}" maxlength="20" inputmode="numeric"></label>
@@ -4487,14 +4536,14 @@ function intakeFormPage(token, err, values, opts) {
         <label>Schedule constraints (school, work, travel)<textarea name="schedule_constraints" rows="2" maxlength="500">${ival('schedule_constraints')}</textarea></label>`)}
 
       ${step('7 · Hitting resources', `
-        <p class="hint" style="margin-top:0">Be exact — Bobby programs only what you actually have. And the big one: <strong>do you have someone who can feed you consistently?</strong></p>
-        <div class="pick-group">
-          ${checkRow('has_tee', '1', 'I have a batting tee', '')}
-          ${checkRow('has_net', '1', 'I have a net', '')}
-          ${checkRow('has_cage', '1', 'I have cage access', '')}
-          ${checkRow('has_machine', '1', 'I have a pitching machine', '')}
-          ${checkRow('has_feed_partner', '1', 'I have someone who can feed me front toss / side toss consistently', 'this one matters most')}
-        </div>
+        <p class="hint" style="margin-top:0">Assume you have <strong>everything</strong> — just add what you <strong>don't</strong> have. Be exact — Bobby programs only what's left. And the big one: if nobody can feed you consistently, add that.</p>
+        ${noHavePicker('missing_hitting', [
+          ['tee', 'Batting tee'],
+          ['net', 'Net'],
+          ['cage', 'Cage access'],
+          ['machine', 'Pitching machine'],
+          ['feed_partner', 'Someone to feed me front / side toss'],
+        ], "What DON'T you have? Pick one…")}
         <label>Who feeds you? How often?<input type="text" name="feed_partner_detail" value="${ival('feed_partner_detail')}" maxlength="300" placeholder="e.g. my dad, 3x a week"></label>
         <p class="hint"><strong>Which hitting environments</strong> do you train in?</p>
         <div class="pick-group pick-inline">
@@ -4601,6 +4650,38 @@ function intakeFormPage(token, err, values, opts) {
         var liftNote = document.getElementById('lift-note');
         function checkLift(){ if (liftNote) liftNote.hidden = !(liftCb && liftCb.checked); }
         if (liftCb) { liftCb.addEventListener('change', checkLift); checkLift(); }
+        // "What DON'T you have?" dropdown + chips pickers
+        Array.prototype.forEach.call(document.querySelectorAll('.nohave'), function(box){
+          var field = box.getAttribute('data-field');
+          var sel = box.querySelector('.nohave-select');
+          var addBtn = box.querySelector('.nohave-add');
+          var chips = box.querySelector('.nohave-chips');
+          function has(val){ return !!chips.querySelector('input[value="' + val + '"]'); }
+          function addChip(val, label){
+            var chip = document.createElement('span');
+            chip.className = 'nohave-chip';
+            var hid = document.createElement('input');
+            hid.type = 'hidden'; hid.name = field; hid.value = val;
+            var x = document.createElement('button');
+            x.type = 'button'; x.className = 'nohave-x'; x.textContent = '×';
+            x.setAttribute('aria-label', 'Remove');
+            x.addEventListener('click', function(){ chip.remove(); });
+            chip.appendChild(hid);
+            chip.appendChild(document.createTextNode(label + ' '));
+            chip.appendChild(x);
+            chips.appendChild(chip);
+          }
+          addBtn.addEventListener('click', function(){
+            var opt = sel.options[sel.selectedIndex];
+            if (!opt || !opt.value) return;
+            if (has(opt.value)) { sel.value = ''; return; }
+            addChip(opt.value, opt.textContent);
+            sel.value = '';
+          });
+          Array.prototype.forEach.call(chips.querySelectorAll('.nohave-x'), function(x){
+            x.addEventListener('click', function(){ x.closest('.nohave-chip').remove(); });
+          });
+        });
         show(0);
       })();
       </script>
@@ -4630,9 +4711,9 @@ function intakeDetailPage(user, row) {
     ${sec('Goals', list('Goals', a.goals) + kv('Other goals', a.goals_other) + kv('90-day goal', a.goals_90) + kv('Current EV / bat speed', [a.current_ev, a.current_bat_speed].filter(Boolean).join(' / ')))}
     ${sec('Health & injuries', kv('Current injuries', a.injury_current) + kv('Area', a.injury_area) + kv('Severity', a.injury_severity) + kv('Cleared to train', a.injury_cleared) + kv('Past injuries/surgeries', a.injury_past) + kv('Current pain', a.pain_now) + kv("Doctor's notes", a.doctor_notes))}
     ${sec('Training background', kv('Years training', a.years_training) + kv('Lifting experience', a.lifting_experience) + kv('Past programs', a.past_programs) + kv('What worked', a.what_worked) + kv("What didn't", a.what_didnt) + kv('Best lifts', [a.squat_max && ('Squat ' + a.squat_max), a.bench_max && ('Bench ' + a.bench_max), a.deadlift_max && ('DL ' + a.deadlift_max)].filter(Boolean).join(' / ')) + kv('Strong but not explosive', a.strong_not_explosive ? 'Yes' : '—'))}
-    ${sec('Equipment', list('Checked', a.equipment) + kv('Details', a.equipment_detail))}
-    ${sec('Availability & season', list('Components', a.components) + kv('Hit days/week', a.hit_days_per_week) + kv('Lift days/week', a.lift_days_per_week) + list('Training weekdays', a.train_days) + kv('Session length', a.session_length) + kv('Games/week', a.games_per_week) + kv('Season phase', a.season_phase) + kv('Season detail', a.season_detail) + kv('Schedule constraints', a.schedule_constraints))}
-    ${sec('Hitting resources', kv('Tee', yn(a.has_tee)) + kv('Net', yn(a.has_net)) + kv('Cage', yn(a.has_cage)) + kv('Machine', yn(a.has_machine)) + kv('Feed partner', yn(a.has_feed_partner)) + kv('Feeder detail', a.feed_partner_detail) + list('Environments', a.hitting_progression))}
+    ${sec('Equipment', (a.missing_equipment && a.missing_equipment.length ? kv('Does NOT have', a.missing_equipment.join(', ')) : kv('Missing equipment', 'Has everything')) + kv('Details', a.equipment_detail))}
+    ${sec('Availability & season', list('Components', a.components) + kv('Hit days/week', a.hit_days_per_week) + kv('Lift days/week', a.lift_days_per_week) + list('Training weekdays', a.train_days) + list('Recovery / mobility days', a.weekly_days) + kv('Session length', a.session_length) + kv('Games/week', a.games_per_week) + kv('Season phase', a.season_phase) + kv('Season detail', a.season_detail) + kv('Schedule constraints', a.schedule_constraints))}
+    ${sec('Hitting resources', (a.missing_hitting && a.missing_hitting.length ? kv('Does NOT have', a.missing_hitting.join(', ')) : kv('Missing resources', 'Has everything')) + kv('Feeder detail', a.feed_partner_detail) + list('Environments', a.hitting_progression))}
     ${sec('Lifestyle', kv('Sleep', [a.sleep_hours, a.sleep_quality].filter(Boolean).join(' ')) + kv('Nutrition', a.nutrition) + kv('Stress', a.stress) + kv('Other notes', a.other_notes))}`,
   });
 }

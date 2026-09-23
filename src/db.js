@@ -808,6 +808,33 @@ db.exec(`CREATE TABLE IF NOT EXISTS intake_custom_questions (
     } catch (e) { /* best effort */ }
     db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('migration_medball_youtube_v2', ?)").run(`${fixed}f/${purged}p`);
   }
+  // Bobby's rule (Sep 23 2026): lifting, mobility, and med ball are ALL
+  // YouTube videos — never the Drive library. Repair mobility + recovery
+  // items that were auto-linked to Drive videos: re-point at the YouTube
+  // registry where it has them, clear the rest. Manual links never touched.
+  // Then fill any blanks from the registry (YouTube only for these blocks).
+  const mflag = db.prepare("SELECT value FROM settings WHERE key = 'migration_mobility_youtube'").get();
+  if (!mflag) {
+    let fixed = 0;
+    let purged = 0;
+    let relinked = 0;
+    try {
+      const vl = require('./video_links');
+      const rows = db.prepare('SELECT id, program_json FROM remote_programs').all();
+      const upd = db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?');
+      for (const row of rows) {
+        let prog;
+        try { prog = JSON.parse(row.program_json || '{}'); } catch (e) { continue; }
+        let changed = false;
+        const r = vl.repairMobilityLinks(prog);
+        if (r.fixed > 0 || r.purged > 0) { fixed += r.fixed; purged += r.purged; changed = true; }
+        const n = vl.attachVideoLinks(prog, []);
+        if (n > 0) { relinked += n; changed = true; }
+        if (changed) upd.run(JSON.stringify(prog), new Date().toISOString(), row.id);
+      }
+    } catch (e) { /* best effort */ }
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('migration_mobility_youtube', ?)").run(`${fixed}f/${purged}p/${relinked}r`);
+  }
 }
 // NOTE: starter lifting templates are seeded after the settings table is
 // created below (guarded by a settings flag).
