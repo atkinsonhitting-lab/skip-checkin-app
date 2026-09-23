@@ -972,3 +972,64 @@ a.stat-card { padding: 14px 8px; }
   cursor: pointer;
 }
 .talk-point:active { border-color: var(--red); color: var(--text); }
+
+/* Lock In routine player — immersive, app-grade (Sep 23 2026) */
+.routine-hero {
+  border-radius: 18px; padding: 20px; margin: 12px 0;
+  background: linear-gradient(135deg, #1a1a1e 0%, #232328 100%);
+  border: 1px solid var(--line);
+  display: flex; align-items: center; gap: 16px;
+  cursor: pointer; width: 100%; text-align: left; color: var(--text);
+}
+.routine-hero:active { transform: scale(0.98); }
+.routine-hero.done { border-color: var(--ok); }
+.routine-hero-icon {
+  width: 52px; height: 52px; border-radius: 16px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 26px; background: rgba(225,6,0,0.12);
+}
+.routine-hero.done .routine-hero-icon { background: rgba(34,197,94,0.15); }
+.routine-hero-body { flex: 1; }
+.routine-hero-title { font-size: 17px; font-weight: 700; margin: 0 0 2px; }
+.routine-hero-sub { font-size: 13px; color: var(--muted); margin: 0; }
+.routine-hero-go { font-size: 20px; color: var(--muted); }
+.routine-hero.done .routine-hero-go { color: var(--ok); }
+
+/* Full-screen player */
+.routine-player {
+  position: fixed; inset: 0; z-index: 100;
+  background: #0c0c0e; color: #fff;
+  display: flex; flex-direction: column;
+  padding: calc(12px + env(safe-area-inset-top)) 24px calc(24px + env(safe-area-inset-bottom));
+}
+.routine-player[hidden] { display: none; }
+.rp-top { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+.rp-close { background: none; border: none; color: #888; font-size: 22px; cursor: pointer; padding: 4px; }
+.rp-progress { flex: 1; height: 3px; background: #2a2a2e; border-radius: 2px; overflow: hidden; }
+.rp-progress-fill { height: 100%; background: var(--red); border-radius: 2px; transition: width 0.4s ease; }
+.rp-count { font-size: 12px; color: #888; min-width: 36px; text-align: right; }
+.rp-stage { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; }
+.rp-kind { font-size: 12px; text-transform: uppercase; letter-spacing: 0.15em; color: var(--red); margin-bottom: 16px; font-weight: 700; }
+.rp-title { font-size: 30px; font-weight: 800; margin: 0 0 16px; line-height: 1.2; }
+.rp-detail { font-size: 17px; line-height: 1.6; color: #b8b8be; margin: 0; max-width: 340px; }
+.rp-verse { font-size: 19px; line-height: 1.7; font-style: italic; color: #e8e8ec; margin: 0 0 12px; max-width: 340px; }
+.rp-ref { font-size: 14px; color: #8b5cf6; font-weight: 700; margin-bottom: 16px; }
+.rp-breath {
+  width: 120px; height: 120px; border-radius: 50%; margin: 24px auto;
+  background: radial-gradient(circle, rgba(225,6,0,0.35) 0%, rgba(225,6,0,0.08) 70%);
+  border: 2px solid rgba(225,6,0,0.5);
+  animation: rp-breathe 8s infinite ease-in-out;
+}
+@keyframes rp-breathe {
+  0%, 100% { transform: scale(0.85); opacity: 0.7; }
+  50% { transform: scale(1.15); opacity: 1; }
+}
+.rp-nav { display: flex; gap: 12px; margin-top: 24px; }
+.rp-btn {
+  flex: 1; padding: 16px; border-radius: 14px; border: none;
+  font-size: 17px; font-weight: 700; cursor: pointer;
+}
+.rp-btn-next { background: var(--red); color: #fff; }
+.rp-btn-back { background: #1e1e22; color: #fff; flex: 0 0 72px; }
+.rp-btn:active { transform: scale(0.97); }
+.rp-done-icon { font-size: 64px; margin-bottom: 16px; }

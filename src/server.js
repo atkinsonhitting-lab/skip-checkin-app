@@ -2408,30 +2408,33 @@ app.get('/mental-game', requireLogin, (req, res) => {
   const bibleOptIn = bsRow && bsRow.bible_study === 1;
   const checkedInToday = !!db.prepare("SELECT 1 FROM checkins WHERE user_id = ? AND date(created_at, 'unixepoch', 'localtime') = date('now', 'localtime')").get(req.user.id);
   // Routine data (Sep 23 2026)
+  // Bobby (Sep 23 2026): detailed morning routine — each step has a title
+  // and what to actually do. Bible verse is woven in for opt-ins.
   const DEFAULT_MORNING = [
-    '10 slow breaths — feet on the ground, start calm',
-    'Say your keyword out loud',
-    'See 3 good at-bats in your head — feel them',
-    'Read your one focus for today',
-    'Move — stretch, walk, get the blood going',
+    { text: '10 slow breaths', detail: 'Feet on the ground. In for 4, out for 6. Start calm before the day starts.' },
+    { text: 'Say your keyword out loud', detail: 'One word. Yours. Say it like you mean it — this is your reset switch.' },
+    { text: 'See 3 good at-bats', detail: 'In your head, feel them. The pitch coming in, the barrel meeting it, the result. Make it vivid.' },
+    { text: "Read your one focus for today", detail: 'Just one thing. Not five. One. Write it down if you have to.' },
+    { text: 'Move', detail: 'Stretch, walk, get the blood going. Two minutes minimum — wake the body up.' },
   ];
   const DEFAULT_PREGAME = [
-    '3 slow breaths — feet on the ground, leave the day behind',
-    'Say your keyword out loud',
-    'See 3 good at-bats in your head — feel them',
-    'Shake it out — roll your shoulders, loosen up',
-    'Lock in: "I\'m ready. Attack."',
+    { text: '3 slow breaths', detail: 'Feet on the ground. Leave the day behind — school, phone, whatever. This is game time now.' },
+    { text: 'Say your keyword out loud', detail: 'Lock in. One word, full conviction.' },
+    { text: 'See 3 good at-bats', detail: 'Feel them like they already happened. You\'ve done this before.' },
+    { text: 'Shake it out', detail: 'Roll your shoulders, loosen your jaw, unclench everything. Tension is the enemy.' },
+    { text: 'Lock in', detail: '"I\'m ready. Attack." Say it to yourself and believe it.' },
   ];
   const DEFAULT_PRACTICE = [
-    '3 breaths — clear the last class, last game, whatever',
-    'Set one intention: "Today I\'m working on ___"',
-    'Say your keyword',
-    'See one perfect rep in your head before you start',
+    { text: '3 breaths', detail: 'Clear the last class, the last game, whatever\'s on your mind. Be here now.' },
+    { text: 'Set one intention', detail: '"Today I\'m working on ___." Fill in the blank. Practice with a purpose.' },
+    { text: 'Say your keyword', detail: 'Get your head right before the first rep.' },
+    { text: 'See one perfect rep', detail: 'In your head, before you start. Feel the whole thing go right.' },
   ];
+  const toItems = (arr) => arr.map(t => typeof t === 'string' ? { text: t, done: false } : { text: t.text, detail: t.detail || '', done: false });
   let routineRow = db.prepare('SELECT morning_json, pregame_json, prepractice_json FROM mental_routines WHERE user_id = ?').get(req.user.id);
   if (!routineRow) {
     db.prepare(`INSERT INTO mental_routines (user_id, morning_json, pregame_json, prepractice_json, updated_at) VALUES (?, ?, ?, ?, ?)`)
-      .run(req.user.id, JSON.stringify(DEFAULT_MORNING.map(t => ({ text: t, done: false }))), JSON.stringify(DEFAULT_PREGAME.map(t => ({ text: t, done: false }))), JSON.stringify(DEFAULT_PRACTICE.map(t => ({ text: t, done: false }))), new Date().toISOString());
+      .run(req.user.id, JSON.stringify(toItems(DEFAULT_MORNING)), JSON.stringify(toItems(DEFAULT_PREGAME)), JSON.stringify(toItems(DEFAULT_PRACTICE)), new Date().toISOString());
     routineRow = db.prepare('SELECT morning_json, pregame_json, prepractice_json FROM mental_routines WHERE user_id = ?').get(req.user.id);
   }
   // Backfill: existing rows may have empty morning/pregame/practice lists
@@ -2441,9 +2444,52 @@ app.get('/mental-game', requireLogin, (req, res) => {
     const g = JSON.parse(routineRow.pregame_json || '[]');
     const p = JSON.parse(routineRow.prepractice_json || '[]');
     let changed = false;
-    if (!m.length) { routineRow.morning_json = JSON.stringify(DEFAULT_MORNING.map(t => ({ text: t, done: false }))); changed = true; }
-    if (!g.length) { routineRow.pregame_json = JSON.stringify(DEFAULT_PREGAME.map(t => ({ text: t, done: false }))); changed = true; }
-    if (!p.length) { routineRow.prepractice_json = JSON.stringify(DEFAULT_PRACTICE.map(t => ({ text: t, done: false }))); changed = true; }
+    if (!m.length) { routineRow.morning_json = JSON.stringify(toItems(DEFAULT_MORNING)); changed = true; }
+    if (!g.length) { routineRow.pregame_json = JSON.stringify(toItems(DEFAULT_PREGAME)); changed = true; }
+    if (!p.length) { routineRow.prepractice_json = JSON.stringify(toItems(DEFAULT_PRACTICE)); changed = true; }
+    // Upgrade: old default items (plain text, no detail) get the detailed
+    // versions. Matches both the very old one-liners and the short titles.
+    // Custom user items are untouched.
+    const OLD_DEFAULTS = [
+      '10 slow breaths — feet on the ground, start calm',
+      'Say your keyword out loud',
+      'See 3 good at-bats in your head — feel them',
+      'Read your one focus for today',
+      'Move — stretch, walk, get the blood going',
+      '3 slow breaths — feet on the ground, leave the day behind',
+      'Shake it out — roll your shoulders, loosen up',
+      'Lock in: "I\'m ready. Attack."',
+      '3 breaths — clear the last class, last game, whatever',
+      'Set one intention: "Today I\'m working on ___"',
+      'Say your keyword',
+      'See one perfect rep in your head before you start',
+    ];
+    const upgrade = (items, defaults) => {
+      const byText = {};
+      for (const d of defaults) byText[d.text.toLowerCase()] = d;
+      // Map old one-liners to their new detailed step by position.
+      const oldToNew = {};
+      const allNew = [...DEFAULT_MORNING, ...DEFAULT_PREGAME, ...DEFAULT_PRACTICE];
+      OLD_DEFAULTS.forEach((old, i) => { if (allNew[i]) oldToNew[old.toLowerCase()] = allNew[i]; });
+      let touched = false;
+      const out = items.map((it) => {
+        if (!it || it.detail) return it;
+        const key = String(it.text || '').toLowerCase();
+        const d = byText[key] || oldToNew[key];
+        if (d) {
+          touched = true;
+          return { text: d.text, detail: d.detail, done: !!it.done };
+        }
+        return it;
+      });
+      return { out, touched };
+    };
+    const um = upgrade(m, DEFAULT_MORNING);
+    const ug = upgrade(g, DEFAULT_PREGAME);
+    const up = upgrade(p, DEFAULT_PRACTICE);
+    if (um.touched) { routineRow.morning_json = JSON.stringify(um.out); changed = true; }
+    if (ug.touched) { routineRow.pregame_json = JSON.stringify(ug.out); changed = true; }
+    if (up.touched) { routineRow.prepractice_json = JSON.stringify(up.out); changed = true; }
     if (changed) {
       db.prepare('UPDATE mental_routines SET morning_json = ?, pregame_json = ?, prepractice_json = ?, updated_at = ? WHERE user_id = ?')
         .run(routineRow.morning_json, routineRow.pregame_json, routineRow.prepractice_json, new Date().toISOString(), req.user.id);
@@ -2510,7 +2556,8 @@ app.post('/mental-game/routine/add', requireLogin, (req, res) => {
 });
 app.post('/mental-game/routine/done', requireLogin, (req, res) => {
   const today = todayChicagoDate();
-  const card = req.body.card === 'pregame' ? 'pregame' : req.body.card === 'practice' ? 'practice' : 'routine';
+  const raw = req.body.card || req.body.which || '';
+  const card = raw === 'pregame' ? 'pregame' : raw === 'practice' ? 'practice' : 'routine';
   db.prepare('INSERT OR IGNORE INTO mental_card_done (user_id, day, card, completed_at) VALUES (?, ?, ?, ?)')
     .run(req.user.id, today, card, new Date().toISOString());
   res.redirect('/mental-game');

@@ -870,3 +870,93 @@ window.SkipMic = (function () {
       .catch(() => { setStatus('Something went wrong — just fill the fields in.'); fields.hidden = false; });
   });
 })();
+
+// Lock In routine player (Sep 23 2026): immersive full-screen, one step at
+// a time. App, not a checklist.
+(function () {
+  const player = document.getElementById('routine-player');
+  if (!player) return;
+  const stage = document.getElementById('rp-stage');
+  const fill = document.getElementById('rp-fill');
+  const count = document.getElementById('rp-count');
+  const nextBtn = document.getElementById('rp-next');
+  const backBtn = document.getElementById('rp-back');
+  const closeBtn = document.getElementById('rp-close');
+  let steps = [], idx = 0, which = '';
+
+  function render() {
+    const s = steps[idx];
+    const total = steps.length;
+    fill.style.width = ((idx + 1) / (total + 1)) * 100 + '%';
+    count.textContent = (idx + 1) + ' / ' + total;
+    backBtn.style.visibility = idx === 0 ? 'hidden' : 'visible';
+    nextBtn.textContent = idx === total - 1 ? 'Finish' : 'Next';
+    let html = '';
+    if (s.kind === 'bible') {
+      html = `<div class="rp-kind">Daily verse</div>
+        <p class="rp-verse">\u201c${escHtml(s.verse)}\u201d</p>
+        <div class="rp-ref">${escHtml(s.ref)}${s.theme ? ' · ' + escHtml(s.theme) : ''}</div>
+        <p class="rp-detail">Read it twice. Let one phrase stick — carry it today.</p>`;
+    } else if (s.kind === 'breath') {
+      html = `<div class="rp-kind">Breathe</div>
+        <div class="rp-breath"></div>
+        <h2 class="rp-title">${escHtml(s.title)}</h2>
+        ${s.detail ? `<p class="rp-detail">${escHtml(s.detail)}</p>` : ''}`;
+    } else {
+      html = `<div class="rp-kind">${escHtml(whichLabel())}</div>
+        <h2 class="rp-title">${escHtml(s.title)}</h2>
+        ${s.detail ? `<p class="rp-detail">${escHtml(s.detail)}</p>` : ''}`;
+    }
+    stage.innerHTML = html;
+  }
+  function whichLabel() {
+    return which === 'morning' ? 'Morning routine' : which === 'pregame' ? 'Game day' : which === 'practice' ? 'Practice day' : 'Exercise';
+  }
+  function escHtml(t) {
+    return String(t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function open(data) {
+    which = data.which;
+    steps = data.steps || [];
+    if (!steps.length) return;
+    idx = 0;
+    player.hidden = false;
+    document.body.style.overflow = 'hidden';
+    render();
+  }
+  function close() {
+    player.hidden = true;
+    document.body.style.overflow = '';
+  }
+  function finish() {
+    // Final screen
+    fill.style.width = '100%';
+    count.textContent = '';
+    stage.innerHTML = `<div class="rp-done-icon">🔒</div>
+      <h2 class="rp-title">You're locked in.</h2>
+      <p class="rp-detail">Go attack today.</p>`;
+    nextBtn.textContent = 'Done';
+    backBtn.style.visibility = 'hidden';
+    nextBtn.onclick = () => {
+      // Mark the routine done server-side, then close.
+      fetch('/mental-game/routine/done', {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: 'which=' + encodeURIComponent(which === 'morning' ? 'morning' : which),
+      }).finally(() => location.reload());
+    };
+  }
+  nextBtn.onclick = () => {
+    if (idx < steps.length - 1) { idx++; render(); }
+    else finish();
+  };
+  backBtn.onclick = () => { if (idx > 0) { idx--; render(); } };
+  closeBtn.onclick = close;
+
+  document.querySelectorAll('[data-routine]').forEach((el) => {
+    el.addEventListener('click', () => {
+      try { open(JSON.parse(el.getAttribute('data-steps'))); }
+      catch (e) {}
+    });
+  });
+})();

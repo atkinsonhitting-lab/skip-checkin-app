@@ -3146,12 +3146,64 @@ function mentalGamePage(user, data) {
   
   const gpDone = pregame.done || practice.done;
   
+  // Routine player data (Sep 23 2026): immersive, app-grade. Bible verse is
+  // woven into the morning routine for opt-ins — not a separate card.
+  const playerData = (items, which) => {
+    const steps = (items || []).map((it) => ({
+      title: it.text || '',
+      detail: it.detail || '',
+      kind: /breath/i.test(it.text || '') ? 'breath' : 'step',
+    }));
+    return esc(JSON.stringify({ which, steps }));
+  };
+  const bibleStep = (bibleOptIn && bibleVerse) ? {
+    title: 'Today\u2019s verse',
+    detail: '',
+    kind: 'bible',
+    verse: bibleVerse.text,
+    ref: bibleVerse.ref,
+    theme: bibleVerse.theme,
+  } : null;
+  const morningSteps = (() => {
+    const steps = (routineItems || []).map((it) => ({
+      title: it.text || '',
+      detail: it.detail || '',
+      kind: /breath/i.test(it.text || '') ? 'breath' : 'step',
+    }));
+    // Bible goes second — after breaths, before the keyword.
+    if (bibleStep && steps.length) steps.splice(1, 0, bibleStep);
+    else if (bibleStep) steps.push(bibleStep);
+    return steps;
+  })();
+  const heroCard = (which, icon, title, items, done, timeEst) => `
+    <button type="button" class="routine-hero${done ? ' done' : ''}" data-routine="${which}"
+      data-steps="${esc(JSON.stringify({ which, steps: which === 'morning' ? morningSteps : (items || []).map((it) => ({ title: it.text || '', detail: it.detail || '', kind: /breath/i.test(it.text || '') ? 'breath' : 'step' })) }))}">
+      <span class="routine-hero-icon">${done ? '✓' : icon}</span>
+      <span class="routine-hero-body">
+        <span class="routine-hero-title">${esc(title)}</span>
+        <span class="routine-hero-sub">${(items || []).length} steps · ~${timeEst}</span>
+      </span>
+      <span class="routine-hero-go">${done ? '✓' : '›'}</span>
+    </button>`;
+
   const cardsHtml = b.plan ? `
     <h2 class="section-title">Today</h2>
-    ${card('routine', 'Morning Routine', routineDone, routineContent)}
-    ${card('gamepractice', 'Game Day / Practice Day', gpDone, gamePracticeContent)}
-    ${exercise ? card('exercise', 'Daily Exercise', exerciseDone, exerciseContent) : ''}
-    ${(bibleOptIn && bibleVerse) ? card('bible', 'Bible Study', !!data.bibleDone, bibleContent) : ''}
+    ${heroCard('morning', '🌅', 'Morning Routine', routineItems, routineDone, '3 min')}
+    ${heroCard('pregame', '⚾', 'Game Day', pregameItems, pregame.done, '2 min')}
+    ${heroCard('practice', '🔥', 'Practice Day', practiceItems, practice.done, '2 min')}
+    ${exercise ? heroCard('exercise', '🧠', 'Daily Exercise', [{ text: exercise.title, detail: exercise.action }], exerciseDone, '5 min') : ''}
+    <div class="routine-player" id="routine-player" hidden>
+      <div class="rp-top">
+        <button type="button" class="rp-close" id="rp-close" aria-label="Close">✕</button>
+        <div class="rp-progress"><div class="rp-progress-fill" id="rp-fill"></div></div>
+        <span class="rp-count" id="rp-count"></span>
+      </div>
+      <div class="rp-stage" id="rp-stage"></div>
+      <div class="rp-nav">
+        <button type="button" class="rp-btn rp-btn-back" id="rp-back" aria-label="Back">‹</button>
+        <button type="button" class="rp-btn rp-btn-next" id="rp-next">Next</button>
+      </div>
+    </div>
     <h2 class="section-title" style="margin-top:16px">Yours</h2>
     ${planCard}
     ${card('keys', 'Your Keys', false, keysContent)}
