@@ -202,20 +202,27 @@ function repairMobilityLinks(prog) {
 }
 function repairMedBallLinks(prog) {
   let fixed = 0;
+  let purged = 0;
   const blocks = prog && Array.isArray(prog.routine) ? prog.routine : [];
+  const isYT = (u) => /^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\//i.test(String(u || ''));
   for (const c of blocks) {
     if (!/med\s*ball/i.test(String((c && c.category) || ''))) continue;
     for (const it of (c && c.items) || []) {
-      if (!it || it.video_source === 'manual') continue;
+      if (!it || it.video_source === 'manual' || !it.video) continue;
       const yt = matchRegistryOnly(it.drill);
       if (yt && it.video !== yt) {
         it.video = yt;
         it.video_source = 'auto';
         fixed++;
+      } else if (!yt && !isYT(it.video)) {
+        // Bobby's rule: med ball is YouTube-only. A non-YouTube auto-link
+        // with no verified registry match goes blank — never the wrong video.
+        it.video = '';
+        purged++;
       }
     }
   }
-  return fixed;
+  return { fixed, purged };
 }
 
 // Visible library videos as match candidates (custom_name wins; hidden and

@@ -170,8 +170,12 @@ const DEMO_VIDEOS = [
   function speedRow(obj, section) {
     obj.intent = obj.intent || '';
     var wrap = document.createElement('div');
-    wrap.className = 'le-row';
+    wrap.className = 'le-row' + (obj.held ? ' le-held' : '');
     wrap.innerHTML =
+      (obj.held
+        ? '<div class="le-held-banner le-full">⏸ HELD for review — ' + esc(obj.held_reason || 'needs a safe replacement') +
+          '. The athlete can\u2019t see this yet. Rename it above to release it.</div>'
+        : '') +
       '<label class="le-f le-grow">Exercise<input data-f="name" value="' + esc(obj.name) + '" placeholder="e.g. 10-Yard Sprint"></label>' +
       '<label class="le-f le-vol">Volume<input data-f="volume" value="' + esc(obj.volume) + '" placeholder="4×10y"></label>' +
       '<button type="button" class="le-x" aria-label="Remove">×</button>' +
@@ -242,8 +246,12 @@ const DEMO_VIDEOS = [
         s.charAt(0).toUpperCase() + s.slice(1) + '</option>';
     }).join('');
     var wrap = document.createElement('div');
-    wrap.className = 'le-lift';
+    wrap.className = 'le-lift' + (obj.held ? ' le-held' : '');
     wrap.innerHTML =
+      (obj.held
+        ? '<div class="le-held-banner">⏸ HELD for review — ' + esc(obj.held_reason || 'needs a safe replacement') +
+          '. The athlete can\u2019t see this yet. Rename it above to release it.</div>'
+        : '') +
       '<div class="le-lift-head"><strong>' + (esc(obj.name) || 'New lift') + '</strong>' +
       '<span class="le-tools">' +
       '<button type="button" data-t="up" aria-label="Move up">↑</button>' +
@@ -314,7 +322,13 @@ const DEMO_VIDEOS = [
     if (!S.days.length) {
       var p = document.createElement('p');
       p.className = 'hint';
-      p.textContent = 'No days yet — tap + Day to build one.';
+      // If the server sent days but the editor state lost them (stale cache,
+      // interrupted load), say so plainly instead of the misleading "no days".
+      if (S.serverDayCount > 0) {
+        p.textContent = 'The program has ' + S.serverDayCount + ' days but they didn\u2019t load — pull to refresh and try again.';
+      } else {
+        p.textContent = 'No days yet — tap + Day to build one.';
+      }
       host.appendChild(p);
       return;
     }

@@ -573,6 +573,7 @@ a.btn-ghost { text-decoration: none; display: inline-block; }
 .video-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
 .video-card { display: block; text-decoration: none; color: var(--text); padding: 0; overflow: hidden; }
 .video-thumb { height: 90px; display: flex; align-items: center; justify-content: center; font-size: 28px; background: #111; color: #fff; }
+.video-thumbimg { width: 100%; height: 90px; object-fit: cover; background: #111; display: block; border-radius: 8px 8px 0 0; }
 .video-name { padding: 10px 12px; font-size: 14px; }
 .video-player { position: relative; padding-top: 56.25%; border-radius: 12px; overflow: hidden; background: #000; }
 .video-player iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; }
@@ -613,6 +614,17 @@ details[open] > .routine-summary::after { content: '\25B4'; }
 .day-pill.active { background: var(--red); border-color: var(--red); color: #fff; }
 .day-pill.pregame-pill { border-color: var(--red); color: var(--red); }
 .day-pill.pregame-pill.active { background: var(--red); border-color: var(--red); color: #fff; }
+/* Lifting tab: week strip — the athlete's real seven-day calendar (Sep 23 2026) */
+.wk-strip { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin: 0 0 14px; }
+.wk-pill { display: flex; flex-direction: column; align-items: center; gap: 2px; background: var(--bg2); border: 1px solid var(--line); color: var(--text); border-radius: 10px; padding: 8px 2px; text-decoration: none; min-width: 0; }
+.wk-d { font-size: 11px; font-weight: 700; opacity: 0.65; text-transform: uppercase; letter-spacing: 0.04em; }
+.wk-l { font-size: 11px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+a.wk-pill { font-weight: 800; }
+.wk-pill.wk-active { border-color: var(--red); box-shadow: 0 0 0 1px var(--red); }
+.wk-pill.wk-today { background: var(--red); border-color: var(--red); color: #fff; }
+.wk-pill.wk-today .wk-d { opacity: 0.85; }
+.wk-pill.wk-rest { opacity: 0.55; }
+.wk-pill.wk-na { opacity: 0.55; }
 .streak-card { display: flex; align-items: center; gap: 14px; }
 .streak-num { font-size: 42px; font-weight: 800; color: var(--red); line-height: 1; }
 .streak-label { font-weight: 800; font-size: 15px; }
@@ -1438,6 +1450,10 @@ main.wrap { animation: pageIn 0.18s ease-out; }
 .le-lift { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 10px; }
 .le-lift-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; }
 .le-lift-head strong { font-size: 15.5px; }
+/* Held-for-coach-review (Sep 2026): unsafe until Bobby picks a replacement. */
+.le-held { border: 2px dashed #e8a13c; }
+.le-held-banner { background: #fff7e8; border: 1px solid #e8a13c; border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; font-size: 13px; color: #7a4a00; }
+.lift-held { border: 2px dashed #e8a13c; background: #fffdf6; }
 .le-tools { display: flex; gap: 4px; }
 .le-tools button {
   width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line);

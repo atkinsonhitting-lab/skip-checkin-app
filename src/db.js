@@ -835,6 +835,30 @@ db.exec(`CREATE TABLE IF NOT EXISTS intake_custom_questions (
     } catch (e) { /* best effort */ }
     db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('migration_mobility_youtube', ?)").run(`${fixed}f/${purged}p/${relinked}r`);
   }
+  // Med-ball repair (Sep 23 2026): same YouTube-only rule as mobility.
+  // The earlier migration never ran repairMedBallLinks, so med-ball blocks
+  // can still carry wrong Drive/library links. Re-point at verified
+  // registry matches; blank the rest. Hitting blocks are never touched.
+  const mbflag = db.prepare("SELECT value FROM settings WHERE key = 'migration_medball_youtube'").get();
+  if (!mbflag) {
+    let fixed = 0;
+    let purged = 0;
+    try {
+      const vl = require('./video_links');
+      const rows = db.prepare('SELECT id, program_json FROM remote_programs').all();
+      const upd = db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?');
+      for (const row of rows) {
+        let prog;
+        try { prog = JSON.parse(row.program_json || '{}'); } catch (e) { continue; }
+        const r = vl.repairMedBallLinks(prog);
+        if (r.fixed > 0 || r.purged > 0) {
+          fixed += r.fixed; purged += r.purged;
+          upd.run(JSON.stringify(prog), new Date().toISOString(), row.id);
+        }
+      }
+    } catch (e) { /* best effort */ }
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('migration_medball_youtube', ?)").run(`${fixed}f/${purged}p`);
+  }
 }
 // NOTE: starter lifting templates are seeded after the settings table is
 // created below (guarded by a settings flag).
@@ -857,6 +881,29 @@ db.exec('CREATE INDEX IF NOT EXISTS idx_video_cat ON video_library(category, nam
   const cols = db.prepare('PRAGMA table_info(video_library)').all().map((c) => c.name);
   if (!cols.includes('custom_name')) db.exec("ALTER TABLE video_library ADD COLUMN custom_name TEXT DEFAULT '';");
   if (!cols.includes('hidden')) db.exec('ALTER TABLE video_library ADD COLUMN hidden INTEGER DEFAULT 0;');
+}
+// Category display metadata (Sep 23 2026): Bobby's presentation layer for
+// the Drive folder names. The sync never touches this table — titles,
+// order, and visibility survive every sync. Fixes the "Apporach" typo and
+// lets him order/hide categories instead of alphabetical pills.
+db.exec(`CREATE TABLE IF NOT EXISTS category_meta (
+  category TEXT PRIMARY KEY,
+  title TEXT NOT NULL DEFAULT '',
+  blurb TEXT NOT NULL DEFAULT '',
+  emoji TEXT NOT NULL DEFAULT '',
+  sort_order INTEGER NOT NULL DEFAULT 999,
+  hidden INTEGER NOT NULL DEFAULT 0
+);`);
+{
+  // Seed display titles for known Drive categories (only when empty).
+  const seed = [
+    ['Apporach', 'Approach', '', '🎯', 1],
+  ];
+  for (const [cat, title, blurb, emoji, so] of seed) {
+    db.prepare(
+      'INSERT OR IGNORE INTO category_meta (category, title, blurb, emoji, sort_order, hidden) VALUES (?, ?, ?, ?, ?, 0)'
+    ).run(cat, title, blurb, emoji, so);
+  }
 }
 db.exec(`CREATE TABLE IF NOT EXISTS library_sync_state (
   key TEXT PRIMARY KEY,
@@ -1295,6 +1342,41 @@ CREATE TABLE IF NOT EXISTS settings (
       console.log(`Lifting rebuild v4: removed ${removed} v3 template(s), added ${added} system template(s), assigned M1 to ${assigned} athlete(s), kept ${kept} custom.`);
     }
   }
+
+  // Lifting v4b (Sep 23 2026, Bobby: "more intense, focus on rotation and
+  // triphasic"). Refreshes the v4 system templates in place. Updates a
+  // template row ONLY when its program_json is byte-identical to the v4
+  // build — a coach-customized row is kept as-is. Athletes point at template
+  // rows via remote_programs.lifting_program_id, so updating the row updates
+  // everyone on that block.
+  {
+    const done = db.prepare("SELECT value FROM settings WHERE key = 'lifting_update_v4b'").get();
+    if (!done) {
+      const { YT_V4, buildPrograms } = require('./lifting_v4');
+      const programs = buildPrograms(YT_V4);
+      const OLD_HASH = {
+        'Different Animal — Offseason M1 (Absorb)': '66a9f39a666eca23',
+        'Different Animal — Offseason M2 (Produce)': '3cfae2bf64bd4738',
+        'Different Animal — Offseason M3 (Express)': 'dce0651cb8475cbb',
+        'Different Animal — In-Season (3-Day)': '6d568a168c282f43',
+      };
+      const crypto = require('crypto');
+      const now = new Date().toISOString();
+      let updated = 0, kept = 0;
+      for (const p of programs) {
+        const row = db.prepare('SELECT id, program_json FROM lifting_programs WHERE name = ? AND is_template = 1').get(p.name);
+        if (!row) { kept++; continue; }
+        const h = crypto.createHash('sha256').update(row.program_json || '').digest('hex').slice(0, 16);
+        if (h === OLD_HASH[p.name]) {
+          db.prepare('UPDATE lifting_programs SET program_json = ?, updated_at = ? WHERE id = ?')
+            .run(JSON.stringify({ days: p.days, notes: p.notes }), now, row.id);
+          updated++;
+        } else { kept++; }
+      }
+      db.prepare("INSERT INTO settings (key, value) VALUES ('lifting_update_v4b', '1')").run();
+      console.log(`Lifting v4b: updated ${updated} template(s), kept ${kept} (customized or missing).`);
+    }
+  }
 }
 
 // One-time cleanup (Sep 15 2026): Bobby asked to remove ALL test accounts
@@ -1428,8 +1510,13 @@ db.exec(`CREATE TABLE IF NOT EXISTS mental_routines (
   morning_json TEXT NOT NULL DEFAULT '[]',
   prepractice_json TEXT NOT NULL DEFAULT '[]',
   pregame_json TEXT NOT NULL DEFAULT '[]',
+  source TEXT NOT NULL DEFAULT 'default',
   updated_at TEXT NOT NULL DEFAULT ''
 );`);
+// 'source' tracks where a hitter's routines came from (Sep 23 2026, Bobby):
+// 'default' = the generic starter, 'personalized' = built from his
+// questionnaire answers, 'custom' = he edited them himself (never auto-touch).
+try { db.exec(`ALTER TABLE mental_routines ADD COLUMN source TEXT NOT NULL DEFAULT 'default'`); } catch (e) { /* already there */ }
 
 // Mental keys (Sep 15 2026): things a hitter asks Coach Skip to save to their
 // Mental Game tab from the chat ("add this to my mental game"). Shown on the

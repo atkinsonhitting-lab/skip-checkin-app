@@ -2,13 +2,19 @@
 
 // Asset cache-busting (Bobby, Sep 23 2026): hash CSS/JS at boot so phones
 // pick up new versions immediately — no stale-cache roulette.
+// (Fix Sep 23 2026: was only hashing app.js + style.css, so lift-editor.js,
+// workout.js, session.js and checkin.js could go stale on phones after a
+// deploy — exactly the "editor shows no days" class of ghost bug.)
 const ASSET_V = (() => {
   try {
     const crypto = require('crypto');
     const fs = require('fs');
     const path = require('path');
-    const h = (f) => crypto.createHash('md5').update(fs.readFileSync(path.join(__dirname, '..', 'public', f))).digest('hex').slice(0, 8);
-    return h('app.js') + h('style.css');
+    const h = (f) => {
+      try { return crypto.createHash('md5').update(fs.readFileSync(path.join(__dirname, '..', 'public', f))).digest('hex').slice(0, 8); }
+      catch (e) { return 'missing'; }
+    };
+    return ['app.js', 'checkin.js', 'lift-editor.js', 'session.js', 'workout.js', 'live.js', 'style.css'].map(h).join('');
   } catch (e) { return 'dev'; }
 })();
 
@@ -2081,7 +2087,7 @@ function coachHittersPage(user, userStats, opts) {
           <div class="athlete-card-meta">${a.total} check-in${a.total === 1 ? '' : 's'}${a.streak ? ` · 🔥 ${a.streak}-day streak` : ''}${a.weekCount != null ? ` · ${a.weekCount}/7 days` : ''}${a.last ? ` · last ${fmtDate(a.last)}` : ' · none yet'}${a.age != null ? ` · age ${a.age}` : ''}${a.team ? ` · ${esc(a.team)}` : ''}${!o.filterOrg && a.orgName ? ` · ${esc(a.orgName)}` : ''}</div>
         </a>
         <div style="display:flex;gap:8px;margin:8px 0 0;flex-wrap:wrap">
-          ${o.messageButton ? `<a class="btn-small" href="/coach/messages/${a.id}">Message</a>` : ''}
+          ${o.messageButton && a.isRemote ? `<a class="btn-small" href="/coach/messages/${a.id}">Message</a>` : ''}
           ${o.notifyButton ? `<form method="post" action="/coach/player/${a.id}/notify-checkin" style="margin:0">
             <input type="hidden" name="back" value="${esc(o.tab === 'my-players' ? '/coach/my-players' : '/coach/hitters')}">
             <button class="btn-small btn-quiet" type="submit" title="${a.notifyOn ? 'Log alerts ON — tap to mute' : 'Log alerts OFF — tap to unmute'}">${a.notifyOn ? '🔔 Alerts on' : '🔕 Alerts off'}</button>
@@ -2613,7 +2619,7 @@ function programPage(user, p, opts) {
       : { weekday: String((s && s.weekday) || '').trim(), label: String((s && (s.day_label || s.label)) || '').trim() };
   const schedArr = (Array.isArray(prog.schedule) ? prog.schedule : []).map(schedEntry);
   const schedToday = schedArr.find((s) => s.weekday.toLowerCase() === String(weekday).toLowerCase());
-  const isRest = schedToday && /^(off|rest)/i.test(schedToday.label);
+  const isRest = schedToday && /^(off|rest|recovery|mobility)/i.test(schedToday.label);
 
   // Compact day header + manual day picker (GET form, no clunky JS).
   const dayHead = (showPicker) => {
@@ -2696,26 +2702,32 @@ function programPage(user, p, opts) {
     content = `${dayHead(true)}
       ${(todays.length || others.length
         ? todays.map((c) => blockCard(c.category, c.items, 'med', dayPrefix(c.category))).join('') +
-          (others.length
-            ? `<details class="card"><summary class="routine-summary"><span class="routine-station">Other days</span></summary>` +
-              others.map((c) => blockCard(c.category, c.items, 'med', dayPrefix(c.category))).join('') +
-              `</details>`
-            : '')
+          others.map((c) => blockCard(c.category, c.items, 'med', dayPrefix(c.category))).join('')
         : '<div class="card empty">No med ball work in your program.</div>')}`;
   } else if (sub === 'lifting' && lifting) {
     const days = (Array.isArray(lifting.days) ? lifting.days : []).filter((d) => realExercises(d.exercises).length);
     // Different Animal v4 (Sep 2026): 1. SPEED → 2. POWER (jumps + med ball) →
     // 3. STRENGTH → 4. ROTATIONAL → 5. BRAKES. No standalone Metabolic tab —
     // speed lives here; legacy 'Metabolic' blocks fold into Speed.
-    const lday = o.ldayIdx || 0;
-    const ldayExtra = `<input type=\"hidden\" name=\"lday\" value=\"${lday}\">`;
-    const curDay = days[lday] || {};
+    // ldayIdx is -1 on Recovery / Mobility / OFF days (real seven-day
+    // calendar, Sep 23 2026) - rest, not a lift.
+    const lday = Number.isFinite(Number(o.ldayIdx)) ? Number(o.ldayIdx) : 0;
+    const isRestDay = lday < 0;
+    const effLday = isRestDay ? -1 : lday;
+    const ldayExtra = `<input type=\"hidden\" name=\"lday\" value=\"${effLday}\">`;
+    const curDay = effLday >= 0 ? days[effLday] || {} : {};
     const phaseBanner = (Array.isArray(lifting.notes) && lifting.notes.length)
       ? `<div class=\"card phase-banner\">${lifting.notes.map((n) => `<p>${esc(n)}</p>`).join('')}</div>`
       : '';
-    const daySpeed = Array.isArray(curDay.speed) ? curDay.speed.filter((s) => String(s && s.name || '').trim()) : [];
+    const daySpeedAll = Array.isArray(curDay.speed) ? curDay.speed.filter((s) => String(s && s.name || '').trim()) : [];
+    // Held items never render as work — the athlete sees a placeholder.
+    const daySpeed = daySpeedAll.filter((s) => !s.held);
+    const heldSpeed = daySpeedAll.filter((s) => s.held);
+    const heldHtml = (held) => held.length
+      ? held.map(() => `<div class="card lift-held"><p style="margin:0"><strong>Your coach is picking the right exercise for this spot.</strong></p><p class="hint-inline" style="margin:4px 0 0">Check back soon — it will appear here when it's ready.</p></div>`).join('')
+      : '';
     const metBlocks = routine.filter((c) => kindOf(c.category) === 'metabolic' && realItems(c.items).length);
-    const speedHtml = (daySpeed.length || metBlocks.length)
+    const speedHtml = (daySpeed.length || heldSpeed.length || metBlocks.length)
       ? `<h3 class=\"prog-h3\"><span class=\"flow-num\">1</span> ⚡ Speed — sprints first</h3>\n` +
         (daySpeed.length
           ? `<div class=\"card routine-group\">${daySpeed.map((s) =>
@@ -2725,14 +2737,17 @@ function programPage(user, p, opts) {
               liftVideoHtml(s.video, watchLink) + `</div>`
             ).join('')}</div>`
           : '') +
+        heldHtml(heldSpeed) +
         metBlocks.map((c) => blockCard(c.category, c.items, 'spd', dayPrefix(c.category), ldayExtra)).join('')
       : '';
     const medBlocks = routine.filter((c) => kindOf(c.category) === 'medball' && realItems(c.items).length);
     const mbToday = day ? medBlocks.filter((c) => inDay(c.category, day)) : medBlocks;
     const mbOthers = day ? medBlocks.filter((c) => !inDay(c.category, day)) : [];
     // Lifting-day power work renders first, then any routine med-ball blocks.
-    const dayMedball = Array.isArray(curDay.medball) ? curDay.medball.filter((s) => String(s && s.name || '').trim()) : [];
-    const medHtml = (dayMedball.length || mbToday.length || mbOthers.length)
+    const dayMedballAll = Array.isArray(curDay.medball) ? curDay.medball.filter((s) => String(s && s.name || '').trim()) : [];
+    const dayMedball = dayMedballAll.filter((s) => !s.held);
+    const heldMedball = dayMedballAll.filter((s) => s.held);
+    const medHtml = (dayMedball.length || heldMedball.length || mbToday.length || mbOthers.length)
       ? `<h3 class=\"prog-h3\"><span class=\"flow-num\">2</span> 💥 Power — jumps & med ball</h3>\n` +
         (dayMedball.length
           ? `<div class=\"card routine-group\">${dayMedball.map((s) =>
@@ -2742,17 +2757,29 @@ function programPage(user, p, opts) {
               liftVideoHtml(s.video, watchLink) + `</div>`
             ).join('')}</div>`
           : '') +
+        heldHtml(heldMedball) +
         mbToday.map((c) => blockCard(c.category, c.items, 'med', dayPrefix(c.category), ldayExtra)).join('') +
-        (mbOthers.length
-          ? `<details class=\"card\"><summary class=\"routine-summary\"><span class=\"routine-station\">Other days</span></summary>` +
-            mbOthers.map((c) => blockCard(c.category, c.items, 'med', dayPrefix(c.category), ldayExtra)).join('') +
-            `</details>`
-          : '')
+        mbOthers.map((c) => blockCard(c.category, c.items, 'med', dayPrefix(c.category), ldayExtra)).join('')
       : '';
     // Section flow numbers continue after speed/power (liftSubTab renders
     // Strength / Rotational / Brakes groups).
-    const secBase = (daySpeed.length || metBlocks.length ? 1 : 0) + (dayMedball.length || mbToday.length || mbOthers.length ? 1 : 0);
-    content = `${phaseBanner}${liftPrimer}${sessionOrder === 'hitting_first' ? `<p class=\"hint\">Hit first, then lift — you're warm, go straight to speed work. Ramp-up sets on main lifts still apply. Lifting-only day? Full Mobility tab first.</p>` : ''}${speedHtml}${medHtml}${liftSubTab(user, lifting, days, lday, sub, checkoffs, today, o.liftData || {}, o.subs || {}, secBase)}${YT_TOGGLE_SCRIPT}`;
+    const secBase = (daySpeed.length || heldSpeed.length || metBlocks.length ? 1 : 0) + (dayMedball.length || heldMedball.length || mbToday.length || mbOthers.length ? 1 : 0);
+    const weekStripTop = liftWeekStrip(o.sched, o.weekday, days, effLday);
+    if (isRestDay) {
+      // Recovery / Mobility / OFF day on the real seven-day calendar:
+      // no lifting at all. OFF stays actual rest.
+      const schedArr = Array.isArray(o.sched) ? o.sched : [];
+      const tEntry = schedArr.find(([wd]) => String(wd || '').toLowerCase() === String(o.weekday || '').toLowerCase());
+      const tLabel = tEntry ? String(tEntry[1] || '') : '';
+      const restCopy = /mobil/i.test(tLabel)
+        ? '<strong>Mobility day</strong> — no lifting today. Hit the Mobility tab if you want to move.'
+        : /recover/i.test(tLabel)
+          ? '<strong>Recovery day</strong> — no lifting today. Walk, stretch, sleep — the rest is the work.'
+          : '<strong>OFF day</strong> — no lifting today. True rest.';
+      content = `${weekStripTop}<div class="card"><p style="margin:0">${restCopy}</p></div>${YT_TOGGLE_SCRIPT}`;
+    } else {
+      content = `${phaseBanner}${liftPrimer}${sessionOrder === 'hitting_first' ? `<p class=\"hint\">Hit first, then lift — you're warm, go straight to speed work. Ramp-up sets on main lifts still apply. Lifting-only day? Full Mobility tab first.</p>` : ''}${speedHtml}${medHtml}${liftSubTab(user, lifting, days, effLday, sub, checkoffs, today, o.liftData || {}, o.subs || {}, secBase, o.todayLdayIdx, o.sched, o.weekday)}${YT_TOGGLE_SCRIPT}`;
+    }
   } else {
     // HITTING (default): today's plan first — prep for the day + the day's
     // hitting blocks. Then pregame, then Focus/Grades/Strengths/Notes.
@@ -2808,9 +2835,13 @@ function programPage(user, p, opts) {
     ${weekStrip()}
     ${(() => {
       // Guided Today session: one tap runs the whole day in the athlete's
-      // chosen order. Hidden on rest days, when no day is selected, and
-      // until GUIDED_SESSION_LIVE flips (Change 2).
-      if (!GUIDED_SESSION_LIVE || isRest || !day) return '';
+      // chosen order. Hidden until GUIDED_SESSION_LIVE flips (Change 2), and
+      // hidden on rest days — but rest is about the SELECTED day, not today.
+      // The day picker only offers real program days (Day 1, Day 2…), so an
+      // explicit pick always has work: the CTA shows even on a rest today.
+      // (isRest is true only for today, and isToday is false on a manual pick.)
+      const selectedIsRest = isRest && isToday;
+      if (!GUIDED_SESSION_LIVE || selectedIsRest || !day) return '';
       const lday = (o.ldayIdx || 0);
       const href = '/program/session?day=' + encodeURIComponent(day) +
         (tabs.some((t) => t.id === 'lifting') ? '&lday=' + lday : '');
@@ -2831,7 +2862,7 @@ function workoutPage(user, program, wd, ldayIdx) {
   const dayJson = JSON.stringify(wd).replace(/</g, '\\u003c');
   const lday = Number(ldayIdx) || 0;
   return layout({
-    title: wd.day.label + ' · Workout',
+    title: wd.day.label + ' · Lift',
     user,
     tabs: [],
     body: `<div class="wo">
@@ -2976,22 +3007,51 @@ function sessionPage(user, s) {
   });
 }
 
-// LIFTING sub-tab: day pills, per-exercise check-off + weight/RPE log,
+// LIFTING sub-tab: today's lift first with a Start Lift button, per-exercise
+// check-off + weight/RPE log, other days in a disclosure (Sep 2026).
 // target RPE chip, "last time" line, and a compact history view.
 // Warm-up rows render first as their own block (no logging on them).
 // Each exercise gets a mid-workout "Substitute" link; today's swaps are
 // pulled from opts.subs and shown with a marker.
-function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftData, subs, secBase) {
+// Week strip (Sep 23 2026, Bobby): the Lifting tab follows the athlete's real
+// seven-day calendar. Each weekday shows its schedule label; lifting days link
+// straight to that day, today is highlighted, Recovery / Mobility / OFF are
+// rest - never lifting. Replaces the old "Other lifting days" disclosure.
+function liftWeekStrip(sched, weekday, days, ldayIdx) {
+  const schedArr = Array.isArray(sched) ? sched : [];
+  if (!schedArr.length) return '';
+  const pills = schedArr.map(([wd, label]) => {
+    const lab = String(label || '');
+    const short = String(wd || '').slice(0, 3);
+    const isToday = String(wd || '').toLowerCase() === String(weekday || '').toLowerCase();
+    const cls = isToday ? ' wk-today' : '';
+    const m = lab.match(/day\s*(\d+)/i);
+    if (m) {
+      const k = parseInt(m[1], 10) - 1;
+      const di = Number.isFinite(k) && k >= 0 && k < days.length ? k : -1;
+      const dayName = lab.replace(/\s*[\u2014-].*$/, '');
+      const inner = `<span class="wk-d">${esc(short)}</span><span class="wk-l">${esc(dayName)}</span>`;
+      if (di < 0) return `<span class="wk-pill wk-na${cls}">${inner}</span>`;
+      const active = di === ldayIdx ? ' wk-active' : '';
+      return `<a href="/program?sub=lifting&lday=${di}" class="wk-pill${cls}${active}">${inner}</a>`;
+    }
+    const kind = /off/i.test(lab) ? 'OFF' : (/recover/i.test(lab) ? 'Recovery' : (/mobil/i.test(lab) ? 'Mobility' : lab));
+    return `<span class="wk-pill wk-rest${cls}"><span class="wk-d">${esc(short)}</span><span class="wk-l">${esc(kind)}</span></span>`;
+  }).join('');
+  return `<div class="wk-strip">${pills}</div>`;
+}
+
+function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftData, subs, secBase, todayLdayIdx, sched, weekday) {
   const day = days[ldayIdx] || { label: '', exercises: [] };
   const dayKey = String(day.label || '');
   const subsMap = subs || {};
   const readOnly = !!(user && user.viewAs);
-  const pills = days
-    .map(
-      (d, i) =>
-        `<a href="/program?sub=lifting&lday=${i}" class="day-pill${i === ldayIdx ? ' active' : ''}">${esc(d.label || 'Day ' + (i + 1))}</a>`
-    )
-    .join('');
+  // Bobby (Sep 23 2026): the tab leads with today's lift. The week strip -
+  // the athlete's real seven-day calendar - is the day picker. No more
+  // "Other lifting days" disclosure.
+  const todayIdx = Number.isFinite(Number(todayLdayIdx)) ? Number(todayLdayIdx) : ldayIdx;
+  const isToday = ldayIdx === todayIdx;
+  const weekStrip = liftWeekStrip(sched, weekday, days, ldayIdx);
   const fmtDay = (d) => {
     try {
       const dt = new Date(d + 'T12:00:00');
@@ -3024,6 +3084,12 @@ function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftDat
     return s === 'rotational' || s === 'brakes' ? s : 'strength';
   };
   const exRow = (ex) => {
+      // Held for coach review (Sep 2026): the questionnaire flagged this
+      // spot as unsafe and no clean substitute exists. The athlete never
+      // sees the original exercise — just that their coach is on it.
+      if (ex && ex.held) {
+        return `<div class="card lift-held"><p style="margin:0"><strong>Your coach is picking the right exercise for this spot.</strong></p><p class="hint-inline" style="margin:4px 0 0">Check back soon — it will appear here when it's ready.</p></div>`;
+      }
       const name = String(ex.name || '');
       const key = `lift::${dayKey}::${name}`;
       const swapped = subsMap[key];
@@ -3213,10 +3279,11 @@ function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftDat
   const doneEx = (exRows.match(/<details class="lift-ex done"/g) || []).length;
   const startBtn = readOnly ? '' : `<a class="start-workout" href="/program/workout?lday=${ldayIdx}">
     <span class="start-workout-play">▶</span>
-    <span class="start-workout-text"><strong>Start Workout</strong>
-    <span>${doneEx}/${totalSets} exercises done</span></span></a>`;
-  return `<div class="day-pills">${pills}</div>
-    <h3 class="prog-h3">${esc(dayKey)}</h3>
+    <span class="start-workout-text"><strong>Start Lift</strong>
+    <span>${doneEx}/${totalSets} exercises done — walk through it, video + logging as you go</span></span></a>`;
+  return `${weekStrip}
+    ${isToday ? '' : `<p><a href="/program?sub=lifting">← Back to today's lift</a></p>`}
+    <p class="wo-kicker">${isToday ? "Today's lift" : 'Lift day'} · ${esc(dayKey)}</p>
     ${startBtn}
     ${warmupHtml}
     ${readOnly ? '<p class="hint">Preview — logging is disabled.</p>' : ''}
@@ -3354,32 +3421,49 @@ function liftingEditPage(user, lp, opts) {
     id: lp.id,
     name: lp.name || '',
     is_template: !!lp.is_template,
+    serverDayCount: (Array.isArray(lp.days) ? lp.days : []).length,
     days: (Array.isArray(lp.days) ? lp.days : []).map((d) => ({
       label: d.label || '',
       warmup: normWarmup(d.warmup),
       speed: (Array.isArray(d.speed) ? d.speed : []).map((s) => ({
         name: s.name || '', volume: s.volume || '', notes: s.notes || '', video: s.video || '',
         intent: s.intent || '',
+        held: !!s.held, held_original: s.held_original || '', held_reason: s.held_reason || '',
       })),
       medball: (Array.isArray(d.medball) ? d.medball : []).map((s) => ({
         name: s.name || '', volume: s.volume || '', notes: s.notes || '', video: s.video || '',
         intent: s.intent || '',
+        held: !!s.held, held_original: s.held_original || '', held_reason: s.held_reason || '',
       })),
       exercises: (Array.isArray(d.exercises) ? d.exercises : []).map((e) => ({
         name: e.name || '', sets: e.sets || '', reps: e.reps || '',
         target_rpe: e.target_rpe || '', rest: e.rest || 120,
         notes: e.notes || '', video: e.video || '',
         section: e.section || 'strength', intent: e.intent || '',
+        held: !!e.held, held_original: e.held_original || '', held_reason: e.held_reason || '',
       })),
     })),
   };
   const stateJson = JSON.stringify(state).replace(/</g, '\\u003c');
+  // Coach-facing personalization notes (Sep 23 2026): what the questionnaire
+  // changed in this copy. Never shown to athletes.
+  const pnotes = Array.isArray(lp.personalization_notes) ? lp.personalization_notes : [];
+  const heldCount = (Array.isArray(lp.days) ? lp.days : []).reduce((n, d) =>
+    n + ['speed', 'medball', 'exercises'].reduce((m, k) =>
+      m + (Array.isArray(d[k]) ? d[k] : []).filter((e) => e && e.held).length, 0), 0);
+  const heldBanner = heldCount
+    ? `<div class=\"card\" style=\"border:2px solid #e8a13c;background:#fff7e8;margin:0 0 12px\">\n        <strong>⏸ ${heldCount} exercise${heldCount === 1 ? '' : 's'} held for your review</strong>\n        <p style=\"margin:6px 0 0\">The questionnaire flagged these as unsafe and no clean substitute exists. The athlete can't see them. Rename each one to release it.</p>\n      </div>`
+    : '';
+  const pnotesHtml = (heldBanner || '') + (pnotes.length
+    ? `<div class=\"card\" style=\"border-left:4px solid #f5a623;margin:0 0 12px\">\n        <strong>📋 Built from his questionnaire</strong>\n        ${pnotes.map((n) => `<p style=\"margin:6px 0 0\">${esc(n)}</p>`).join('')}\n      </div>`
+    : '');
   return layout({
     title: 'Edit ' + (lp.name || 'program'),
     user,
     tabs: coachTabs('lifting', 0, user),
     body: `<h1 class="page-title">${lp.is_template ? 'Template' : 'Lifting program'}</h1>
     ${error ? `<p class="error" style="margin:0 0 12px">${esc(error)}</p>` : ''}
+    ${pnotesHtml}
     <div class="card le-name"><label>Program name
       <input id="le-name" value="${esc(lp.name || '')}" maxlength="80" style="width:100%;box-sizing:border-box"></label></div>
     <div class="le-tabs" id="le-tabs"></div>
@@ -3556,6 +3640,12 @@ function mentalGamePage(user, data) {
   const practice = data.practice || { items: [], done: false };
   const pregameItems = Array.isArray(pregame.items) ? pregame.items : [];
   const practiceItems = Array.isArray(practice.items) ? practice.items : [];
+  // Personalized routines (Sep 23 2026, Bobby): built from his questionnaire
+  // answers — no two hitters get the same routine.
+  const routineSource = data.routineSource || 'default';
+  const routineCaption = routineSource === 'personalized'
+    ? '<p class="hint" style="margin:0 0 8px">Built from your questionnaire answers — edit anything to make it yours.</p>'
+    : '';
   
   const card = (id, title, done, content) => `
     <div class="lockin-card${done ? ' done' : ''}" data-card="${id}">
@@ -3703,6 +3793,7 @@ function mentalGamePage(user, data) {
 
   const cardsHtml = b.plan ? `
     <h2 class="section-title">Today</h2>
+    ${routineCaption}
     ${heroCard('morning', '🌅', 'Morning Routine', routineItems, routineDone, '3 min')}
     ${bibleHtml}
     <div class="day-picker">
@@ -4003,20 +4094,25 @@ function cleanCat(c) {
   return String(c || '').replace(/^#\d+\s*/, '');
 }
 
-function videosPage(user, cats, activeCat, videos) {
+function videosPage(user, cats, activeCat, videos, q) {
   const pills = cats
     .map(
       (c) =>
-        `<a class="pill-link${c.category === activeCat ? ' active' : ''}" href="/videos?cat=${encodeURIComponent(c.category)}">${esc(cleanCat(c.category))} <span class="hint-inline">${c.n}</span></a>`
+        `<a class="pill-link${c.category === activeCat && !q ? ' active' : ''}" href="/videos?cat=${encodeURIComponent(c.category)}">${c.emoji ? esc(c.emoji) + ' ' : ''}${esc(cleanCat(c.title || c.category))} <span class="hint-inline">${c.n}</span></a>`
     )
     .join('');
-  const isVideo = (m) => String(m || '').startsWith('video/');
   const disp = (v) => (v.custom_name && v.custom_name.trim()) || v.name;
+  // Real Drive thumbnails (Sep 2026) instead of the ▶/📄 emoji tiles.
+  const thumb = (v) =>
+    v.drive_file_id
+      ? `<img class="video-thumbimg" loading="lazy" src="https://drive.google.com/thumbnail?id=${encodeURIComponent(v.drive_file_id)}&sz=w400" alt="">`
+      : `<div class="video-thumb">\u25B6</div>`;
   const cards = videos
     .map(
-      (v) => `<a class="card video-card" data-search="${esc(disp(v).toLowerCase())}" href="/videos/watch/${v.id}">
-        <div class="video-thumb">${isVideo(v.mime_type) ? '\u25B6' : '\uD83D\uDCC4'}</div>
+      (v) => `<a class="card video-card" href="/videos/watch/${v.id}">
+        ${thumb(v)}
         <div class="video-name">${esc(disp(v))}</div>
+        ${v.cat_title ? `<div class="hint-inline">${esc(cleanCat(v.cat_title))}</div>` : ''}
       </a>`
     )
     .join('');
@@ -4025,10 +4121,9 @@ function videosPage(user, cats, activeCat, videos) {
     user,
     tabs: userTabs('videos', user),
     body: `<h1 class="page-title">Remote Library</h1>
-    ${cats.length ? `<input type="search" id="video-search" class="searchbar" placeholder="Search videos\u2026" autocomplete="off">` : ''}
-    <div class="pill-row">${pills}</div>
+    ${cats.length ? `<form method="get" action="/videos" class="form" style="margin:0 0 10px"><input type="search" name="q" class="searchbar" placeholder="Search every category\u2026" autocomplete="off" value="${esc(q || '')}"></form>` : ''}
+    ${q ? `<p class="hint-inline" style="margin:0 0 8px">${videos.length} result${videos.length === 1 ? '' : 's'} for \u201C${esc(q)}\u201D · <a href="/videos">clear</a></p>` : `<div class="pill-row">${pills}</div>`}
     <div class="video-grid">${cards || '<div class="card empty">No videos yet — they\u2019ll appear here after the next sync.</div>'}</div>
-    <div class="card empty" id="video-no-match" hidden>No library items match that search.</div>
 `,
   });
 }
@@ -4072,9 +4167,21 @@ function coachLibraryPage(user, cats, activeCat, videos, playing) {
   const pills = cats
     .map(
       (c) =>
-        `<a class="pill-link${c.category === activeCat ? ' active' : ''}" href="/coach/library?cat=${encodeURIComponent(c.category)}">${esc(cleanCat(c.category))} <span class="hint-inline">${c.n}</span></a>`
+        `<a class="pill-link${c.category === activeCat ? ' active' : ''}" href="/coach/library?cat=${encodeURIComponent(c.category)}">${c.emoji ? esc(c.emoji) + ' ' : ''}${esc(cleanCat(c.title || c.category))}${c.mhidden ? ' (hidden)' : ''} <span class="hint-inline">${c.n}</span></a>`
     )
     .join('');
+  const activeMeta = cats.find((c) => c.category === activeCat) || {};
+  const catEditor = canEdit && activeCat
+    ? `<details class="card" style="margin:0 0 12px"><summary style="cursor:pointer"><strong>Category display</strong> <span class="hint-inline">rename · reorder · hide</span></summary>
+      <form method="post" action="/coach/library/category" class="form" style="margin-top:10px">
+        <input type="hidden" name="category" value="${esc(activeCat)}">
+        <label>Athletes see<input name="title" value="${esc(activeMeta.title || '')}" placeholder="${esc(cleanCat(activeCat))}" maxlength="120"></label>
+        <label>Emoji<input name="emoji" value="${esc(activeMeta.emoji || '')}" maxlength="12" placeholder="🎯"></label>
+        <label>Sort order (low = first)<input name="sort_order" type="number" value="${activeMeta.so != null ? activeMeta.so : 999}" min="0" max="9999"></label>
+        <label style="display:flex;align-items:center;gap:8px"><input type="checkbox" name="hidden" value="1"${activeMeta.mhidden ? ' checked' : ''}> Hide this category from athletes</label>
+        <button class="btn-primary" type="submit">Save category</button>
+      </form></details>`
+    : '';
   const isVideo = (m) => String(m || '').startsWith('video/');
   const rows = videos
     .map((v) => {
@@ -4115,6 +4222,7 @@ function coachLibraryPage(user, cats, activeCat, videos, playing) {
     <div class="hint-inline">Renames and hidden items are yours only — the Drive sync never overwrites them. New Drive files and PDFs appear here automatically.</div>
     ${player}
     <div class="pill-row">${pills}</div>
+    ${catEditor}
     ${rows || '<div class="card empty">No items in this category yet.</div>'}`,
   });
 }
@@ -4483,7 +4591,12 @@ function settingsPage(user, opts) {
       </form>
     </div>
     ${isCoach ? '' : `<div class="card">
-      <h2 class="section-head">Player role</h2>
+    ${isCoach ? '' : `<div class="card">
+      <h2 class="section-head">Training questionnaire</h2>
+      <p class="hint">Injured? New equipment? Schedule changed? Update your answers and your program rebuilds from the new ones. Anything your coach customized by hand stays as he left it.</p>
+      <p style="margin:0"><a class="btn" href="/questionnaire">Update your answers</a></p>
+    </div>`}
+          <h2 class="section-head">Player role</h2>
       <p class="hint">This decides which check-in you get: hitting, pitching, or a combined one for both.</p>
       <form method="post" action="/settings/role" class="form">
         <fieldset class="role-picker">
@@ -4608,11 +4721,13 @@ function intakeFormPage(token, err, values, opts) {
     body: `<div class="login-card card intake-card">
       <img src="/diamond-daily-logo.jpg" class="brand-logo-full" alt="Diamond Daily">
       <h1 class="page-title" style="margin-top:4px">Athlete intake</h1>
-      <p class="hint">This is how Coach Bobby builds your program — the more detail you give, the better it fits. Takes most guys 10–15 minutes.</p>
+      <p class="hint">This is how your coach builds your program — the more detail you give, the better it fits. Takes most guys 10–15 minutes.</p>
       ${prefillBanner}
       <div class="intake-progress"><div class="intake-bar"><div id="ibar"></div></div><div id="istep-label" class="hint"></div></div>
       ${err ? `<div class="error">${esc(err)}</div>` : ''}
-      <form method="post" action="/intake/${esc(token)}/submit" class="form" id="intake-form" novalidate>
+      ${(opts && opts.updateMode) ? `<div class="card" style="margin:0 0 12px;border-left:3px solid var(--accent,#2e7d32)">` +
+      `<strong>Updating your answers.</strong> Change what changed — new injury, new equipment, new schedule — and your program updates from the new answers. Anything your coach customized by hand stays exactly as he left it.</div>` : ``}
+      <form method="post" action="${(opts && opts.updateMode) ? `/questionnaire` : `/intake/${esc(token)}/submit`}" class="form" id="intake-form" novalidate>
 
       ${step('1 · About you', `
         <label>First name<input type="text" name="first_name" value="${ival('first_name')}" maxlength="40"${req}></label>
@@ -4933,7 +5048,7 @@ function welcomePage(token, err) {
     body: `<div class="login-card card">
       <img src="/diamond-daily-logo.jpg" class="brand-logo-full" alt="Diamond Daily">
       <h1 class="page-title">You're in the queue</h1>
-      <p class="hint">Your answers are with Coach Bobby — he's building your program now. Set a password so you can log in when it's ready.</p>
+      <p class="hint">Your answers are with your coach — he's building your program now. Set a password so you can log in when it's ready.</p>
       ${err ? `<div class="error">${esc(err)}</div>` : ''}
       <form method="post" action="/welcome/${esc(token)}" class="form">
         <label>New password<input type="password" name="password" required minlength="8" autocomplete="new-password"></label>
@@ -4997,7 +5112,7 @@ function substitutePage(user, o) {
     </div>` : ''}
     <div class="card">
       <p style="margin:0 0 10px"><strong>None of these work?</strong></p>
-      <p style="margin:0"><a class="btn-primary" href="/messages?prefill=${askBody}" style="text-decoration:none;display:inline-block">Ask Coach Bobby</a></p>
+      <p style="margin:0"><a class="btn-primary" href="/messages?prefill=${askBody}" style="text-decoration:none;display:inline-block">Ask your coach</a></p>
       <p class="hint" style="margin:8px 0 0">Opens a message pre-filled with the details — just add your reason and send.</p>
     </div>
     <p><a href="${esc(o.back)}">← Back to program</a></p>

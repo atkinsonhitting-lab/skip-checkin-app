@@ -48,7 +48,8 @@ function buildPrograms(V) {
   const M1 = {
     name: 'Different Animal — Offseason M1 (Absorb)',
     notes: [
-      'MONTH 1 — ABSORB: eccentric / structural. Every rep: 3–5 seconds down, explode up. ISO holds where programmed.',
+      'MONTH 1 — ABSORB: eccentrics + isometrics. Load it HEAVY, lower it slow: 3–5 seconds down, explode up. ISO holds where programmed.',
+      'ROTATION IS THE PRIORITY — rotational power and anti-rotation get loaded hard every week. This is a hitter\u2019s program.',
       'Explosive work stays at MAX INTENT ⚡ — moderate volume, perfect reps. Stop explosive work when rep quality drops.',
       'Test/retest every 2 weeks — log every lift, compare in the dashboard.',
     ],
@@ -60,10 +61,10 @@ function buildPrograms(V) {
           spd('Plyo Push-Up', '3 x 5', 'Explode off the floor. Full recovery between sets.', 'plyoPushup', 'max'),
         ],
         exercises: [
-          ex('DB Bench Press', '4', '6', 7, 120, 'ABSORB tempo: 4-sec down, 1-sec pause on the chest, explode up.', 'dbBench'),
-          ex('DB Single-Arm Row', '4', '6/side', 7, 120, '3-sec down. Chest supported — no twisting.', 'saRow'),
-          ex('Cable Rotation', '3', '5/side', 8, 90, 'Rotate through the hips, not the arms.', 'cableRot', 'rotational', 'max'),
-          ex('Pallof Press', '3', '10/side', 6, 60, '3-sec ISO hold every rep — own the position.', 'pallof', 'rotational'),
+          ex('DB Bench Press', '4', '5', 8, 120, 'ABSORB tempo: 4-sec down, 1-sec pause on the chest, explode up. Load it.', 'dbBench'),
+          ex('DB Single-Arm Row', '4', '5/side', 8, 120, '3-sec down. Chest supported — no twisting. Heavy.', 'saRow'),
+          ex('Cable Rotation', '4', '5/side', 8, 90, 'HEAVY rotation — hips do the work, arms just hold on.', 'cableRot', 'rotational', 'max'),
+          ex('Pallof Press', '3', '10/side', 7, 60, '3-sec ISO hold every rep — own the position.', 'pallof', 'rotational'),
         ]},
       { label: 'Day 2 — Bilateral Lower',
         speed: [
@@ -73,21 +74,21 @@ function buildPrograms(V) {
           spd('Trap-Bar Jump', '4 x 5 @ ~50% BW', 'Wake the nervous system up. Land soft, reset every rep.', 'trapJump', 'max'),
         ],
         exercises: [
-          ex('Trap-Bar Deadlift', '4', '5', 7, 120, 'ABSORB tempo: 4-sec down to the knee, then drive the floor away.', 'trapbar'),
+          ex('Trap-Bar Deadlift', '4', '4', 8, 150, 'ABSORB tempo: 4-sec down to the knee, then drive the floor away. Heavy.', 'trapbar'),
           ex('Nordic Curl', '3', '5', 8, 120, 'Slow eccentrics — 5-sec lower, control the whole way down.', 'nordic', 'brakes'),
-          ex('Lateral Box Squat', '3', '5–8/side', 7, 90, 'Sit back to the box, drive up through the whole foot.', 'latBoxSquat'),
+          ex('Lateral Box Squat', '3', '5/side', 8, 120, 'Sit back to the box, drive up through the whole foot. Load it.', 'latBoxSquat'),
         ]},
       { label: 'Day 3 — Upper: Horizontal Pull + Vertical Press',
         speed: [],
         medball: [
-          spd('MB Rotational Throw', '4 x 5', 'Hips lead, hands follow.', 'mbRot', 'max'),
+          spd('MB Rotational Throw', '5 x 5', 'Hips lead, hands follow — violent.', 'mbRot', 'max'),
           spd('Single-Arm Landmine Press', '4', '5/side', 8, 90, 'Explosive press — punch the ceiling.', 'landmine', 'max'),
         ],
         exercises: [
-          ex('DB Single-Arm Row', '4', '6/side', 7, 120, '3-sec down, 1-sec squeeze at the top.', 'saRow'),
-          ex('DB Shoulder Press', '3', '6', 7, 120, 'ABSORB tempo: 3-sec down. Ribs down, no arching.', 'dbOhp'),
+          ex('DB Single-Arm Row', '4', '5/side', 8, 120, '3-sec down, 1-sec squeeze at the top. Heavy.', 'saRow'),
+          ex('DB Shoulder Press', '4', '5', 8, 120, 'ABSORB tempo: 3-sec down. Ribs down, no arching. Load it.', 'dbOhp'),
           ex('DB Rear-Lateral Raise', '3', '8–10', 7, 60, 'Light and strict — rear delts and upper back.', 'rearLateral'),
-          ex('Pallof Hold', '3', '15 sec/side', 7, 60, 'Heaviest you can hold with perfect posture.', 'pallofHold', 'rotational'),
+          ex('Pallof Hold', '3', '20 sec/side', 8, 60, 'Heaviest you can hold with perfect posture.', 'pallofHold', 'rotational'),
         ]},
       { label: 'Day 4 — Unilateral Lower (alone on purpose)',
         speed: [],
@@ -96,10 +97,10 @@ function buildPrograms(V) {
           spd('Split-Squat ISO Pull', '3', '5/side', 7, 90, 'Potentiation primer: 5-sec ISO hold, then pull. Wakes up the Bulgarians.', 'isoPull'),
         ],
         exercises: [
-          ex('Bulgarian Split Squat', '3', '6/leg', 8, 150, 'ABSORB: 3-sec down every rep. Torso tall.', 'bulgarian'),
+          ex('Bulgarian Split Squat', '4', '5/leg', 8, 150, 'ABSORB: 3-sec down every rep. Torso tall. Heavy.', 'bulgarian'),
           ex('Pin Split Squat', '3', '5/leg', 8, 120, 'Dead stop off the pins — no bounce, pure concentric.', 'pinSplit'),
           ex('Nordic Curl', '3', '5', 8, 120, '5-sec lower.', 'nordic', 'brakes'),
-          ex('DB Trunk Rotation', '3', '8/side', 7, 90, 'Build the brakes — control the rotation, don\'t let it control you.', 'trunkRot', 'brakes'),
+          ex('DB Trunk Rotation', '3', '6/side', 8, 90, 'Heavy and controlled — brakes under load.', 'trunkRot', 'brakes'),
         ]},
     ],
   };
@@ -107,8 +108,8 @@ function buildPrograms(V) {
   const M2 = {
     name: 'Different Animal — Offseason M2 (Produce)',
     notes: [
-      'MONTH 2 — PRODUCE: strength / concentric. Main lifts @85–90%, 2–6 reps, explosive concentric.',
-      'CONTRAST pairings: heavy lift → explosive movement, same plane, 3:00 rest. That pairing is the program.',
+      'MONTH 2 — PRODUCE: strength / concentric. Main lifts @85–90%, 2–5 reps, explosive concentric. Load it and move it.',
+      'CONTRAST pairings: heavy lift → explosive movement, same plane, 3:00 rest. Rotation gets the contrast treatment too — heavy cable rotation → med-ball rotational throw.',
       'Test/retest every 2 weeks — log every lift, compare in the dashboard.',
     ],
     days: [
@@ -120,9 +121,9 @@ function buildPrograms(V) {
         ],
         exercises: [
           ex('DB Bench Press', '4', '4 @ 85%', 9, 180, 'PRODUCE: explosive concentric. CONTRAST with plyo push-up — 3:00 rest.', 'dbBench'),
-          ex('DB Single-Arm Row', '4', '5/side', 8, 150, 'Heavy — explode the DB to the hip.', 'saRow'),
-          ex('Cable Rotation', '4', '5/side', 8, 90, 'Heavy rotation, full speed.', 'cableRot', 'rotational', 'max'),
-          ex('Pallof Press', '3', '8/side', 7, 60, 'Heavy anti-rotation.', 'pallof', 'rotational'),
+          ex('DB Single-Arm Row', '4', '5/side', 9, 150, 'Heavy — explode the DB to the hip.', 'saRow'),
+          ex('Cable Rotation', '4', '5/side', 9, 120, 'Heavy rotation, full speed. CONTRAST with med-ball rotational throw.', 'cableRot', 'rotational', 'max'),
+          ex('Pallof Press', '3', '8/side', 8, 60, 'Heavy anti-rotation.', 'pallof', 'rotational'),
         ]},
       { label: 'Day 2 — Bilateral Lower',
         speed: [
@@ -134,17 +135,17 @@ function buildPrograms(V) {
         exercises: [
           ex('Trap-Bar Deadlift', '3', '3 @ 85–90%', 9, 180, 'PRODUCE: move it fast. CONTRAST with trap-bar jump — 3:00 rest.', 'trapbar'),
           ex('Nordic Curl', '3', '5', 8, 120, 'Slow eccentrics.', 'nordic', 'brakes'),
-          ex('Lateral Box Squat', '4', '5/side', 8, 120, 'Heavy single-leg strength.', 'latBoxSquat'),
+          ex('Lateral Box Squat', '4', '5/side', 9, 120, 'Heavy single-leg strength. Drive.', 'latBoxSquat'),
         ]},
       { label: 'Day 3 — Upper: Horizontal Pull + Vertical Press',
         speed: [],
         medball: [
-          spd('MB Rotational Throw', '5 x 4', 'Heavy ball, full intent.', 'mbRot', 'max'),
+          spd('MB Rotational Throw', '5 x 5', 'Heavy ball, full intent. CONTRAST: heavy cable rotation → throw.', 'mbRot', 'max'),
           spd('Single-Arm Landmine Press', '4', '4/side', 8, 120, 'Heavy + explosive.', 'landmine', 'max'),
         ],
         exercises: [
-          ex('DB Single-Arm Row', '4', '5/side', 8, 150, 'Heavy rows — own the squeeze.', 'saRow'),
-          ex('DB Shoulder Press', '4', '4 @ 85%', 8, 150, 'PRODUCE: explosive lockout.', 'dbOhp'),
+          ex('DB Single-Arm Row', '4', '5/side', 9, 150, 'Heavy rows — own the squeeze.', 'saRow'),
+          ex('DB Shoulder Press', '4', '4 @ 85%', 9, 150, 'PRODUCE: explosive lockout.', 'dbOhp'),
           ex('DB Rear-Lateral Raise', '3', '8', 7, 60, 'Strict.', 'rearLateral'),
           ex('Pallof Hold', '3', '20 sec/side', 8, 60, 'Max weight with perfect posture.', 'pallofHold', 'rotational'),
         ]},
@@ -156,9 +157,9 @@ function buildPrograms(V) {
         ],
         exercises: [
           ex('Bulgarian Split Squat', '3', '5/leg @ 85%', 9, 180, 'PRODUCE: heavy. CONTRAST with drop-catch split jump — 3:00 rest.', 'bulgarian'),
-          ex('Pin Split Squat', '3', '4/leg', 8, 150, 'Heavy, dead stop off the pins.', 'pinSplit'),
+          ex('Pin Split Squat', '3', '4/leg', 9, 150, 'Heavy, dead stop off the pins. Drive.', 'pinSplit'),
           ex('Nordic Curl', '3', '5', 8, 120, 'Slow eccentrics.', 'nordic', 'brakes'),
-          ex('DB Trunk Rotation', '3', '6/side', 8, 90, 'Heavy and controlled — brakes under load.', 'trunkRot', 'brakes'),
+          ex('DB Trunk Rotation', '3', '6/side', 9, 90, 'Heavy and controlled — brakes under max load.', 'trunkRot', 'brakes'),
         ]},
     ],
   };
@@ -166,7 +167,8 @@ function buildPrograms(V) {
   const M3 = {
     name: 'Different Animal — Offseason M3 (Express)',
     notes: [
-      'MONTH 3 — EXPRESS: speed / transfer. Lighter loads, MAX bar speed. Jumps, med-ball, and sprints LEAD the session.',
+      'MONTH 3 — EXPRESS: speed / transfer. @75%, moved as fast as humanly possible. Jumps, med-ball, and sprints LEAD the session.',
+      'Rotation at max speed — rotational throws are the main event, not the warm-up.',
       'Volume up on explosive work. If the bar slows down, it\'s too heavy.',
       'Test/retest every 2 weeks — this is where the numbers should jump.',
     ],
@@ -174,14 +176,14 @@ function buildPrograms(V) {
       { label: 'Day 1 — Upper: Horizontal Press + Vertical Pull',
         speed: [],
         medball: [
-          spd('MB Shot-Put Throw', '5 x 5', 'Throws LEAD today.', 'mbShotput', 'max'),
+          spd('MB Shot-Put Throw', '5 x 5', 'Throws LEAD today — max violence.', 'mbShotput', 'max'),
           spd('Plyo Push-Up', '4 x 5', 'Fast hands off the floor.', 'plyoPushup', 'max'),
         ],
         exercises: [
-          ex('DB Bench Press', '4', '5 @ 70%', 7, 90, 'EXPRESS: move the DBs as fast as possible.', 'dbBench'),
-          ex('DB Single-Arm Row', '3', '6/side', 7, 90, 'Fast and crisp.', 'saRow'),
-          ex('Cable Rotation', '3', '6/side', 8, 60, 'Speed of rotation.', 'cableRot', 'rotational', 'max'),
-          ex('Pallof Press', '2', '10/side', 6, 60, 'Snappy.', 'pallof', 'rotational'),
+          ex('DB Bench Press', '4', '5 @ 75%', 8, 90, 'EXPRESS: move the DBs violently fast.', 'dbBench'),
+          ex('DB Single-Arm Row', '3', '6/side', 8, 90, 'Fast and crisp. Heavy intent, fast hands.', 'saRow'),
+          ex('Cable Rotation', '3', '6/side', 9, 60, 'MAX rotation speed.', 'cableRot', 'rotational', 'max'),
+          ex('Pallof Press', '2', '10/side', 7, 60, 'Snappy.', 'pallof', 'rotational'),
         ]},
       { label: 'Day 2 — Bilateral Lower',
         speed: [
@@ -191,19 +193,19 @@ function buildPrograms(V) {
           spd('Trap-Bar Jump', '5 x 5 @ ~40% BW', 'Jump day. Every rep maximal.', 'trapJump', 'max'),
         ],
         exercises: [
-          ex('Trap-Bar Deadlift', '3', '3 @ 70%', 7, 120, 'EXPRESS: speed pulls — bar speed over load.', 'trapbar'),
+          ex('Trap-Bar Deadlift', '3', '3 @ 75%', 8, 120, 'EXPRESS: speed pulls — violent bar speed.', 'trapbar'),
           ex('Nordic Curl', '2', '5', 7, 90, 'Controlled.', 'nordic', 'brakes'),
-          ex('Lateral Box Squat', '3', '6/side', 7, 90, 'Fast out of the bottom.', 'latBoxSquat'),
+          ex('Lateral Box Squat', '3', '6/side', 8, 90, 'Violent out of the bottom.', 'latBoxSquat'),
         ]},
       { label: 'Day 3 — Upper: Horizontal Pull + Vertical Press',
         speed: [],
         medball: [
-          spd('MB Rotational Throw', '5 x 5', 'Max rotation speed.', 'mbRot', 'max'),
+          spd('MB Rotational Throw', '5 x 5', 'The main event — max rotation speed, every throw.', 'mbRot', 'max'),
           spd('Single-Arm Landmine Press', '4', '5/side', 7, 90, 'Speed press.', 'landmine', 'max'),
         ],
         exercises: [
-          ex('DB Single-Arm Row', '3', '6/side', 7, 90, 'Fast.', 'saRow'),
-          ex('DB Shoulder Press', '3', '5 @ 70%', 7, 90, 'Fast lockout.', 'dbOhp'),
+          ex('DB Single-Arm Row', '3', '6/side', 8, 90, 'Fast and crisp.', 'saRow'),
+          ex('DB Shoulder Press', '3', '5 @ 75%', 8, 90, 'Violent lockout.', 'dbOhp'),
           ex('DB Rear-Lateral Raise', '2', '10', 6, 60, 'Strict.', 'rearLateral'),
           ex('Pallof Hold', '2', '15 sec/side', 6, 60, 'Own it.', 'pallofHold', 'rotational'),
         ]},

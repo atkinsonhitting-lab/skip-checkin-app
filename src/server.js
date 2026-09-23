@@ -1935,7 +1935,50 @@ function liftHistory(userId, itemKey, limit) {
     .all(userId, itemKey, limit || 8);
   for (const r of rows) r.sets = parseSets(r);
   return rows;
-}// Workout-mode day builder (Sep 23 2026): shapes one lifting day into
+}
+// Lifting day selection (Sep 23 2026, Bobby: the Lifting tab follows the real
+// seven-day calendar, not a rotation). Today's schedule label (e.g. 'Day 2')
+// picks the lifting day; Recovery / Mobility / OFF days get NO lifting —
+// OFF stays actual rest. Athletes with no schedule keep the legacy
+// block_start rotation as a fallback. Returns -1 for rest days.
+// An explicit ?lday= always wins (handled in pickLiftingDayIdx).
+function todayLiftingDayIdx(p, n) {
+  if (!n) return 0;
+  try {
+    const label = String(programCurrentDay(p) || '').trim();
+    const m = label.match(/day\s*(\d+)/i);
+    if (m) {
+      const k = parseInt(m[1], 10) - 1;
+      if (Number.isFinite(k)) return Math.max(0, Math.min(n - 1, k));
+    }
+    // A schedule exists but today isn't a lifting day -> rest, no lifting.
+    const prog = (p && p.prog) || {};
+    if (Array.isArray(prog.schedule) && prog.schedule.length) return -1;
+  } catch (e) { /* fall through to legacy rotation */ }
+  // No schedule: legacy rotation (days since block_start, mod lifting days).
+  try {
+    const r = db.prepare('SELECT block_start FROM remote_programs WHERE id = ?').get(p && p.id);
+    const start = r && r.block_start;
+    if (!start) return 0;
+    // Calendar-day difference in Chicago time — the lift rolls over at
+    // midnight, not 24h after whatever time block_start was recorded.
+    const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+    const tDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const parts = String(start).slice(0, 10).split('-').map(Number);
+    if (parts.length < 3 || parts.some((x) => !Number.isFinite(x))) return 0;
+    const sDay = new Date(parts[0], parts[1] - 1, parts[2]);
+    const days = Math.round((tDay - sDay) / 864e5);
+    return ((days % n) + n) % n;
+  } catch (e) { return 0; }
+}
+function pickLiftingDayIdx(req, p, n) {
+  const q = parseInt(req.query.lday, 10);
+  if (req.query.lday != null && String(req.query.lday).trim() !== '' && Number.isFinite(q)) {
+    return n ? Math.max(0, Math.min(n - 1, q)) : 0;
+  }
+  return todayLiftingDayIdx(p, n);
+}
+// Workout-mode day builder (Sep 23 2026): shapes one lifting day into
 // structured JSON for the guided session — Speed -> Med Ball -> Lifts.
 // Each item carries its checkoff key, prescription, video, last-time log,
 // and today's logged sets so the client can render without extra calls.
@@ -1947,7 +1990,7 @@ function buildWorkoutDay(userId, lifting, ldayIdx, today) {
   const dayKey = String(day.label || '');
   const checkoffs = getCheckoffs(userId, today);
   const spd = (Array.isArray(day.speed) ? day.speed : [])
-    .filter((s) => String((s && s.name) || '').trim())
+    .filter((s) => String((s && s.name) || '').trim() && !(s && s.held))
     .map((s) => {
       const key = `spd::lifting::${dayKey}::${s.name}`;
       return {
@@ -1957,7 +2000,7 @@ function buildWorkoutDay(userId, lifting, ldayIdx, today) {
       };
     });
   const med = (Array.isArray(day.medball) ? day.medball : [])
-    .filter((s) => String((s && s.name) || '').trim())
+    .filter((s) => String((s && s.name) || '').trim() && !(s && s.held))
     .map((s) => {
       const key = `med::lifting::${dayKey}::${s.name}`;
       return {
@@ -1967,7 +2010,7 @@ function buildWorkoutDay(userId, lifting, ldayIdx, today) {
       };
     });
   const lifts = (Array.isArray(day.exercises) ? day.exercises : [])
-    .filter((ex) => String((ex && ex.name) || '').trim())
+    .filter((ex) => String((ex && ex.name) || '').trim() && !(ex && ex.held))
     .map((ex) => {
       const name = String(ex.name || '');
       const key = `lift::${dayKey}::${name}`;
@@ -2062,7 +2105,7 @@ app.get('/program', requireLogin, requireWaiver, (req, res) => {
   // Day: manual pick (?day=) or auto-detected from the schedule (weekday -> day label).
   const labels = programDayLabels(p);
   const rawAuto = programCurrentDay(p);
-  const restToday = /^(off|rest)/i.test(String(rawAuto || '').trim());
+  const restToday = /^(off|rest|recovery|mobility)/i.test(String(rawAuto || '').trim());
   const autoDay = restToday ? '' : rawAuto;
   const reqDay = String(req.query.day || '').trim();
   const day = labels.some((l) => l.toLowerCase() === reqDay.toLowerCase())
@@ -2078,7 +2121,8 @@ app.get('/program', requireLogin, requireWaiver, (req, res) => {
         (Array.isArray(d.exercises) ? d.exercises : []).some((ex) => String((ex && ex.name) || '').trim())
       )
     : [];
-  const ldayIdx = liftDays.length ? Math.max(0, Math.min(liftDays.length - 1, parseInt(req.query.lday, 10) || 0)) : 0;
+  const ldayIdx = pickLiftingDayIdx(req, p, liftDays.length);
+  const todayLdayIdx = todayLiftingDayIdx(p, liftDays.length);
   const liftData = {};
   if (sub === 'lifting' && liftDays[ldayIdx]) {
     for (const ex of liftDays[ldayIdx].exercises || []) {
@@ -2091,7 +2135,7 @@ app.get('/program', requireLogin, requireWaiver, (req, res) => {
     sched: (prog.schedule || []).map((s) => [s[0], s[1]]),
     weekday: new Date().toLocaleDateString('en-US', { weekday: 'long', timeZone: 'America/Chicago' }),
     isToday: !reqDay || (autoDay && reqDay.toLowerCase() === autoDay.toLowerCase()),
-    ldayIdx, liftData,
+    ldayIdx, todayLdayIdx, liftData,
     videoLib: videoLibMap(),
     subs: todaySubs(req.user.id),
     sessionOrder: p.session_order || 'hitting_first',
@@ -2112,7 +2156,7 @@ app.get('/program/workout', requireLogin, requireWaiver, (req, res) => {
   const today = chiToday();
   const days = (Array.isArray(lifting.days) ? lifting.days : [])
     .filter((d) => (Array.isArray(d.exercises) ? d.exercises : []).some((ex) => String((ex && ex.name) || '').trim()));
-  const ldayIdx = days.length ? Math.max(0, Math.min(days.length - 1, parseInt(req.query.lday, 10) || 0)) : 0;
+  const ldayIdx = pickLiftingDayIdx(req, p, days.length);
   const wd = buildWorkoutDay(req.user.id, lifting, ldayIdx, today);
   if (!wd.day) return res.redirect('/program?sub=lifting');
   res.send(views.workoutPage(req.user, p, wd, ldayIdx));
@@ -2257,13 +2301,13 @@ app.get('/program/session', requireLogin, requireWaiver, (req, res) => {
     ? labels.find((l) => l.toLowerCase() === reqDay.toLowerCase())
     : (rawAuto || labels[0] || '');
   const schedLabel = (schedule.find((s) => s.weekday.toLowerCase() === weekday.toLowerCase()) || {}).label || '';
-  const restToday = /^(off|rest)/i.test(String(day || schedLabel || '').trim());
+  const restToday = /^(off|rest|recovery|mobility)/i.test(String(day || schedLabel || '').trim());
   const liftingId = db.prepare('SELECT lifting_program_id FROM remote_programs WHERE id = ?').get(p.id);
   const lifting = getLifting(liftingId && liftingId.lifting_program_id);
   const liftDays = lifting && Array.isArray(lifting.days)
     ? lifting.days.filter((d) => (Array.isArray(d.exercises) ? d.exercises : []).some((ex) => String((ex && ex.name) || '').trim()))
     : [];
-  const ldayIdx = liftDays.length ? Math.max(0, Math.min(liftDays.length - 1, parseInt(req.query.lday, 10) || 0)) : 0;
+  const ldayIdx = pickLiftingDayIdx(req, p, liftDays.length);
   const today = chiToday();
   const checkoffs = getCheckoffs(req.user.id, today);
   const sess = buildSessionDay(req.user.id, p, day, checkoffs, lifting, ldayIdx, videoLibMap(), todaySubs(req.user.id));
@@ -2325,6 +2369,24 @@ function applyProgramLog(userId, body) {
   const kind = String(body.kind || '').slice(0, 10);
   const itemKey = String(body.item_key || '').slice(0, 300);
   if (!kind || !itemKey) return { ok: false, error: 'missing' };
+  // Held-for-coach-review guard (Sep 2026): a held exercise must never be
+  // loggable, even if someone crafts the item key by hand. The key embeds
+  // the exercise name as its last :: segment.
+  if (kind === 'lift' || kind === 'spd' || kind === 'med') {
+    try {
+      const name = itemKey.split('::').pop().trim().toLowerCase();
+      const rp = db.prepare('SELECT remote_program_id FROM users WHERE id = ?').get(userId);
+      const lpRow = rp && rp.remote_program_id
+        ? db.prepare('SELECT lifting_program_id FROM remote_programs WHERE id = ?').get(rp.remote_program_id)
+        : null;
+      const lp = getLifting(lpRow && lpRow.lifting_program_id);
+      const isHeld = (Array.isArray(lp && lp.days) ? lp.days : []).some((d) =>
+        ['speed', 'medball', 'exercises'].some((k) =>
+          (Array.isArray(d[k]) ? d[k] : []).some((e) =>
+            e && e.held && String(e.name || '').trim().toLowerCase() === name)));
+      if (isHeld) return { ok: false, error: 'held' };
+    } catch (e) { /* guard is best-effort — never block legitimate logs */ }
+  }
   const today = chiToday();
   const existing = db
     .prepare('SELECT * FROM program_checkoffs WHERE user_id = ? AND day = ? AND item_key = ?')
@@ -2726,35 +2788,24 @@ app.get('/mental-game', requireLogin, (req, res) => {
   const bsRow = db.prepare('SELECT bible_study FROM users WHERE id = ?').get(req.user.id);
   const bibleOptIn = bsRow && bsRow.bible_study === 1;
   const checkedInToday = !!db.prepare("SELECT 1 FROM checkins WHERE user_id = ? AND date(created_at, 'unixepoch', 'localtime') = date('now', 'localtime')").get(req.user.id);
-  // Routine data (Sep 23 2026)
-  // Bobby (Sep 23 2026): detailed morning routine — each step has a title
-  // and what to actually do. Bible verse is woven in for opt-ins.
-  const DEFAULT_MORNING = [
-    { text: '10 slow breaths', detail: 'Feet on the ground. In for 4, out for 6. Start calm before the day starts.' },
-    { text: 'Say your keyword out loud', detail: 'One word. Yours. Say it like you mean it — this is your reset switch.' },
-    { text: 'See 3 good at-bats', detail: 'In your head, feel them. The pitch coming in, the barrel meeting it, the result. Make it vivid.' },
-    { text: "Read your one focus for today", detail: 'Just one thing. Not five. One. Write it down if you have to.' },
-    { text: 'Move', detail: 'Stretch, walk, get the blood going. Two minutes minimum — wake the body up.' },
-  ];
-  const DEFAULT_PREGAME = [
-    { text: '3 slow breaths', detail: 'Feet on the ground. Leave the day behind — school, phone, whatever. This is game time now.' },
-    { text: 'Say your keyword out loud', detail: 'Lock in. One word, full conviction.' },
-    { text: 'See 3 good at-bats', detail: 'Feel them like they already happened. You\'ve done this before.' },
-    { text: 'Shake it out', detail: 'Roll your shoulders, loosen your jaw, unclench everything. Tension is the enemy.' },
-    { text: 'Lock in', detail: '"I\'m ready. Attack." Say it to yourself and believe it.' },
-  ];
-  const DEFAULT_PRACTICE = [
-    { text: '3 breaths', detail: 'Clear the last class, the last game, whatever\'s on your mind. Be here now.' },
-    { text: 'Set one intention', detail: '"Today I\'m working on ___." Fill in the blank. Practice with a purpose.' },
-    { text: 'Say your keyword', detail: 'Get your head right before the first rep.' },
-    { text: 'See one perfect rep', detail: 'In your head, before you start. Feel the whole thing go right.' },
-  ];
+  // Routine defaults now live at module scope (personalized routines, Sep 23 2026).
   const toItems = (arr) => arr.map(t => typeof t === 'string' ? { text: t, done: false } : { text: t.text, detail: t.detail || '', done: false });
-  let routineRow = db.prepare('SELECT morning_json, pregame_json, prepractice_json FROM mental_routines WHERE user_id = ?').get(req.user.id);
+  const reselectRoutines = () => db.prepare('SELECT morning_json, pregame_json, prepractice_json, source FROM mental_routines WHERE user_id = ?').get(req.user.id);
+  let routineRow = reselectRoutines();
   if (!routineRow) {
-    db.prepare(`INSERT INTO mental_routines (user_id, morning_json, pregame_json, prepractice_json, updated_at) VALUES (?, ?, ?, ?, ?)`)
-      .run(req.user.id, JSON.stringify(toItems(DEFAULT_MORNING)), JSON.stringify(toItems(DEFAULT_PREGAME)), JSON.stringify(toItems(DEFAULT_PRACTICE)), new Date().toISOString());
-    routineRow = db.prepare('SELECT morning_json, pregame_json, prepractice_json FROM mental_routines WHERE user_id = ?').get(req.user.id);
+    // First visit: questionnaire answers → personalized routines; otherwise
+    // the generic defaults (Sep 23 2026, Bobby — no two hitters same).
+    let made = false;
+    try { made = personalizeRoutinesFor(req.user.id); } catch (e) { made = false; }
+    if (!made) {
+      db.prepare(`INSERT INTO mental_routines (user_id, morning_json, pregame_json, prepractice_json, source, updated_at) VALUES (?, ?, ?, ?, 'default', ?)`)
+        .run(req.user.id, JSON.stringify(toItems(DEFAULT_MORNING)), JSON.stringify(toItems(DEFAULT_PREGAME)), JSON.stringify(toItems(DEFAULT_PRACTICE)), new Date().toISOString());
+    }
+    routineRow = reselectRoutines();
+  } else if ((routineRow.source || 'default') === 'default') {
+    // Lazy upgrade: hitters who answered the questionnaire since the generic
+    // defaults get their personalized routines on next visit.
+    try { if (personalizeRoutinesFor(req.user.id)) routineRow = reselectRoutines(); } catch (e) {}
   }
   // Backfill: existing rows may have empty morning/pregame/practice lists
   // from before defaults existed (Sep 23 2026).
@@ -2763,26 +2814,20 @@ app.get('/mental-game', requireLogin, (req, res) => {
     const g = JSON.parse(routineRow.pregame_json || '[]');
     const p = JSON.parse(routineRow.prepractice_json || '[]');
     let changed = false;
-    if (!m.length) { routineRow.morning_json = JSON.stringify(toItems(DEFAULT_MORNING)); changed = true; }
-    if (!g.length) { routineRow.pregame_json = JSON.stringify(toItems(DEFAULT_PREGAME)); changed = true; }
-    if (!p.length) { routineRow.prepractice_json = JSON.stringify(toItems(DEFAULT_PRACTICE)); changed = true; }
+    // Personalized rows backfill from the questionnaire build; default rows
+    // backfill from the generic defaults (Sep 23 2026).
+    let pers = null;
+    if ((routineRow.source || 'default') === 'personalized') {
+      try { pers = buildPersonalRoutines(getMentalAnswers(req.user.id)); } catch (e) { pers = null; }
+    }
+    if (!m.length) { routineRow.morning_json = JSON.stringify(toItems(pers ? pers.morning : DEFAULT_MORNING)); changed = true; }
+    if (!g.length) { routineRow.pregame_json = JSON.stringify(toItems(pers ? pers.pregame : DEFAULT_PREGAME)); changed = true; }
+    if (!p.length) { routineRow.prepractice_json = JSON.stringify(toItems(pers ? pers.practice : DEFAULT_PRACTICE)); changed = true; }
     // Upgrade: old default items (plain text, no detail) get the detailed
     // versions. Matches both the very old one-liners and the short titles.
-    // Custom user items are untouched.
-    const OLD_DEFAULTS = [
-      '10 slow breaths — feet on the ground, start calm',
-      'Say your keyword out loud',
-      'See 3 good at-bats in your head — feel them',
-      'Read your one focus for today',
-      'Move — stretch, walk, get the blood going',
-      '3 slow breaths — feet on the ground, leave the day behind',
-      'Shake it out — roll your shoulders, loosen up',
-      'Lock in: "I\'m ready. Attack."',
-      '3 breaths — clear the last class, last game, whatever',
-      'Set one intention: "Today I\'m working on ___"',
-      'Say your keyword',
-      'See one perfect rep in your head before you start',
-    ];
+    // Custom user items are untouched. Personalized rows skip this entirely —
+    // their details are already specific (Sep 23 2026).
+    const OLD_DEFAULTS = OLD_DEFAULT_ROUTINE_TEXTS;
     const upgrade = (items, defaults) => {
       const byText = {};
       for (const d of defaults) byText[d.text.toLowerCase()] = d;
@@ -2839,6 +2884,7 @@ app.get('/mental-game', requireLogin, (req, res) => {
     routine: { morning: routineItems, done: routineDone },
     pregame: { items: pregameItems, done: pregameDone },
     practice: { items: practiceItems, done: practiceDone },
+    routineSource: (routineRow && routineRow.source) || 'default',
   }));
 });
 
@@ -2884,8 +2930,8 @@ app.post('/mental-game/routine/add', requireLogin, (req, res) => {
     const row = db.prepare(`SELECT ${col} FROM mental_routines WHERE user_id = ?`).get(req.user.id);
     const items = row ? JSON.parse(row[col] || '[]') : [];
     items.push({ text, detail, done: false });
-    db.prepare(`INSERT INTO mental_routines (user_id, ${col}, updated_at) VALUES (?, ?, ?)
-      ON CONFLICT(user_id) DO UPDATE SET ${col}=excluded.${col}, updated_at=excluded.updated_at`)
+    db.prepare(`INSERT INTO mental_routines (user_id, ${col}, source, updated_at) VALUES (?, ?, 'custom', ?)
+      ON CONFLICT(user_id) DO UPDATE SET ${col}=excluded.${col}, source='custom', updated_at=excluded.updated_at`)
       .run(req.user.id, JSON.stringify(items), new Date().toISOString());
   }
   res.redirect(back);
@@ -2908,7 +2954,7 @@ app.post('/mental-game/routine/delete', requireLogin, (req, res) => {
     const items = JSON.parse(row[col] || '[]');
     if (idx >= 0 && idx < items.length) {
       items.splice(idx, 1);
-      db.prepare(`UPDATE mental_routines SET ${col} = ?, updated_at = ? WHERE user_id = ?`)
+      db.prepare(`UPDATE mental_routines SET ${col} = ?, source='custom', updated_at = ? WHERE user_id = ?`)
         .run(JSON.stringify(items), new Date().toISOString(), req.user.id);
     }
   }
@@ -2926,7 +2972,7 @@ app.post('/mental-game/routine/edit', requireLogin, (req, res) => {
     if (idx >= 0 && idx < items.length) {
       items[idx].text = text;
       items[idx].detail = detail;
-      db.prepare(`UPDATE mental_routines SET ${col} = ?, updated_at = ? WHERE user_id = ?`)
+      db.prepare(`UPDATE mental_routines SET ${col} = ?, source='custom', updated_at = ? WHERE user_id = ?`)
         .run(JSON.stringify(items), new Date().toISOString(), req.user.id);
     }
   }
@@ -3299,6 +3345,140 @@ async function refreshMentalPlan(userId) {
   }
 }
 
+// ---- Personalized mental routines (Sep 23 2026, Bobby) ----
+// No two hitters get the same routine. The generic defaults below are the
+// fallback for hitters who haven't answered the questionnaire; everyone
+// else gets checklists built from their own answers.
+const DEFAULT_MORNING = [
+  { text: '10 slow breaths', detail: 'Feet on the ground. In for 4, out for 6. Start calm before the day starts.' },
+  { text: 'Say your keyword out loud', detail: 'One word. Yours. Say it like you mean it — this is your reset switch.' },
+  { text: 'See 3 good at-bats', detail: 'In your head, feel them. The pitch coming in, the barrel meeting it, the result. Make it vivid.' },
+  { text: "Read your one focus for today", detail: 'Just one thing. Not five. One. Write it down if you have to.' },
+  { text: 'Move', detail: 'Stretch, walk, get the blood going. Two minutes minimum — wake the body up.' },
+];
+const DEFAULT_PREGAME = [
+  { text: '3 slow breaths', detail: 'Feet on the ground. Leave the day behind — school, phone, whatever. This is game time now.' },
+  { text: 'Say your keyword out loud', detail: 'Lock in. One word, full conviction.' },
+  { text: 'See 3 good at-bats', detail: 'Feel them like they already happened. You\'ve done this before.' },
+  { text: 'Shake it out', detail: 'Roll your shoulders, loosen your jaw, unclench everything. Tension is the enemy.' },
+  { text: 'Lock in', detail: '"I\'m ready. Attack." Say it to yourself and believe it.' },
+];
+const DEFAULT_PRACTICE = [
+  { text: '3 breaths', detail: 'Clear the last class, the last game, whatever\'s on your mind. Be here now.' },
+  { text: 'Set one intention', detail: '"Today I\'m working on ___." Fill in the blank. Practice with a purpose.' },
+  { text: 'Say your keyword', detail: 'Get your head right before the first rep.' },
+  { text: 'See one perfect rep', detail: 'In your head, before you start. Feel the whole thing go right.' },
+];
+const OLD_DEFAULT_ROUTINE_TEXTS = [
+  '10 slow breaths — feet on the ground, start calm',
+  'Say your keyword out loud',
+  'See 3 good at-bats in your head — feel them',
+  'Read your one focus for today',
+  'Move — stretch, walk, get the blood going',
+  '3 slow breaths — feet on the ground, leave the day behind',
+  'Shake it out — roll your shoulders, loosen up',
+  'Lock in: "I\'m ready. Attack."',
+  '3 breaths — clear the last class, last game, whatever',
+  'Set one intention: "Today I\'m working on ___"',
+  'Say your keyword',
+  'See one perfect rep in your head before you start',
+];
+// Every default item text ever shipped — used to tell "never touched the
+// defaults" apart from "edited his own routine".
+const KNOWN_DEFAULT_ROUTINE_TEXTS = new Set(
+  [...DEFAULT_MORNING, ...DEFAULT_PREGAME, ...DEFAULT_PRACTICE].map((d) => d.text.toLowerCase())
+    .concat(OLD_DEFAULT_ROUTINE_TEXTS.map((s) => s.toLowerCase()))
+);
+
+// Deterministic questionnaire → routine mapping (no LLM: instant, free,
+// consistent). Each list is a priority-ordered pool, sliced to length —
+// hitters with no routine yet get the tiny starter (3ish items).
+function buildPersonalRoutines(answers) {
+  const a = answers || {};
+  const has = (v) => String(v || '').trim().length > 0;
+  const t = (v, n) => { v = String(v || '').trim(); return v.length > n ? v.slice(0, n - 1).trimEnd() + '…' : v; };
+  const kw = String(a.keyword || '').trim();
+  const starter = a.has_routine === 'no';
+  const light = a.signal_light;
+
+  const morningPool = [];
+  if (light === 'red') morningPool.push({ text: '10 slow breaths — cool the red', detail: 'In for 4, out for 6. You run red when it gets emotional — this is your daily practice at staying green.' });
+  else if (light === 'yellow') morningPool.push({ text: '10 slow breaths', detail: 'In for 4, out for 6. You run yellow — catch the tension early in the day before it builds.' });
+  else morningPool.push({ text: '10 slow breaths', detail: 'Feet on the ground. In for 4, out for 6. Start calm before the day starts.' });
+  if (has(kw)) morningPool.push({ text: `Say your keyword: "${t(kw, 24)}"`, detail: 'Out loud. One word, full conviction — this is your reset switch for the day.' });
+  else morningPool.push({ text: 'Pick your reset word', detail: "One word that locks you back in. Yours, not someone else's — then use it all day." });
+  if (has(a.worst_self_talk)) morningPool.push({ text: 'Catch the sentence', detail: `When you hear "${t(a.worst_self_talk, 90)}" today — that's your cue. It's never true. Answer it${has(kw) ? ' with your keyword' : ''}.` });
+  else if (has(a.hard_voice)) morningPool.push({ text: 'Name the governor', detail: `It says "${t(a.hard_voice, 90)}". Hear it, label it, don't obey it.` });
+  if (a.confidence_source === 'disappears') morningPool.push({ text: 'Open the cookie jar', detail: has(a.best_game) ? `Name 2 times you came through — like ${t(a.best_game, 110)}` : 'Name 2 times you came through under pressure. Evidence beats feelings.' });
+  else if (a.confidence_source === 'preparation') morningPool.push({ text: 'Trust the work', detail: 'Your confidence comes from preparation — you put the work in. Walk like it today.' });
+  else if (a.confidence_source === 'past_success') morningPool.push({ text: "You've done it before", detail: 'Your confidence comes from past success. Today is just another chance to add to the pile.' });
+  morningPool.push({ text: 'Read your one focus for today', detail: 'Just one thing. Not five. One. Write it down if you have to.' });
+  morningPool.push({ text: 'Move', detail: 'Stretch, walk, get the blood going. Two minutes minimum — wake the body up.' });
+
+  const pregamePool = [];
+  if (has(a.between_pitches)) pregamePool.push({ text: 'Your between-pitch reset', detail: `"${t(a.between_pitches, 110)}" — that's YOUR 15 seconds. Do it between every pitch.` });
+  else pregamePool.push({ text: '3 slow breaths', detail: 'Feet on the ground. Leave the day behind — school, phone, whatever. Game time now.' });
+  if (light === 'red' || light === 'yellow') pregamePool.push({ text: 'Shake it out', detail: 'Roll shoulders, loosen jaw, unclench everything. Tension is the enemy — you know how you run.' });
+  const sp = a.struggle_pattern;
+  if (sp === 'expecting_results') pregamePool.push({ text: 'One pitch', detail: 'Win THIS pitch. Expecting results creates pressure — the process is the only thing you control.' });
+  else if (sp === 'thinking_mechanics') pregamePool.push({ text: 'See ball, hit ball', detail: 'Thinking mechanics in the box freezes the body. One external cue: see it, hit it.' });
+  else if (sp === 'worried_watching') pregamePool.push({ text: 'The only eyes that matter', detail: has(a.focus_pull) ? `Not ${t(a.focus_pull, 70)} — the only eyes that matter are yours, on the ball.` : "Not the crowd, not who's watching — your eyes, on the ball." });
+  else if (sp === 'blank') pregamePool.push({ text: 'Breathe, ground, one word', detail: 'Feet in the dirt. One breath. Your keyword. Blank is just noise — breathe through it.' });
+  const bm = a.big_moment_mode;
+  if (bm === 'attacking') pregamePool.push({ text: 'Protect the attack', detail: "You attack in big moments — don't let the moment change that. Same you, bigger stage." });
+  else if (bm === 'hoping' || bm === 'depends') pregamePool.push({ text: 'Attack the moment', detail: 'Decide right now: when the big moment comes, you attack. Hoping is not a plan.' });
+  if (a.visualization === 'no') pregamePool.push({ text: 'See 3 good at-bats', detail: "You've never tried picturing success — start now. Feel the pitch, the barrel, the result. Make it vivid." });
+  else if (a.visualization === 'sometimes') pregamePool.push({ text: 'See 3 good at-bats', detail: 'You sometimes picture it — make it every game. Feel them like they already happened.' });
+  else pregamePool.push({ text: 'See 3 good at-bats', detail: "You've done this before — feel them like they already happened." });
+  if (has(kw)) pregamePool.push({ text: `Say your keyword: "${t(kw, 24)}"`, detail: 'Lock in. One word, full conviction, right before first pitch.' });
+
+  const practicePool = [
+    { text: '3 breaths — be here now', detail: "Clear the last class, the last game, whatever's on your mind. Be here now." },
+  ];
+  if (has(a.focus_pull)) practicePool.push({ text: 'Lock the focus', detail: `${t(a.focus_pull, 80)} stays outside the cage. One intention in here.` });
+  practicePool.push({ text: 'Set one intention', detail: '"Today I\'m working on ___." Fill in the blank. Practice with a purpose.' });
+  if (has(kw)) practicePool.push({ text: `Say your keyword: "${t(kw, 24)}"`, detail: 'Get your head right before the first rep.' });
+  if (a.post_game === 'replay' || a.post_game === 'beat_up') practicePool.push({ text: 'Flush yesterday', detail: "Review a bad game for 5 minutes, then it's gone. Beating yourself up is not preparation." });
+  else if (a.visualization === 'no' || a.visualization === 'sometimes') practicePool.push({ text: 'See one perfect rep', detail: 'In your head, before you start. Feel the whole thing go right — practice the picture.' });
+
+  const done = (arr) => arr.map((x) => ({ text: x.text, detail: x.detail || '', done: false }));
+  return {
+    morning: done(morningPool.slice(0, starter ? 3 : 6)),
+    pregame: done(pregamePool.slice(0, starter ? 4 : 6)),
+    practice: done(practicePool.slice(0, starter ? 3 : 5)),
+  };
+}
+
+// Write a hitter's questionnaire-based routines. Returns true when written.
+// Never touches 'custom' rows — a hitter who edited his routines keeps them.
+// A 'default' row whose items don't all match shipped defaults is treated as
+// custom (edited before source tracking existed) and left alone.
+function personalizeRoutinesFor(userId) {
+  const answers = getMentalAnswers(userId);
+  if (!Object.values(answers).some((v) => String(v || '').trim())) return false;
+  let row = null;
+  try { row = db.prepare('SELECT source FROM mental_routines WHERE user_id = ?').get(userId); } catch (e) { return false; }
+  if (row && row.source === 'custom') return false;
+  if (row && row.source !== 'personalized') {
+    try {
+      const full = db.prepare('SELECT morning_json, pregame_json, prepractice_json FROM mental_routines WHERE user_id = ?').get(userId);
+      const items = [...JSON.parse(full.morning_json || '[]'), ...JSON.parse(full.pregame_json || '[]'), ...JSON.parse(full.prepractice_json || '[]')];
+      if (items.length && items.some((it) => !KNOWN_DEFAULT_ROUTINE_TEXTS.has(String(it.text || '').toLowerCase()))) {
+        db.prepare("UPDATE mental_routines SET source = 'custom' WHERE user_id = ?").run(userId);
+        return false;
+      }
+    } catch (e) { /* fall through and personalize */ }
+  }
+  const r = buildPersonalRoutines(answers);
+  const now = new Date().toISOString();
+  db.prepare(`INSERT INTO mental_routines (user_id, morning_json, pregame_json, prepractice_json, source, updated_at)
+    VALUES (?, ?, ?, ?, 'personalized', ?)
+    ON CONFLICT(user_id) DO UPDATE SET morning_json=excluded.morning_json, pregame_json=excluded.pregame_json,
+      prepractice_json=excluded.prepractice_json, source='personalized', updated_at=excluded.updated_at`)
+    .run(userId, JSON.stringify(r.morning), JSON.stringify(r.pregame), JSON.stringify(r.practice), now);
+  return true;
+}
+
 app.post('/mental-game/save', requireLogin, async (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
   // Questionnaire v2 (Sep 23 2026): answers stored per-question so Bobby can
@@ -3332,6 +3512,9 @@ app.post('/mental-game/save', requireLogin, async (req, res) => {
   db.prepare(`INSERT INTO mental_baseline (user_id, plan, updated_at) VALUES (?, ?, ?)
     ON CONFLICT(user_id) DO UPDATE SET plan=excluded.plan, updated_at=excluded.updated_at`)
     .run(req.user.id, plan, now);
+  // Answers changed → rebuild his personalized routines (never touches a
+  // 'custom' row; Sep 23 2026, Bobby — no two hitters get the same routine).
+  try { personalizeRoutinesFor(req.user.id); } catch (e) { console.warn('routine personalize failed:', e.message); }
   res.redirect(planFailed ? '/mental-game/questionnaire?planfailed=1' : '/mental-game/questionnaire?saved=1');
 });
 
@@ -3574,16 +3757,38 @@ app.post('/coach/lifting/create', requireLiftingCoach, (req, res) => {
 });
 // Assign a template to an athlete: copies the template into a private,
 // per-athlete program (later tweaks never touch the template), then links it.
+// Bobby's rule (Sep 23 2026): the copy is personalized from the athlete's
+// intake questionnaire at assign time — equipment he lacks and injuries he
+// flagged get swapped for fitting alternatives, beginners get eased RPE.
+// Every swap lands in the program notes for Bobby's review in the editor.
+// Athletes with no questionnaire answers get the template verbatim.
 app.post('/coach/lifting/assign', requireLiftingCoach, (req, res) => {
   const templateId = Number(req.body.template_id);
   const programId = Number(req.body.program_id);
   const tpl = getLifting(templateId);
   if (!tpl || !tpl.is_template || !programId) return res.redirect('/coach/lifting');
   const athlete = db.prepare('SELECT athlete_name FROM remote_programs WHERE id = ?').get(programId);
-  const copyName = tpl.name + ' — ' + (athlete ? athlete.athlete_name : 'athlete');
+  const athleteName = athlete ? athlete.athlete_name : 'athlete';
+  const copyName = tpl.name + ' — ' + athleteName;
+  let days = tpl.days;
+  const notes = tpl.notes || [];
+  let personalization_notes = [];
+  try {
+    const user = db.prepare('SELECT id FROM users WHERE remote_program_id = ?').get(programId);
+    const row = user ? db.prepare('SELECT answers_json FROM intake_responses WHERE user_id = ? ORDER BY id DESC LIMIT 1').get(user.id) : null;
+    if (row && row.answers_json) {
+      const p = personalizeLiftingDays(tpl.days, JSON.parse(row.answers_json), athleteName);
+      days = p.days;
+      personalization_notes = p.personalization_notes || [];
+    }
+  } catch (e) { /* personalization is best-effort — never block the assign */ }
   const info = db
     .prepare('INSERT INTO lifting_programs (name, is_template, program_json, updated_at) VALUES (?, 0, ?, ?)')
-    .run(copyName, JSON.stringify({ days: tpl.days, notes: tpl.notes }), new Date().toISOString());
+    .run(copyName, JSON.stringify({
+      days, notes, personalization_notes,
+      source: 'personalized', // never auto-overwritten; editor saves flip to 'custom'
+      personalized_from: { template_id: templateId, template_name: tpl.name },
+    }), new Date().toISOString());
   db.prepare('UPDATE remote_programs SET lifting_program_id = ? WHERE id = ?').run(info.lastInsertRowid, programId);
   res.redirect('/coach/lifting/' + info.lastInsertRowid + '/edit');
 });
@@ -3689,13 +3894,26 @@ function sanitizeLiftingDays(rawDays) {
     return s === 'rotational' || s === 'brakes' ? s : 'strength';
   };
   const cleanBlock = (arr) => (Array.isArray(arr) ? arr : []).slice(0, 12)
-    .map((s) => ({
-      name: String((s && s.name) || '').trim().slice(0, 120),
-      volume: String((s && s.volume) || '').trim().slice(0, 60),
-      notes: String((s && s.notes) || '').trim().slice(0, 200),
-      video: cleanUrl(s && s.video),
-      intent: cleanIntent(s && s.intent),
-    }))
+    .map((s) => {
+      const name = String((s && s.name) || '').trim().slice(0, 120);
+      // Held-for-coach-review survives the save until Bobby replaces the
+      // exercise (name differs from held_original) — then it's released.
+      const held = !!(s && s.held);
+      const heldOriginal = String((s && s.held_original) || '').trim().slice(0, 120);
+      const stillHeld = held && heldOriginal && name === heldOriginal;
+      return {
+        name,
+        volume: String((s && s.volume) || '').trim().slice(0, 60),
+        notes: String((s && s.notes) || '').trim().slice(0, 200),
+        video: cleanUrl(s && s.video),
+        intent: cleanIntent(s && s.intent),
+        ...(stillHeld ? {
+          held: true,
+          held_original: heldOriginal,
+          held_reason: String((s && s.held_reason) || '').trim().slice(0, 200),
+        } : {}),
+      };
+    })
     .filter((s) => s.name);
   return (Array.isArray(rawDays) ? rawDays : []).slice(0, 14).map((d, i) => ({
     label: String((d && d.label) || '').trim().slice(0, 40) || ('Day ' + String.fromCharCode(65 + i)),
@@ -3705,8 +3923,12 @@ function sanitizeLiftingDays(rawDays) {
     medball: cleanBlock(d && d.medball),
     exercises: (Array.isArray(d && d.exercises) ? d.exercises : []).slice(0, 40).map((e) => {
       const trpe = Number(e && e.target_rpe);
+      const name = String((e && e.name) || '').trim().slice(0, 120);
+      const held = !!(e && e.held);
+      const heldOriginal = String((e && e.held_original) || '').trim().slice(0, 120);
+      const stillHeld = held && heldOriginal && name === heldOriginal;
       return {
-        name: String((e && e.name) || '').trim().slice(0, 120),
+        name,
         sets: String((e && e.sets) || '').trim().slice(0, 12),
         reps: String((e && e.reps) || '').trim().slice(0, 24),
         target_rpe: trpe >= 1 && trpe <= 10 ? trpe : '',
@@ -3715,6 +3937,11 @@ function sanitizeLiftingDays(rawDays) {
         video: cleanUrl(e && e.video),
         section: cleanSection(e && e.section),
         intent: cleanIntent(e && e.intent),
+        ...(stillHeld ? {
+          held: true,
+          held_original: heldOriginal,
+          held_reason: String((e && e.held_reason) || '').trim().slice(0, 200),
+        } : {}),
       };
     }).filter((e) => e.name),
   }));
@@ -3780,7 +4007,7 @@ app.post('/coach/lifting/:id/save', requireLiftingCoach, (req, res) => {
     // Saving clears the intake-draft marker — Bobby has reviewed the program.
     // Other JSON fields (progression read, block index) are preserved.
     finalName,
-    JSON.stringify({ ...lp, days, notes: lp.notes, draft: false }),
+    JSON.stringify({ ...lp, days, notes: lp.notes, draft: false, source: 'custom' }),
     new Date().toISOString(),
     lp.id
   );
@@ -4135,6 +4362,7 @@ const LIFT_POOL = [
   { name: 'Step-Up', pattern: 'unilateral', eq: ['dumbbell', 'box'], goals: ['strength', 'health'], avoid: ['knee'], schemes: { strength: ['3', '8', 8, 'Each leg'], power: ['3', '6', 8, 'Each leg'], speed: ['3', '5', 7, 'Drive up fast'], health: ['3', '8', 6, 'Low box, each leg'] } },
   { name: 'Single-Leg RDL', pattern: 'unilateral', eq: ['dumbbell'], goals: ['exit_velo', 'health', 'balanced'], avoid: ['back'], schemes: { strength: ['3', '8', 7, 'Each leg'], power: ['3', '8', 7, 'Each leg'], speed: ['3', '6', 7, 'Each leg'], health: ['3', '10', 6, 'Each leg'] } },
   { name: 'Lateral Lunge', pattern: 'unilateral', eq: ['dumbbell'], goals: ['exit_velo', 'health'], avoid: ['knee', 'hip'], schemes: { strength: ['3', '8', 7, 'Each side — baseball moves sideways'], power: ['3', '8', 7, 'Each side'], speed: ['3', '6', 7, 'Each side'], health: ['3', '8', 6, 'Each side'] } },
+  { name: 'Bodyweight Reverse Lunge', pattern: 'unilateral', eq: [], goals: ['balanced', 'health'], avoid: [], schemes: { strength: ['3', '10', 7, 'Each side'], power: ['3', '8', 7, 'Each side'], speed: ['3', '6', 7, 'Each side'], health: ['3', '10', 6, 'Each side'] } },
   // --- Horizontal push ---
   { name: 'Bench Press', pattern: 'push_h', eq: ['barbell', 'bench', 'rack'], goals: ['strength', 'balanced'], avoid: ['shoulder', 'elbow'], schemes: { strength: ['5', '5', 8, ''], power: ['4', '5', 8, '2-sec pause on chest'], speed: ['5', '3', 7, 'Speed reps'], health: ['3', '8', 6, ''] } },
   { name: 'DB Bench Press', pattern: 'push_h', eq: ['dumbbell', 'bench'], goals: ['strength', 'exit_velo', 'balanced'], avoid: ['shoulder'], schemes: { strength: ['4', '8', 8, ''], power: ['4', '6', 8, ''], speed: ['4', '5', 7, 'Explode up'], health: ['3', '10', 6, 'Neutral grip if shoulders cranky'] } },
@@ -4168,6 +4396,8 @@ const LIFT_POOL = [
   { name: 'Med Ball Slam', pattern: 'rotational', eq: ['medball'], goals: ['explosive', 'exit_velo'], avoid: ['shoulder', 'back'], schemes: { strength: ['3', '8', 8, ''], power: ['4', '6', 9, 'Max intent'], speed: ['4', '5', 8, 'Max intent'], health: ['3', '8', 6, 'Light ball'] } },
   { name: 'Med Ball Overhead Throw', pattern: 'rotational', eq: ['medball'], goals: ['explosive'], avoid: ['shoulder', 'back'], schemes: { strength: ['3', '6', 8, ''], power: ['4', '5', 9, 'Max intent'], speed: ['4', '4', 8, 'Max intent'], health: ['3', '6', 6, ''] } },
   { name: 'Rotational Jump', pattern: 'rotational', eq: [], goals: ['explosive', 'exit_velo'], avoid: ['knee', 'ankle'], schemes: { strength: ['3', '4', 7, 'Each side — no-ball rotational power sub'], power: ['4', '4', 8, 'Each side'], speed: ['4', '4', 8, 'Each side'], health: ['3', '4', 6, 'Each side, easy'] } },
+  { name: 'DB Trunk Rotation', pattern: 'rotational', eq: ['dumbbell'], goals: ['exit_velo', 'balanced'], avoid: [], schemes: { strength: ['3', '10', 7, 'Each side — hips do the work'], power: ['3', '8', 8, 'Each side, fast'], speed: ['3', '8', 7, 'Each side'], health: ['3', '10', 6, 'Each side, smooth'] } },
+  { name: 'Banded Rotation', pattern: 'rotational', eq: ['bands'], goals: ['exit_velo', 'balanced'], avoid: [], schemes: { strength: ['3', '10', 7, 'Each side — anti-rotation + rotation'], power: ['3', '8', 8, 'Each side, fast'], speed: ['3', '8', 7, 'Each side'], health: ['3', '10', 6, 'Each side, smooth'] } },
   // --- Jumps ---
   { name: 'Box Jump', pattern: 'jump', eq: ['box'], goals: ['explosive', 'exit_velo'], avoid: ['knee', 'ankle'], schemes: { strength: ['4', '3', 7, 'Stick the landing'], power: ['4', '3', 8, ''], speed: ['5', '3', 8, 'Max height, full rest'], health: ['3', '3', 6, 'Low box'] } },
   { name: 'Broad Jump', pattern: 'jump', eq: [], goals: ['explosive', 'exit_velo', 'balanced'], avoid: ['knee', 'ankle'], schemes: { strength: ['4', '3', 7, 'Stick the landing'], power: ['4', '3', 8, ''], speed: ['5', '3', 8, 'Max distance, full rest'], health: ['3', '3', 6, 'Sub-max'] } },
@@ -4221,16 +4451,160 @@ function pickExercise(pattern, tags, rules, track, usedNames, gaps) {
     .map((e) => ({ e, score: (e.goals.includes(track) ? 2 : 0) + (e.goals.includes('balanced') ? 1 : 0) }))
     .sort((x, y) => y.score - x.score);
   if (scored.length) return { ex: scored[0].e, sub: null };
-  // Nothing fits — report the gap, try ANYTHING in the pattern (Bobby decides).
+  // Nothing clean fits. If injuries are in play, NEVER auto-assign an
+  // injury-conflicting movement — return null so the caller keeps the
+  // original and flags it for the coach. Unsafe work is never assigned
+  // automatically (Sep 23 2026).
+  if (rules.length) {
+    if (gaps && !gaps.includes(pattern)) gaps.push(pattern);
+    return { ex: null, sub: `NO SAFE ${pattern.toUpperCase()} OPTION with his equipment/injury — coach must pick` };
+  }
+  // No injuries — report the gap, try ANYTHING in the pattern (coach decides).
   const anyFit = cands.filter((e) => fitsEq(e, tags));
   if (anyFit.length) {
     const e = anyFit[0];
-    return { ex: e, sub: `INJURY WORKAROUND NEEDED: only option for ${pattern} is ${e.name} — review` };
+    return { ex: e, sub: `Only option for ${pattern} with his equipment is ${e.name} — review` };
   }
   if (gaps && !gaps.includes(pattern)) gaps.push(pattern);
   // Last resort: bodyweight-only entry in the pattern.
   const bw = cands.find((e) => (e.eq || []).length === 0);
   return { ex: bw || null, sub: bw ? null : `NO ${pattern.toUpperCase()} OPTION with his equipment` };
+}
+
+// ---- Questionnaire-driven lifting personalization (Sep 23 2026, Bobby) ----
+// "That's the whole premise" — assigning a template to an athlete must build
+// HIS copy from HIS intake questionnaire, not hand everyone the same sheet.
+// The v4 Different Animal templates are the framework (session order, block
+// identity, contrast pairings); this layer adapts the copy at assign time:
+//   1. Equipment — anything he doesn't have gets swapped for the same
+//      movement pattern that fits what he does have.
+//   2. Injuries — anything his injury answers flag gets swapped for a
+//      same-pattern alternative that avoids it.
+//   3. Experience — beginners get RPE targets eased a point.
+// Every swap is recorded in the program notes so Bobby reviews it in the
+// editor. Athletes with no intake answers get the template verbatim.
+// Metadata for the v4 template exercise names: pattern (LIFT_POOL pattern,
+// or 'speed'/'mobility' which have no substitutes), eq (required equipment
+// tags), avoid (injury keys, same vocabulary as LIFT_POOL entries).
+const V4_EXERCISE_META = {
+  'mb shot-put throw':        { pattern: 'rotational', eq: ['medball'], avoid: [] },
+  'plyo push-up':             { pattern: 'push_h', eq: [], avoid: [] },
+  'db bench press':           { pattern: 'push_h', eq: ['dumbbell', 'bench'], avoid: [] },
+  'db single-arm row':        { pattern: 'pull_h', eq: ['dumbbell'], avoid: [] },
+  'cable rotation':           { pattern: 'rotational', eq: ['cables'], avoid: [] },
+  'pallof press':             { pattern: 'core', eq: ['cables'], avoid: [] },
+  '10-yard sprint':           { pattern: 'speed', eq: ['field'], avoid: [] },
+  'trap-bar jump':            { pattern: 'jump', eq: ['trapbar'], avoid: [] },
+  'trap-bar deadlift':        { pattern: 'hinge', eq: ['trapbar'], avoid: ['back'] },
+  'nordic curl':              { pattern: 'hinge', eq: [], avoid: ['knee'] },
+  'lateral box squat':        { pattern: 'squat', eq: ['barbell', 'rack', 'box'], avoid: ['knee'] },
+  'mb rotational throw':      { pattern: 'rotational', eq: ['medball'], avoid: [] },
+  'single-arm landmine press':{ pattern: 'push_v', eq: ['barbell'], avoid: ['shoulder'] },
+  'db shoulder press':        { pattern: 'push_v', eq: ['dumbbell'], avoid: ['shoulder'] },
+  'db rear-lateral raise':    { pattern: 'pull_h', eq: ['dumbbell'], avoid: [] },
+  'pallof hold':              { pattern: 'core', eq: ['cables'], avoid: [] },
+  'drop-catch split jump':    { pattern: 'jump', eq: [], avoid: ['knee', 'ankle'] },
+  'split-squat iso pull':     { pattern: 'iso', eq: ['bands'], avoid: [] },
+  'bulgarian split squat':    { pattern: 'unilateral', eq: ['dumbbell', 'bench'], avoid: ['knee', 'hip'] },
+  'pin split squat':          { pattern: 'unilateral', eq: ['barbell', 'rack'], avoid: ['knee'] },
+  'db trunk rotation':        { pattern: 'rotational', eq: ['dumbbell'], avoid: [] },
+  'bear crawl':               { pattern: 'core', eq: [], avoid: ['wrist'] },
+  'cossack squat':            { pattern: 'unilateral', eq: [], avoid: ['knee', 'hip'] },
+  'hamstring bridge iso':     { pattern: 'iso', eq: [], avoid: [] },
+  'curved sprint':            { pattern: 'speed', eq: ['field'], avoid: [] },
+  'ity':                      { pattern: 'pull_h', eq: ['dumbbell'], avoid: [] },
+  'deep-range pullover':      { pattern: 'pull_v', eq: ['dumbbell'], avoid: ['shoulder'] },
+  'rack-elevated deadlift':   { pattern: 'hinge', eq: ['barbell', 'rack'], avoid: ['back'] },
+  'face pull':                { pattern: 'pull_h', eq: ['cables'], avoid: [] },
+  'banded alternate jumps':   { pattern: 'jump', eq: ['bands'], avoid: ['knee', 'ankle'] },
+  'mb step-back toss':        { pattern: 'rotational', eq: ['medball'], avoid: [] },
+  'goblet squat':             { pattern: 'squat', eq: ['dumbbell'], avoid: ['knee'] },
+  't-spine mobility':         { pattern: 'mobility', eq: [], avoid: [] },
+  'hip cars':                 { pattern: 'mobility', eq: [], avoid: [] },
+  'split squat':              { pattern: 'unilateral', eq: [], avoid: ['knee'] },
+  'pin squat':                { pattern: 'squat', eq: ['barbell', 'rack'], avoid: ['back', 'knee'] },
+  'push press':               { pattern: 'push_v', eq: ['barbell'], avoid: ['shoulder', 'elbow'] },
+  'bench press':              { pattern: 'push_h', eq: ['barbell', 'bench', 'rack'], avoid: [] },
+  'broad jump':               { pattern: 'jump', eq: [], avoid: ['knee', 'ankle'] },
+};
+// Personalize a template's days for one athlete from his intake answers.
+// Returns { days, personalization_notes } where personalization_notes is a
+// list of human-readable swap lines shown ONLY in the coach editor (the
+// athlete never sees them). The input days array is deep-copied and never
+// mutated.
+function personalizeLiftingDays(days, answers, athleteName) {
+  const a = answers || {};
+  const tags = equipmentTags(a);
+  const rules = injuryKeys(a);
+  const track = goalTrack(a);
+  const beginner = /never lifted|beginner/i.test(String(a.lifting_experience || ''));
+  const out = JSON.parse(JSON.stringify(days || []));
+  const swapLines = [];
+  const gaps = [];
+  const ARRAYS = ['speed', 'medball', 'exercises'];
+  for (const day of out) {
+    // usedNames: original case for pickExercise; usedLower: lowercase for our
+    // own bookkeeping (v4 names and pool names differ in case).
+    const usedNames = new Set();
+    const usedLower = new Set();
+    for (const key of ARRAYS) for (const it of (day[key] || [])) {
+      if (it && it.name) { usedNames.add(String(it.name)); usedLower.add(String(it.name).toLowerCase()); }
+    }
+    for (const key of ARRAYS) for (const it of (day[key] || [])) {
+      if (!it || !it.name) continue;
+      if (beginner && it.target_rpe !== '' && it.target_rpe != null && it.sets) {
+        const rpe0 = Number(it.target_rpe);
+        if (!Number.isNaN(rpe0) && rpe0 > 6) it.target_rpe = rpe0 - 1;
+      }
+      const meta = V4_EXERCISE_META[String(it.name).toLowerCase()];
+      if (!meta) continue; // unknown exercise — leave untouched
+      const missing = (meta.eq || []).filter((t) => !tags.has(t));
+      const avoided = isAvoided({ name: it.name, avoid: meta.avoid }, rules);
+      const needSwap = missing.length > 0 || !!avoided;
+      const reason = missing.length ? ('no ' + missing.join('/') + ' in his setup') : ((avoided && avoided.note) || 'injury flag');
+      if (needSwap && (meta.pattern === 'speed' || meta.pattern === 'mobility')) {
+        // No substitutes exist for these patterns — HOLD for coach review.
+        // The athlete never sees or executes the original; Bobby picks a
+        // safe replacement in the editor before it's released.
+        it.held = true;
+        it.held_original = it.name;
+        it.held_reason = `${reason} — no substitute exists for this pattern`;
+        it.notes = '';
+        swapLines.push(`${it.name} — HELD for coach (${it.held_reason})`);
+        continue;
+      }
+      if (needSwap) {
+        const picked = pickExercise(meta.pattern, tags, rules, track, usedNames, gaps);
+        if (picked && picked.ex && !usedLower.has(picked.ex.name.toLowerCase())) {
+          const orig = it.name;
+          usedNames.delete(orig); usedLower.delete(orig.toLowerCase());
+          usedNames.add(picked.ex.name); usedLower.add(picked.ex.name.toLowerCase());
+          it.name = picked.ex.name;
+          it.vkey = ''; // pool entries carry no video — never show the wrong demo
+          it.notes = (it.notes ? it.notes + ' ' : '') + `[Swapped from ${orig} — ${reason}]`;
+          swapLines.push(`${orig} → ${picked.ex.name} (${reason})${picked.sub ? ' — ' + picked.sub : ''}`);
+        } else {
+          // Nothing clean left in this pattern (or only a duplicate) — HOLD
+          // for coach review. The athlete never sees or executes the
+          // original; Bobby picks a safe replacement in the editor.
+          it.held = true;
+          it.held_original = it.name;
+          it.held_reason = `${reason} — ${(picked && picked.sub) || 'no clean substitute'}`;
+          it.notes = '';
+          swapLines.push(`${it.name} — HELD for coach (${it.held_reason})`);
+        }
+        continue;
+      }
+    }
+  }
+  for (const g of gaps) swapLines.push(`No ${g} option fits his equipment — coach to fill`);
+  const notes = [];
+  if (swapLines.length || beginner) {
+    notes.push(`Personalized from ${athleteName || 'athlete'}'s questionnaire${beginner ? ' (beginner: RPE eased 1 pt)' : ''}:`);
+    for (const l of swapLines) notes.push('• ' + l);
+  }
+  // Coach-facing only — the editor shows these; athlete pages never do.
+  return { days: out, personalization_notes: notes };
 }
 
 // Warm-up philosophy (Bobby's call, Sep 2026): ONE integrated warm-up per
@@ -4330,6 +4704,7 @@ function buildLiftingDraft(a, opts) {
   if (season === 'preseason' && emphasis === 'strength') emphasis = 'power';
   const inSeason = season === 'inseason';
   const n = inSeason ? 2 : Math.min(6, Math.max(2, a.lift_days_per_week || 4));
+  const beginner = /never lifted|beginner/i.test(String(a.lifting_experience || ''));
   const used = new Set();
   const mk = (pickRes, kind) => {
     const e = pickRes.ex;
@@ -4341,9 +4716,12 @@ function buildLiftingDraft(a, opts) {
     if (kind === 'contrast') extra.push('CONTRAST: do the hold, then throw IMMEDIATELY');
     // Main lifts carry their own ramp-up — that's the warm-up for heavy work.
     if (kind === 'main') extra.push(rampNote(e));
+    // Beginners ease in: RPE down a point so the first block is learnable.
+    let rpe = sc[2] || '';
+    if (beginner && typeof rpe === 'number' && rpe > 6) rpe = rpe - 1;
     return {
       name: e.name, sets: sc[0], reps: sc[1],
-      target_rpe: sc[2] || '',
+      target_rpe: rpe,
       notes: [sc[3], ...extra].filter(Boolean).join(' · ').slice(0, 220),
     };
   };
@@ -4393,13 +4771,16 @@ function buildLiftingDraft(a, opts) {
   notes.push(`Goal track: ${track} · Block emphasis: ${step.label}${inSeason ? ' · IN-SEASON: 2x/week maintenance, never bury him' : ''}`);
   notes.push('WARM-UP: one integrated warm-up per session (Mobility tab + hitting prep) at session start. Default order is hitting first — athlete arrives at med ball already warm, goes straight in. If lifting runs first, do the full Mobility tab + the lifting-day primer, then med ball. Main lifts carry their own ramp-up sets — those are essential, not optional.');
   if (season === 'preseason') notes.push('Pre-season: potentiation style — long rest, quality over fatigue.');
-  if (rules.length) notes.push('INJURIES: ' + rules.map((r) => r.note).join(' · '));
-  if (subs.length) notes.push('SUBSTITUTIONS (review): ' + subs.join(' | '));
-  if (gaps.length) notes.push('EQUIPMENT GAPS — no ' + gaps.join(', ') + ' option with what he has. Consider: ' + gaps.map((g) => ({ squat: 'goblet/box squat or gym access', hinge: 'DB RDLs or trap bar access', push_h: 'push-up progressions or bench access', pull_v: 'a pull-up bar or bands', rotational: 'a med ball (any weight)', jump: 'open floor space' }[g] || 'equipment upgrade')).join('; '));
+  // Coach-facing only (Sep 23 2026): shown in the coach editor, never to athletes.
+  const personalization_notes = ['Built from his intake questionnaire:'];
+  if (beginner) personalization_notes.push('• Beginner: RPE eased 1 pt across the board.');
+  if (rules.length) personalization_notes.push('• INJURIES: ' + rules.map((r) => r.note).join(' · '));
+  if (subs.length) personalization_notes.push('• SUBSTITUTIONS (review): ' + subs.join(' | '));
+  if (gaps.length) personalization_notes.push('• EQUIPMENT GAPS — no ' + gaps.join(', ') + ' option with what he has. Consider: ' + gaps.map((g) => ({ squat: 'goblet/box squat or gym access', hinge: 'DB RDLs or trap bar access', push_h: 'push-up progressions or bench access', pull_v: 'a pull-up bar or bands', rotational: 'a med ball (any weight)', jump: 'open floor space' }[g] || 'equipment upgrade')).join('; '));
   if (o.progression && o.progression.adjustments && o.progression.adjustments.length) {
-    notes.push('PROGRESSION READ: ' + o.progression.adjustments.join(' | '));
+    personalization_notes.push('• PROGRESSION READ: ' + o.progression.adjustments.join(' | '));
   }
-  return { days, notes, draft: true, subs, gaps, track, emphasis, block_index: o.blockIndex || 0 };
+  return { days, notes, personalization_notes, draft: true, subs, gaps, track, emphasis, block_index: o.blockIndex || 0, source: 'personalized' };
 }
 function intakeTokenValid(tok) {
   const cur = getIntakeToken();
@@ -4651,6 +5032,80 @@ function progressionRead(userId) {
     adjustments,
   };
 }
+// Questionnaire resubmission (Sep 23 2026, Bobby: "that's the whole premise" —
+// the program must stay built from the athlete's answers, so when answers
+// change the program follows). Safe regeneration: the lifting draft rebuilds
+// ONLY when Bobby hasn't hand-customized it (source != 'custom'); the hitting
+// program rebuilds ONLY while it's still an intake draft. Custom work is
+// never overwritten.
+app.get('/questionnaire', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.redirect('/coach');
+  let answers = {};
+  try {
+    const r = db.prepare('SELECT answers_json FROM intake_responses WHERE user_id = ? ORDER BY id DESC LIMIT 1').get(req.user.id);
+    if (r && r.answers_json) answers = JSON.parse(r.answers_json) || {};
+  } catch (e) { answers = {}; }
+  // Carry the account's identity into the form so validation passes.
+  if (!answers.first_name) answers.first_name = req.user.firstName || '';
+  if (!answers.last_name) answers.last_name = req.user.lastName || '';
+  if (!answers.email) answers.email = req.user.email || '';
+  res.send(views.intakeFormPage('update', null, answers, { updateMode: true }));
+});
+app.post('/questionnaire', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.redirect('/coach');
+  const a = parseIntakeBody(req.body);
+  // Identity comes from the account, not the form.
+  a.first_name = req.user.firstName || a.first_name;
+  a.last_name = req.user.lastName || a.last_name;
+  a.email = req.user.email || a.email;
+  if (!a.components.length) {
+    return res.send(views.intakeFormPage('update', 'Pick at least one training component.', req.body, { updateMode: true }));
+  }
+  const nowIso = new Date().toISOString();
+  // intake_responses keeps one current row per athlete (user_id UNIQUE).
+  const had = db.prepare('SELECT id FROM intake_responses WHERE user_id = ?').get(req.user.id);
+  if (had) {
+    db.prepare('UPDATE intake_responses SET answers_json = ?, created_at = ? WHERE user_id = ?').run(JSON.stringify(a), nowIso, req.user.id);
+  } else {
+    db.prepare('INSERT INTO intake_responses (user_id, answers_json, created_at) VALUES (?, ?, ?)').run(req.user.id, JSON.stringify(a), nowIso);
+  }
+  const notes = [];
+  const p = getProgram(req.user.remoteProgramId);
+  if (p) {
+    const athleteName = `${a.first_name} ${a.last_name}`.trim() || req.user.athleteName || 'Athlete';
+    // Lifting: rebuild the draft unless Bobby customized it by hand.
+    try {
+      const lrow = db.prepare('SELECT lifting_program_id FROM remote_programs WHERE id = ?').get(p.id);
+      const lid = lrow && lrow.lifting_program_id;
+      if (lid && a.components.includes('lifting')) {
+        const lrec = db.prepare('SELECT program_json FROM lifting_programs WHERE id = ?').get(Number(lid));
+        let src = '';
+        try { src = String((JSON.parse(lrec.program_json || '{}') || {}).source || ''); } catch (e) {}
+        if (src === 'custom') {
+          notes.push('Lifting left as your coach built it');
+        } else {
+          const draft = buildLiftingDraft(a);
+          db.prepare('UPDATE lifting_programs SET program_json = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(draft), nowIso, Number(lid));
+          notes.push('Lifting rebuilt from your new answers');
+        }
+      }
+    } catch (e) { /* lifting not ready */ }
+    // Hitting program: rebuild only while it's still an intake draft.
+    try {
+      const prog = p.prog || {};
+      if (prog.draft) {
+        const rebuilt = buildIntakeProgram(a, athleteName);
+        try { videoLinks.attachVideoLinks(rebuilt, videoLinks.getLibraryRows(db)); } catch (e) { /* library not ready */ }
+        db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(rebuilt), nowIso, p.id);
+        notes.push('Hitting rebuilt from your new answers');
+      } else {
+        notes.push('Hitting left as your coach built it');
+      }
+    } catch (e) { /* program not ready */ }
+  }
+  const msg = 'Answers updated. ' + (notes.length ? notes.join(' · ') + '.' : '');
+  res.redirect('/settings?notice=' + encodeURIComponent(msg));
+});
 app.get('/intake/:token', (req, res) => {
   if (req.user) return res.redirect('/');
   // Lead-bound invite: pre-fill name, phone, and goals from the application.
@@ -5011,20 +5466,41 @@ app.post('/api/library/entries', (req, res) => {
 });
 
 app.get('/videos', requireLogin, requireRemote, (req, res) => {
+  // Categories join category_meta for Bobby's display titles, sort order,
+  // and visibility. Hidden categories never reach athletes.
   const cats = db
     .prepare(
-      'SELECT category, COUNT(*) AS n FROM video_library WHERE hidden = 0 GROUP BY category ORDER BY category'
+      `SELECT vl.category AS category, COUNT(*) AS n,
+              COALESCE(NULLIF(cm.title, ''), vl.category) AS title,
+              COALESCE(cm.emoji, '') AS emoji,
+              COALESCE(cm.sort_order, 999) AS so
+       FROM video_library vl LEFT JOIN category_meta cm ON cm.category = vl.category
+       WHERE vl.hidden = 0 AND COALESCE(cm.hidden, 0) = 0
+       GROUP BY vl.category ORDER BY so, title`
     )
     .all();
+  const q = String(req.query.q || '').trim().slice(0, 60);
   const active = req.query.cat || (cats[0] ? cats[0].category : '');
-  const videos = active
+  // Global search (Sep 2026): ?q= searches every category, not just the
+  // active pill. Per-category browsing stays the default.
+  const videos = q
     ? db
         .prepare(
-          "SELECT * FROM video_library WHERE category = ? AND hidden = 0 ORDER BY COALESCE(NULLIF(custom_name, ''), name)"
+          `SELECT vl.*, COALESCE(NULLIF(cm.title, ''), vl.category) AS cat_title
+           FROM video_library vl LEFT JOIN category_meta cm ON cm.category = vl.category
+           WHERE vl.hidden = 0 AND COALESCE(cm.hidden, 0) = 0
+             AND (COALESCE(NULLIF(vl.custom_name, ''), vl.name) LIKE '%' || ? || '%')
+           ORDER BY cat_title, COALESCE(NULLIF(vl.custom_name, ''), vl.name) LIMIT 60`
         )
-        .all(active)
-    : [];
-  res.send(views.videosPage(req.user, cats, active, videos));
+        .all(q)
+    : active
+      ? db
+          .prepare(
+            "SELECT * FROM video_library WHERE category = ? AND hidden = 0 ORDER BY COALESCE(NULLIF(custom_name, ''), name)"
+          )
+          .all(active)
+      : [];
+  res.send(views.videosPage(req.user, cats, active, videos, q));
 });
 
 app.get('/videos/watch/:id', requireLogin, requireRemote, (req, res) => {
@@ -5053,7 +5529,15 @@ app.post('/coach/view-as/exit', (req, res) => {
 // Coach Videos tab: the video library.
 app.get('/coach/videos', requireGlobalCoachAny, (req, res) => {
   const cats = db
-    .prepare('SELECT category, COUNT(*) AS n FROM video_library GROUP BY category ORDER BY category')
+    .prepare(
+      `SELECT vl.category AS category, COUNT(*) AS n,
+              COALESCE(NULLIF(cm.title, ''), vl.category) AS title,
+              COALESCE(cm.emoji, '') AS emoji,
+              COALESCE(cm.sort_order, 999) AS so,
+              COALESCE(cm.hidden, 0) AS mhidden
+       FROM video_library vl LEFT JOIN category_meta cm ON cm.category = vl.category
+       GROUP BY vl.category ORDER BY so, title`
+    )
     .all();
   const active = req.query.cat || (cats[0] ? cats[0].category : '');
   const videos = active
@@ -5063,6 +5547,23 @@ app.get('/coach/videos', requireGlobalCoachAny, (req, res) => {
     : [];
   const playing = req.query.play ? db.prepare('SELECT * FROM video_library WHERE id = ?').get(req.query.play) : null;
   res.send(views.coachLibraryPage(realUser(req), cats, active, videos, playing));
+});
+
+// Category display metadata (Sep 2026): Bobby renames/reorders/hides the
+// Drive folder categories athletes see. The sync never touches category_meta.
+app.post('/coach/library/category', requireCoach, (req, res) => {
+  const category = String(req.body.category || '').slice(0, 200);
+  if (!category) return res.redirect('/coach/videos');
+  const title = String(req.body.title || '').trim().slice(0, 120);
+  const emoji = String(req.body.emoji || '').trim().slice(0, 12);
+  const so = Math.max(0, Math.min(9999, parseInt(req.body.sort_order, 10) || 999));
+  const hidden = req.body.hidden === '1' ? 1 : 0;
+  db.prepare(
+    `INSERT INTO category_meta (category, title, blurb, emoji, sort_order, hidden)
+     VALUES (?, ?, '', ?, ?, ?)
+     ON CONFLICT(category) DO UPDATE SET title=excluded.title, emoji=excluded.emoji, sort_order=excluded.sort_order, hidden=excluded.hidden`
+  ).run(category, title, emoji, so, hidden);
+  res.redirect('/coach/videos?cat=' + encodeURIComponent(category));
 });
 
 // Old library URL — everything lives on the Videos tab now.
@@ -5975,7 +6476,7 @@ function coachUserStats(scope, opts) {
   const users = db
     .prepare(
       `SELECT u.id, u.email, u.athlete_name, u.first_name, u.last_name, u.created_at, u.date_of_birth, u.player_type,
-              u.notify_on_checkin, u.organization_id, o.is_mine AS org_is_mine, o.name AS org_name, t.name AS team_name
+              u.notify_on_checkin, u.organization_id, u.remote_program_id, o.is_mine AS org_is_mine, o.name AS org_name, t.name AS team_name
        FROM users u LEFT JOIN teams t ON t.id = u.team_id LEFT JOIN organizations o ON o.id = u.organization_id
        WHERE u.role != 'coach' AND u.status = 'approved'
          AND (? IS NULL OR u.organization_id = ?) AND (? IS NULL OR u.team_id = ?)
@@ -6006,6 +6507,7 @@ function coachUserStats(scope, opts) {
     } catch (e) {}
     return { id: u.id, email: u.email, name, total: row.total, last: row.last, age: ageOn(u.date_of_birth), team: u.team_name || null,
       organizationId: u.organization_id || null, orgName: u.org_name || null, playerType: u.player_type || 'hitter',
+      isRemote: u.remote_program_id != null,
       notifyOn: flag === 1 || (flag == null && u.org_is_mine === 1), streak, weekCount };
   });
 }
@@ -6324,9 +6826,11 @@ app.get('/coach/my-players', requireGlobalCoachAny, (req, res) => {
 
 // Coach compose (Sep 17 2026, redesign): clean "New message" screen. The old
 // always-expanded checklist on My Players is gone — broadcasting lives here.
+// Remote-guys only (Sep 23 2026): messaging is scoped to athletes with a
+// remote program, matching the thread/reply gate.
 app.get('/coach/messages/new', requireGlobalCoachAny, (req, res) => {
   setApprovalCount(req);
-  const players = coachUserStats(orgScope(req), { mineOnly: true });
+  const players = coachUserStats(orgScope(req), { mineOnly: true }).filter((p) => p.isRemote);
   res.send(views.coachComposePage(realUser(req), players, { error: req.query.error || null }));
 });
 
@@ -6338,8 +6842,8 @@ app.post('/coach/messages/new', requireCoach, (req, res) => {
   const body = String(req.body.body || '').trim();
   if (!body) return back('error=' + encodeURIComponent('Write a message first.'));
   if (body.length > 500) return back('error=' + encodeURIComponent('Keep it to 500 characters.'));
-  // Never trust the form: recipients must actually be Bobby's players.
-  const mine = new Set(coachUserStats(orgScope(req), { mineOnly: true }).map((a) => String(a.id)));
+  // Never trust the form: recipients must actually be Bobby's remote players.
+  const mine = new Set(coachUserStats(orgScope(req), { mineOnly: true }).filter((a) => a.isRemote).map((a) => String(a.id)));
   let targets;
   if (req.body.to_mode === 'choose') {
     let ids = req.body.user_ids;
@@ -6373,6 +6877,7 @@ app.get('/coach/messages', requireGlobalCoachAny, (req, res) => {
       `SELECT DISTINCT u.id, u.first_name, u.last_name, u.athlete_name, u.email FROM users u
        WHERE u.role = 'athlete'
          AND u.organization_id IN (SELECT id FROM organizations WHERE is_mine = 1)
+         AND u.remote_program_id IS NOT NULL
          AND (u.id IN (SELECT r.user_id FROM message_recipients r JOIN messages m ON m.id = r.message_id WHERE m.sender_id = ?)
            OR u.id IN (SELECT m.sender_id FROM messages m JOIN message_recipients r ON r.message_id = m.id WHERE r.user_id = ?))`
     )
@@ -6871,7 +7376,7 @@ app.get('/coach/user/:email', requireCoachAny, (req, res) => {
         .all(user.id)
         .reverse();
   const pt = user.player_type || 'hitter';
-  res.send(views.coachUser(realUser(req), name, rows, restricted ? null : whatWorksData(name, user.id), thread, user.email, brain.listMemory(db, user.id), getRoutine(user.id), pt, pt === 'hitter' ? null : throwingSummary(user.id), isMyProgramPlayer(user.id) ? user.id : null, { restricted, viewAsId: user.id }));
+  res.send(views.coachUser(realUser(req), name, rows, restricted ? null : whatWorksData(name, user.id), thread, user.email, brain.listMemory(db, user.id), getRoutine(user.id), pt, pt === 'hitter' ? null : throwingSummary(user.id), isRemotePlayer(user.id) ? user.id : null, { restricted, viewAsId: user.id }));
 });
 
 // Throwing summary for a pitcher's or two-way player's coach view: session
