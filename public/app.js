@@ -703,3 +703,17 @@
     card.classList.toggle('open', isHidden);
   });
 })();
+
+// Game Day / Practice Day toggle (Sep 23 2026)
+(function () {
+  document.addEventListener('click', function (ev) {
+    const btn = ev.target.closest('[data-gp]');
+    if (!btn) return;
+    const which = btn.getAttribute('data-gp');
+    document.querySelectorAll('[data-gp]').forEach(b => b.classList.toggle('active', b === btn));
+    const game = document.getElementById('gp-game');
+    const practice = document.getElementById('gp-practice');
+    if (game) game.hidden = which !== 'game';
+    if (practice) practice.hidden = which !== 'practice';
+  });
+})();

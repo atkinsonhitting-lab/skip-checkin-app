@@ -3017,6 +3017,10 @@ function mentalGamePage(user, data) {
   const routine = data.routine || { morning: [], done: false };
   const routineItems = Array.isArray(routine.morning) ? routine.morning : [];
   const routineDone = !!routine.done;
+  const pregame = data.pregame || { items: [], done: false };
+  const practice = data.practice || { items: [], done: false };
+  const pregameItems = Array.isArray(pregame.items) ? pregame.items : [];
+  const practiceItems = Array.isArray(practice.items) ? practice.items : [];
   
   const card = (id, title, done, content) => `
     <div class="lockin-card${done ? ' done' : ''}" data-card="${id}">
@@ -3069,9 +3073,44 @@ function mentalGamePage(user, data) {
           </form></li>`).join('')}</ul>`
       : `<p class="hint">Nothing saved yet.</p>`}`;
   
+  const gamePracticeContent = `
+    <div class="gp-toggle">
+      <button type="button" class="gp-btn active" data-gp="game">Game Day</button>
+      <button type="button" class="gp-btn" data-gp="practice">Practice Day</button>
+    </div>
+    <div id="gp-game">
+      ${pregameItems.length ? `<ul class="routine-list">${pregameItems.map((item) => `
+        <li><label><input type="checkbox"${item.done ? ' checked' : ''}> ${esc(item.text)}</label></li>
+      `).join('')}</ul>` : '<p class="hint">No pregame routine yet.</p>'}
+      <form method="post" action="/mental-game/routine/add" class="form" style="margin-top:8px">
+        <input type="hidden" name="which" value="pregame">
+        <div style="display:flex;gap:8px">
+          <input type="text" name="text" placeholder="Add to pregame routine..." maxlength="200" style="flex:1">
+          <button type="submit" class="btn btn-sm">Add</button>
+        </div>
+      </form>
+      ${pregameItems.length && !pregame.done ? `<form method="post" action="/mental-game/routine/done" style="margin:8px 0 0"><input type="hidden" name="card" value="pregame"><button type="submit" class="btn btn-primary btn-sm">Mark pregame done</button></form>` : ''}
+    </div>
+    <div id="gp-practice" hidden>
+      ${practiceItems.length ? `<ul class="routine-list">${practiceItems.map((item) => `
+        <li><label><input type="checkbox"${item.done ? ' checked' : ''}> ${esc(item.text)}</label></li>
+      `).join('')}</ul>` : '<p class="hint">No pre-practice routine yet.</p>'}
+      <form method="post" action="/mental-game/routine/add" class="form" style="margin-top:8px">
+        <input type="hidden" name="which" value="practice">
+        <div style="display:flex;gap:8px">
+          <input type="text" name="text" placeholder="Add to pre-practice routine..." maxlength="200" style="flex:1">
+          <button type="submit" class="btn btn-sm">Add</button>
+        </div>
+      </form>
+      ${practiceItems.length && !practice.done ? `<form method="post" action="/mental-game/routine/done" style="margin:8px 0 0"><input type="hidden" name="card" value="practice"><button type="submit" class="btn btn-primary btn-sm">Mark practice done</button></form>` : ''}
+    </div>`;
+  
+  const gpDone = pregame.done || practice.done;
+  
   const cardsHtml = b.plan ? `
     <h2 class="section-title">Today</h2>
     ${card('routine', 'Morning Routine', routineDone, routineContent)}
+    ${card('gamepractice', 'Game Day / Practice Day', gpDone, gamePracticeContent)}
     ${exercise ? card('exercise', 'Daily Exercise', exerciseDone, exerciseContent) : ''}
     ${(bibleOptIn && bibleVerse) ? card('bible', 'Bible Study', !!data.bibleDone, bibleContent) : ''}
     <h2 class="section-title" style="margin-top:16px">Yours</h2>

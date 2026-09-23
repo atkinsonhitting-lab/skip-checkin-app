@@ -2300,9 +2300,31 @@ app.get('/mental-game', requireLogin, (req, res) => {
   const bibleOptIn = bsRow && bsRow.bible_study === 1;
   const checkedInToday = !!db.prepare("SELECT 1 FROM checkins WHERE user_id = ? AND date(created_at, 'unixepoch', 'localtime') = date('now', 'localtime')").get(req.user.id);
   // Routine data (Sep 23 2026)
-  const routineRow = db.prepare('SELECT morning_json FROM mental_routines WHERE user_id = ?').get(req.user.id);
-  const routineItems = routineRow ? JSON.parse(routineRow.morning_json || '[]') : [];
+  const DEFAULT_PREGAME = [
+    '3 slow breaths — feet on the ground, leave the day behind',
+    'Say your keyword out loud',
+    'See 3 good at-bats in your head — feel them',
+    'Shake it out — roll your shoulders, loosen up',
+    'Lock in: "I\'m ready. Attack."',
+  ];
+  const DEFAULT_PRACTICE = [
+    '3 breaths — clear the last class, last game, whatever',
+    'Set one intention: "Today I\'m working on ___"',
+    'Say your keyword',
+    'See one perfect rep in your head before you start',
+  ];
+  let routineRow = db.prepare('SELECT morning_json, pregame_json, prepractice_json FROM mental_routines WHERE user_id = ?').get(req.user.id);
+  if (!routineRow) {
+    db.prepare(`INSERT INTO mental_routines (user_id, morning_json, pregame_json, prepractice_json, updated_at) VALUES (?, '[]', ?, ?, ?)`)
+      .run(req.user.id, JSON.stringify(DEFAULT_PREGAME.map(t => ({ text: t, done: false }))), JSON.stringify(DEFAULT_PRACTICE.map(t => ({ text: t, done: false }))), new Date().toISOString());
+    routineRow = db.prepare('SELECT morning_json, pregame_json, prepractice_json FROM mental_routines WHERE user_id = ?').get(req.user.id);
+  }
+  const routineItems = JSON.parse(routineRow.morning_json || '[]');
+  const pregameItems = JSON.parse(routineRow.pregame_json || '[]');
+  const practiceItems = JSON.parse(routineRow.prepractice_json || '[]');
   const routineDone = !!db.prepare('SELECT 1 FROM mental_card_done WHERE user_id = ? AND day = ? AND card = ?').get(req.user.id, today, 'routine');
+  const pregameDone = !!db.prepare('SELECT 1 FROM mental_card_done WHERE user_id = ? AND day = ? AND card = ?').get(req.user.id, today, 'pregame');
+  const practiceDone = !!db.prepare('SELECT 1 FROM mental_card_done WHERE user_id = ? AND day = ? AND card = ?').get(req.user.id, today, 'practice');
   const bibleDone = !!db.prepare('SELECT 1 FROM mental_card_done WHERE user_id = ? AND day = ? AND card = ?').get(req.user.id, today, 'bible');
   res.send(views.mentalGamePage(req.user, {
     baseline: getMentalBaseline(req.user.id),
@@ -2318,6 +2340,8 @@ app.get('/mental-game', requireLogin, (req, res) => {
     checkedInToday,
     showBiblePopup: showBiblePopupFor(req.user, bsRow ? bsRow.bible_study : null),
     routine: { morning: routineItems, done: routineDone },
+    pregame: { items: pregameItems, done: pregameDone },
+    practice: { items: practiceItems, done: practiceDone },
   }));
 });
 
@@ -2339,23 +2363,26 @@ app.post('/mental-game/keys/delete', requireLogin, (req, res) => {
   if (id) db.prepare('DELETE FROM mental_keys WHERE id = ? AND user_id = ?').run(id, req.user.id);
   res.redirect('/mental-game');
 });
-// Lock In routine builder (Sep 23 2026) — morning routine checklist.
+// Lock In routine builder (Sep 23 2026) — morning / pregame / pre-practice checklists.
 app.post('/mental-game/routine/add', requireLogin, (req, res) => {
   const text = String(req.body.text || '').trim().slice(0, 200);
+  const which = req.body.which === 'pregame' ? 'pregame' : req.body.which === 'practice' ? 'practice' : 'morning';
+  const col = which === 'pregame' ? 'pregame_json' : which === 'practice' ? 'prepractice_json' : 'morning_json';
   if (text) {
-    const row = db.prepare('SELECT morning_json FROM mental_routines WHERE user_id = ?').get(req.user.id);
-    const items = row ? JSON.parse(row.morning_json || '[]') : [];
+    const row = db.prepare(`SELECT ${col} FROM mental_routines WHERE user_id = ?`).get(req.user.id);
+    const items = row ? JSON.parse(row[col] || '[]') : [];
     items.push({ text, done: false });
-    db.prepare(`INSERT INTO mental_routines (user_id, morning_json, updated_at) VALUES (?, ?, ?)
-      ON CONFLICT(user_id) DO UPDATE SET morning_json=excluded.morning_json, updated_at=excluded.updated_at`)
+    db.prepare(`INSERT INTO mental_routines (user_id, ${col}, updated_at) VALUES (?, ?, ?)
+      ON CONFLICT(user_id) DO UPDATE SET ${col}=excluded.${col}, updated_at=excluded.updated_at`)
       .run(req.user.id, JSON.stringify(items), new Date().toISOString());
   }
   res.redirect('/mental-game');
 });
 app.post('/mental-game/routine/done', requireLogin, (req, res) => {
   const today = todayChicagoDate();
+  const card = req.body.card === 'pregame' ? 'pregame' : req.body.card === 'practice' ? 'practice' : 'routine';
   db.prepare('INSERT OR IGNORE INTO mental_card_done (user_id, day, card, completed_at) VALUES (?, ?, ?, ?)')
-    .run(req.user.id, today, 'routine', new Date().toISOString());
+    .run(req.user.id, today, card, new Date().toISOString());
   res.redirect('/mental-game');
 });
 app.post('/mental-game/bible/done', requireLogin, (req, res) => {
