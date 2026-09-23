@@ -224,7 +224,7 @@ const logoUpload = multer({
 
 // Message attachments (Sep 23 2026): remote guys send Bobby swing clips.
 // Videos up to 100MB, images up to 10MB. Disk for now, R2 later.
-const MSG_ATTACH_DIR = path.join(DATA_DIR, 'message-attachments');
+const MSG_ATTACH_DIR = path.join(data.DATA_DIR, 'message-attachments');
 try { fs.mkdirSync(MSG_ATTACH_DIR, { recursive: true }); } catch (e) {}
 const msgAttachmentUpload = multer({
   storage: multer.diskStorage({
