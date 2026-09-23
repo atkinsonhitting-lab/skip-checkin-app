@@ -2864,7 +2864,12 @@ DAILY WORK
 
 Keep the whole thing 300-400 words. Every section must reference something HE actually said — never generic. If he didn't answer something, skip that section rather than guessing.`;
 
-async function buildMentalPlan(baseline, userId) {
+async function buildMentalPlan(answers, userId) {
+  // Questionnaire v2 (Sep 23 2026): answers is a plain {qkey: answer} map.
+  // Known keys get the book-based diagnostic wording; coach-added questions
+  // are appended as plain Q/A so nothing Bobby adds is ever dropped.
+  const baseline = answers || {};
+  const KNOWN = new Set(['has_routine', 'head_state', 'signal_light', 'worst_self_talk', 'struggle_pattern', 'big_moment_mode', 'hard_voice', 'pregame_routine', 'morning_routine', 'breath_work', 'when_sped_up', 'between_pitches', 'keyword', 'best_game', 'visualization', 'confidence_source', 'post_game', 'focus_pull']);
   const bits = [];
   const routineWord = { yes: 'has a routine he trusts', sortof: 'sort of has a routine', no: 'has no routine' }[baseline.has_routine] || 'did not say';
   const headWord = { present: 'usually present', between: 'in between', worried: 'usually worried' }[baseline.head_state] || 'did not say';
@@ -2893,6 +2898,12 @@ async function buildMentalPlan(baseline, userId) {
   const postWord = { replay: 'replays mistakes over and over', forget: 'tries to forget bad games', review: 'reviews then moves on', beat_up: 'beats himself up' }[baseline.post_game];
   if (postWord) bits.push(`After bad games: ${postWord}.`);
   if (baseline.focus_pull) bits.push(`What pulls his focus: "${baseline.focus_pull}"`);
+  // Coach-added questions (not in the original 13): include as plain Q/A.
+  try {
+    const extra = db.prepare('SELECT qkey, prompt FROM mental_questions WHERE active = 1').all()
+      .filter((q) => !KNOWN.has(q.qkey) && baseline[q.qkey]);
+    for (const q of extra) bits.push(`"${q.prompt}" — he answered: "${baseline[q.qkey]}"`);
+  } catch (e) {}
   // His keys adjust the plan (Bobby, Sep 23 2026) — what he wants, in his words.
   if (userId) {
     try {
@@ -2908,7 +2919,7 @@ async function refreshMentalPlan(userId) {
   const baseline = getMentalBaseline(userId);
   if (!baseline || !baseline.plan) return;
   try {
-    const plan = await buildMentalPlan(baseline, userId);
+    const plan = await buildMentalPlan(getMentalAnswers(userId), userId);
     db.prepare('UPDATE mental_baseline SET plan = ?, updated_at = ? WHERE user_id = ?')
       .run(plan, new Date().toISOString(), userId);
   } catch (e) {
@@ -2918,53 +2929,37 @@ async function refreshMentalPlan(userId) {
 
 app.post('/mental-game/save', requireLogin, async (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
+  // Questionnaire v2 (Sep 23 2026): answers stored per-question so Bobby can
+  // edit the questions without losing anyone's answers.
   const b = req.body || {};
   const clean = (v) => String(v || '').trim().slice(0, 600);
-  const row = {
-    pregame_routine: clean(b.pregame_routine),
-    morning_routine: clean(b.morning_routine),
-    breath_work: clean(b.breath_work),
-    when_sped_up: clean(b.when_sped_up),
-    has_routine: ['yes', 'sortof', 'no'].includes(b.has_routine) ? b.has_routine : '',
-    head_state: ['present', 'between', 'worried'].includes(b.head_state) ? b.head_state : '',
-    // Book-based diagnostic (Sep 23 2026)
-    signal_light: ['green', 'yellow', 'red'].includes(b.signal_light) ? b.signal_light : '',
-    worst_self_talk: clean(b.worst_self_talk),
-    struggle_pattern: ['expecting_results', 'thinking_mechanics', 'worried_watching', 'blank'].includes(b.struggle_pattern) ? b.struggle_pattern : '',
-    big_moment_mode: ['attacking', 'hoping', 'depends'].includes(b.big_moment_mode) ? b.big_moment_mode : '',
-    hard_voice: clean(b.hard_voice),
-    // Individualization fields (Sep 23 2026) — from the books
-    between_pitches: clean(b.between_pitches),
-    keyword: clean(b.keyword),
-    best_game: clean(b.best_game),
-    visualization: ['yes', 'sometimes', 'no'].includes(b.visualization) ? b.visualization : '',
-    confidence_source: ['preparation', 'past_success', 'disappears'].includes(b.confidence_source) ? b.confidence_source : '',
-    post_game: ['replay', 'forget', 'review', 'beat_up'].includes(b.post_game) ? b.post_game : '',
-    focus_pull: clean(b.focus_pull),
-  };
+  const questions = getMentalQuestions();
+  const answers = getMentalAnswers(req.user.id);
+  const now = new Date().toISOString();
+  const up = db.prepare(`INSERT INTO mental_answers (user_id, qkey, answer, updated_at) VALUES (?, ?, ?, ?)
+    ON CONFLICT(user_id, qkey) DO UPDATE SET answer=excluded.answer, updated_at=excluded.updated_at`);
+  for (const q of questions) {
+    const raw = b['q_' + q.qkey];
+    let val = '';
+    if (q.qtype === 'radio') {
+      const allowed = (q.options || []).map((o) => String(o[0]));
+      val = allowed.includes(String(raw || '')) ? String(raw) : '';
+    } else {
+      val = clean(raw);
+    }
+    answers[q.qkey] = val;
+    up.run(req.user.id, q.qkey, val, now);
+  }
   let plan = (getMentalBaseline(req.user.id) || {}).plan || '';
   let planFailed = false;
   try {
-    plan = await buildMentalPlan(row, req.user.id);
+    plan = await buildMentalPlan(answers, req.user.id);
   } catch (e) {
     planFailed = true;
   }
-  db.prepare(
-    `INSERT INTO mental_baseline (user_id, pregame_routine, morning_routine, breath_work, when_sped_up, has_routine, head_state, signal_light, worst_self_talk, struggle_pattern, big_moment_mode, hard_voice, between_pitches, keyword, best_game, visualization, confidence_source, post_game, focus_pull, plan, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(user_id) DO UPDATE SET pregame_routine=excluded.pregame_routine, morning_routine=excluded.morning_routine,
-       breath_work=excluded.breath_work, when_sped_up=excluded.when_sped_up, has_routine=excluded.has_routine,
-       head_state=excluded.head_state, signal_light=excluded.signal_light, worst_self_talk=excluded.worst_self_talk,
-       struggle_pattern=excluded.struggle_pattern, big_moment_mode=excluded.big_moment_mode, hard_voice=excluded.hard_voice,
-       between_pitches=excluded.between_pitches, keyword=excluded.keyword, best_game=excluded.best_game,
-       visualization=excluded.visualization, confidence_source=excluded.confidence_source, post_game=excluded.post_game,
-       focus_pull=excluded.focus_pull, plan=excluded.plan, updated_at=excluded.updated_at`
-  ).run(
-    req.user.id, row.pregame_routine, row.morning_routine, row.breath_work, row.when_sped_up,
-    row.has_routine, row.head_state, row.signal_light, row.worst_self_talk, row.struggle_pattern,
-    row.big_moment_mode, row.hard_voice, row.between_pitches, row.keyword, row.best_game,
-    row.visualization, row.confidence_source, row.post_game, row.focus_pull, plan, new Date().toISOString()
-  );
+  db.prepare(`INSERT INTO mental_baseline (user_id, plan, updated_at) VALUES (?, ?, ?)
+    ON CONFLICT(user_id) DO UPDATE SET plan=excluded.plan, updated_at=excluded.updated_at`)
+    .run(req.user.id, plan, now);
   res.redirect(planFailed ? '/mental-game/questionnaire?planfailed=1' : '/mental-game/questionnaire?saved=1');
 });
 
@@ -6671,8 +6666,6 @@ NEVER REPEAT YOURSELF — the conversation history shows everything you've alrea
 WHEN HE WANTS TO SKIP A QUESTION: if he asks to skip a question, just skip it — acknowledge briefly and move on. Never push back with 'remember you logged this today' or any version of that. He knows what he logged; he just doesn't want to answer right now. No guilt, and don't rephrase the question or circle back to the same topic — drop that thread entirely. Keep helping some other way, or leave the floor open.
 7. THE HITTING MATERIAL BELOW IS BACKGROUND KNOWLEDGE — stuff you've learned, not a script. Draw on it when it's genuinely needed — answering a question, explaining something, working through a problem — not just for diagnoses and fixes. Common sense first, and the hitter's own history and words always come before anything here. Never throw knowledge at him without knowing his problem first — ask, listen, understand what's actually going on before bringing anything in. No random tips, no lectures, no quoting entries at him. Let it shape how you talk, not what you say. And nothing below overrides rule 8.
 8. NEVER INVENT A CAUSE — no matter what problem he describes, never state or imply a specific mechanical cause as THE reason. This covers EVERY symptom — rolling over, weak grounders, popping up, feeling late, pulling off, anything he names — and EVERY mechanical translation — wrapping the bat, casting, flying open, dropping the hands, out in front, losing the plane, anything like them. The only exceptions: HE described that detail himself, or you've seen video of his swing. Translating his symptom into mechanics IS the diagnosis: when he says "weak grounders," you do NOT say "that means you're out in front" — that's the diagnosis wearing different words. Stay in HIS words. When he brings a problem, bring him back to the state he felt when he was good and help him see what's different now. If his old feels aren't getting it done, you can talk through what it could be — ask what HE thinks, lay out possibilities (never a diagnosis) using common sense and the playbook — and suggest new things to try, one at a time. A guessed cause teaches the wrong fix. This rule overrides every playbook entry below — no diagnosis or example changes it.
-
-TOUGH DAYS PHASE (Bobby's rule) — when his recent sessions show a rough stretch — several low days in a row, red and yellow stacking up — you can go further than reminding: you may offer him a concrete fix. But ONLY for things HE has mentioned himself. If he said he's late on everything, give him something to try for being late. If he said his timing feels rushed, address the rush. If he named a feel, a thought, or a detail, that's fair game. You never introduce a problem he hasn't named, and you never diagnose a cause he hasn't described — the fix is for HIS words, not your read of his swing. One thing at a time, framed as something to try — never "the answer," never a lecture. When the rough stretch ends, go back to mirror mode.
 
 SUPPORT, NOT THERAPY: You're a coach, not a therapist or mental health professional — never diagnose mental health conditions (depression, anxiety disorders, eating disorders, anything like them) and never try to provide therapy. Struggling is normal — a lot of players feel this way, and it's fine to say so. Point him toward a real human: a parent, a coach, a counselor. If he talks about self-harm, hurting himself, or suicide: respond with care, don't try to counsel him through it — tell him to talk to a trusted adult right now, and give him the 988 Suicide and Crisis Lifeline: call or text 988, any time. This is a hard boundary — it overrides every playbook entry below, alongside rule 8.
 
