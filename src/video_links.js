@@ -122,6 +122,29 @@ function matchDrillVideo(drill, libRows) {
   return bestScore > 0 ? best : '';
 }
 
+// Bobby's rule (Sep 2026): med ball work links to YouTube, never the
+// in-app drill library. Registry-only match for med ball items — the library
+// fuzzy fallback is for hitting drills, not med ball.
+function matchRegistryOnly(drill) {
+  const reg = registry();
+  const linkKeys = Object.keys(reg.links);
+  const n = normName(drill);
+  if (!n) return '';
+  for (const k of linkKeys) {
+    if (normName(k) === n) return reg.links[k];
+  }
+  for (const k of Object.keys(reg.aliases)) {
+    if (normName(k) !== n) continue;
+    const canon = reg.aliases[k];
+    if (!canon) return '';
+    for (const kk of linkKeys) {
+      if (normName(kk) === normName(canon)) return reg.links[kk];
+    }
+    return '';
+  }
+  return '';
+}
+
 // Fill in missing video links on a program object (mutates it). Returns the
 // number of items linked. Skips items that already have a link and items
 // Bobby decided on by hand (video_source === 'manual').
@@ -129,10 +152,12 @@ function attachVideoLinks(prog, libRows) {
   let count = 0;
   const blocks = prog && Array.isArray(prog.routine) ? prog.routine : [];
   for (const c of blocks) {
+    const isMedBall = /med\s*ball/i.test(String((c && c.category) || ''));
     for (const it of (c && c.items) || []) {
       if (!it || it.video) continue;
       if (it.video_source === 'manual') continue;
-      const url = matchDrillVideo(it.drill, libRows);
+      // Med ball: YouTube via Bobby's registry only — never the library.
+      const url = isMedBall ? matchRegistryOnly(it.drill) : matchDrillVideo(it.drill, libRows);
       if (url) {
         it.video = url;
         it.video_source = 'auto';
@@ -141,6 +166,27 @@ function attachVideoLinks(prog, libRows) {
     }
   }
   return count;
+}
+
+// One-time repair (Sep 2026): med ball items that were auto-linked to the
+// drill library (Drive/in-app) get re-pointed at Bobby's YouTube registry
+// links. Manual links are never touched.
+function repairMedBallLinks(prog) {
+  let fixed = 0;
+  const blocks = prog && Array.isArray(prog.routine) ? prog.routine : [];
+  for (const c of blocks) {
+    if (!/med\s*ball/i.test(String((c && c.category) || ''))) continue;
+    for (const it of (c && c.items) || []) {
+      if (!it || it.video_source === 'manual') continue;
+      const yt = matchRegistryOnly(it.drill);
+      if (yt && it.video !== yt) {
+        it.video = yt;
+        it.video_source = 'auto';
+        fixed++;
+      }
+    }
+  }
+  return fixed;
 }
 
 // Visible library videos as match candidates (custom_name wins; hidden and
@@ -187,7 +233,9 @@ module.exports = {
   normName,
   matchConfidence,
   matchDrillVideo,
+  matchRegistryOnly,
   attachVideoLinks,
+  repairMedBallLinks,
   getLibraryRows,
   autoLinkAllPrograms,
 };
