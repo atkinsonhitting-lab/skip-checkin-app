@@ -94,7 +94,9 @@
   }
 
   /* ---------- API ---------- */
+  var PREVIEW = !!window.WO_PREVIEW;
   function log(payload) {
+    if (PREVIEW) return Promise.resolve({ ok: true, preview: true });
     return fetch('/api/program/log', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

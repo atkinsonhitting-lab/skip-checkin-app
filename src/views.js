@@ -2786,7 +2786,11 @@ function programPage(user, p, opts) {
           : '<strong>OFF day</strong> — no lifting today. True rest.';
       content = `${weekStripTop}<div class="card"><p style="margin:0">${restCopy}</p></div>${YT_TOGGLE_SCRIPT}`;
     } else {
-      content = `${phaseBanner}${liftPrimer}${sessionOrder === 'hitting_first' ? `<p class=\"hint\">Hit first, then lift — you're warm, go straight to speed work. Ramp-up sets on main lifts still apply. Lifting-only day? Full Mobility tab first.</p>` : ''}${speedHtml}${medHtml}${liftSubTab(user, lifting, days, effLday, sub, checkoffs, today, o.liftData || {}, o.subs || {}, secBase, o.todayLdayIdx, o.sched, o.weekday)}${YT_TOGGLE_SCRIPT}`;
+      // Bobby (Sep 23 2026): Start Lift goes at the very top of the lifting tab.
+      const topDay = days[effLday] || { exercises: [] };
+      const topTotal = realExercises(topDay.exercises).length;
+      const topStartBtn = topTotal > 0 ? startLiftButton(effLday, 0, topTotal) : '';
+      content = `${topStartBtn}${phaseBanner}${liftPrimer}${sessionOrder === 'hitting_first' ? `<p class=\"hint\">Hit first, then lift — you're warm, go straight to speed work. Ramp-up sets on main lifts still apply. Lifting-only day? Full Mobility tab first.</p>` : ''}${speedHtml}${medHtml}${liftSubTab(user, lifting, days, effLday, sub, checkoffs, today, o.liftData || {}, o.subs || {}, secBase, o.todayLdayIdx, o.sched, o.weekday)}${YT_TOGGLE_SCRIPT}`;
     }
   } else {
     // HITTING (default): today's plan first — prep for the day + the day's
@@ -2866,14 +2870,17 @@ function programPage(user, p, opts) {
 // time — Speed → Med Ball → Lifts — big inputs, one-tap set logging,
 // rest timer, no page reloads. The day JSON rides in window.WO_DAY;
 // /workout.js renders and runs the session.
-function workoutPage(user, program, wd, ldayIdx) {
+function workoutPage(user, program, wd, ldayIdx, preview) {
   const dayJson = JSON.stringify(wd).replace(/</g, '\\u003c');
   const lday = Number(ldayIdx) || 0;
+  const previewBanner = preview
+    ? '<div class="card" style="margin:0 0 12px;background:#fff8e1;border:1px solid #f0d060"><p style="margin:0"><strong>Preview</strong> — you\'re viewing as a coach. Logging is disabled.</p></div>'
+    : '';
   return layout({
     title: wd.day.label + ' · Lift',
     user,
     tabs: [],
-    body: `<div class="wo">
+    body: `${previewBanner}<div class="wo">
       <div class="wo-top">
         <a class="wo-end" href="/program?sub=lifting&lday=${lday}">✕ End</a>
         <div class="wo-prog"><div class="wo-bar"><div class="wo-fill" id="wo-fill"></div></div>
@@ -2907,7 +2914,7 @@ function workoutPage(user, program, wd, ldayIdx) {
         </div>
       </div>
     </div>
-    <script>window.WO_DAY = ${dayJson};</script>
+    <script>window.WO_DAY = ${dayJson}; window.WO_PREVIEW = ${preview ? 'true' : 'false'};</script>
     <script src="/workout.js?v=${ASSET_V}"></script>`,
   });
 }
@@ -3047,6 +3054,19 @@ function liftWeekStrip(sched, weekday, days, ldayIdx) {
     return `<span class="wk-pill wk-rest${cls}"><span class="wk-d">${esc(short)}</span><span class="wk-l">${esc(kind)}</span></span>`;
   }).join('');
   return `<div class="wk-strip">${pills}</div>`;
+}
+
+// Start Lift button — lives at the very top of the lifting tab (Sep 23 2026,
+// Bobby: "that needs to be at the top"). Visible to coaches in view-as too so
+// Bobby can test the flow; the workout page renders in preview mode for them.
+function startLiftButton(ldayIdx, doneEx, totalSets) {
+  const sub = totalSets > 0
+    ? `${doneEx}/${totalSets} exercises done — walk through it, video + logging as you go`
+    : 'Walk through it — video + logging as you go';
+  return `<a class="start-workout" href="/program/workout?lday=${ldayIdx}">
+    <span class="start-workout-play">▶</span>
+    <span class="start-workout-text"><strong>Start Lift</strong>
+    <span>${sub}</span></span></a>`;
 }
 
 function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftData, subs, secBase, todayLdayIdx, sched, weekday) {
@@ -3285,14 +3305,9 @@ function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftDat
   }).join('');
   const totalSets = realEx.length;
   const doneEx = (exRows.match(/<details class="lift-ex done"/g) || []).length;
-  const startBtn = readOnly ? '' : `<a class="start-workout" href="/program/workout?lday=${ldayIdx}">
-    <span class="start-workout-play">▶</span>
-    <span class="start-workout-text"><strong>Start Lift</strong>
-    <span>${doneEx}/${totalSets} exercises done — walk through it, video + logging as you go</span></span></a>`;
   return `${weekStrip}
     ${isToday ? '' : `<p><a href="/program?sub=lifting">← Back to today's lift</a></p>`}
     <p class="wo-kicker">${isToday ? "Today's lift" : 'Lift day'} · ${esc(dayKey)}</p>
-    ${startBtn}
     ${warmupHtml}
     ${readOnly ? '<p class="hint">Preview — logging is disabled.</p>' : ''}
     ${exRows || '<div class="card empty">No exercises on this day yet — your coach can add them.</div>'}`;

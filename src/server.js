@@ -2150,7 +2150,10 @@ app.get('/program', requireLogin, requireWaiver, (req, res) => {
 app.get('/program/workout', requireLogin, requireWaiver, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
   if (!req.user.remoteProgramId) return res.redirect('/');
-  if (req.user.viewAs) return res.redirect('/program');
+  // Bobby (Sep 23 2026): coaches in view-as can preview the guided workout so
+  // the Start Lift flow is testable. Logging stays disabled (view-as POSTs are
+  // blocked by middleware; the page renders in preview mode).
+  const preview = !!req.user.viewAs;
   const p = getProgram(req.user.remoteProgramId);
   if (!p) return res.redirect('/');
   const liftingId = db.prepare('SELECT lifting_program_id FROM remote_programs WHERE id = ?').get(p.id);
@@ -2162,7 +2165,7 @@ app.get('/program/workout', requireLogin, requireWaiver, (req, res) => {
   const ldayIdx = pickLiftingDayIdx(req, p, days.length);
   const wd = buildWorkoutDay(req.user.id, lifting, ldayIdx, today);
   if (!wd.day) return res.redirect('/program?sub=lifting');
-  res.send(views.workoutPage(req.user, p, wd, ldayIdx));
+  res.send(views.workoutPage(req.user, p, wd, ldayIdx, preview));
 });
 
 // ---- Guided Today session (Sep 2026) ----
