@@ -5149,6 +5149,63 @@ app.get('/notebook', requireLogin, (req, res) => {
   res.send(views.notebookPage(req.user, checkins, notes, players, req.query.saved === '1', { kinds, kind }));
 });
 
+// Skip's read — pattern notes at the top of the Notebook (Sep 23 2026).
+// Cached per athlete; regenerates when a new check-in lands.
+app.get('/api/notebook/read', requireLogin, async (req, res) => {
+  if (req.user.role !== 'athlete') return res.status(403).json({ error: 'athletes only' });
+  const checkins = db
+    .prepare(`SELECT created_at, session_type, swing_feel, timing, session_notes,
+              main_focus, felt_good, biggest_struggle, adjustment_helped, learned, whats_next,
+              session_score, score_tier
+              FROM checkins WHERE user_id = ? ORDER BY created_at DESC LIMIT 20`)
+    .all(req.user.id);
+  if (!checkins.length) return res.json({ ok: true, empty: true });
+  const cached = db.prepare('SELECT * FROM notebook_reads WHERE user_id = ?').get(req.user.id);
+  if (cached && cached.checkin_count === checkins.length) {
+    try { return res.json({ ok: true, read: JSON.parse(cached.content) }); }
+    catch (e) {}
+  }
+  const lines = checkins.map((c) => {
+    const parts = [
+      String(c.created_at).slice(0, 10),
+      `score ${c.session_score ?? '?'}`,
+      c.session_type ? `type ${c.session_type}` : null,
+      c.session_notes ? `said: "${c.session_notes.slice(0, 300)}"` : null,
+      c.felt_good ? `felt good: "${c.felt_good.slice(0, 200)}"` : null,
+      c.biggest_struggle ? `struggled: "${c.biggest_struggle.slice(0, 200)}"` : null,
+      c.adjustment_helped ? `helped: "${c.adjustment_helped.slice(0, 200)}"` : null,
+      c.learned ? `learned: "${c.learned.slice(0, 200)}"` : null,
+      c.whats_next ? `next focus: "${c.whats_next.slice(0, 200)}"` : null,
+    ].filter(Boolean);
+    return '- ' + parts.join(' | ');
+  }).join('\n');
+  const system = `You are Skip, a hitting coach's AI. You MIRROR the hitter — you never fix, never diagnose, never invent mechanical causes. Look at these recent check-ins and notice patterns. Reply with ONLY a JSON object, no other text, with exactly these keys (each an array of 1-3 short strings, plain words, in second person, using the hitter's own language where possible):
+working: what's been working for him (from his good sessions)
+struggling: what he's been struggling with (recurring themes)
+good_sessions: what he's been thinking/feeling during his good sessions (mindset, focus)
+bad_sessions: what's been happening during his bad sessions (patterns, not diagnoses)
+Rules: short bullets (one line each). No advice, no fixes, no "you should". If there's no clear pattern for a section, use an empty array. Never repeat the same bullet twice.`;
+  try {
+    const raw = await geminiText(system, `Recent check-ins (newest first):\n${lines}`, 1200);
+    const read = JSON.parse(raw.replace(/^```json\s*|\s*```$/g, '').trim());
+    const content = JSON.stringify({
+      working: read.working || [],
+      struggling: read.struggling || [],
+      good_sessions: read.good_sessions || [],
+      bad_sessions: read.bad_sessions || [],
+    });
+    db.prepare(`INSERT INTO notebook_reads (user_id, generated_at, checkin_count, content)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET generated_at = excluded.generated_at,
+                checkin_count = excluded.checkin_count, content = excluded.content`)
+      .run(req.user.id, new Date().toISOString(), checkins.length, content);
+    res.json({ ok: true, read: JSON.parse(content) });
+  } catch (e) {
+    console.warn('notebook read failed:', e.message);
+    res.status(500).json({ error: 'read_failed' });
+  }
+});
+
 // Old routes fold into the notebook.
 app.get('/history', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');

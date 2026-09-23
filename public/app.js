@@ -967,3 +967,29 @@ document.querySelectorAll('.feel-slider input[type="range"]').forEach((el) => {
   if (!out) return;
   el.addEventListener('input', () => { out.textContent = el.value; });
 });
+
+// Skip's read — Notebook top (Sep 23 2026)
+(function () {
+  const box = document.getElementById('skips-read');
+  if (!box) return;
+  const body = document.getElementById('skips-read-body');
+  fetch('/api/notebook/read')
+    .then((r) => r.json())
+    .then((d) => {
+      if (!d.ok || d.empty || !d.read) return;
+      const r = d.read;
+      const sections = [
+        ['✅ What\u2019s been working', r.working],
+        ['⚠️ What you\u2019ve been struggling with', r.struggling],
+        ['🧠 What you\u2019re thinking in good sessions', r.good_sessions],
+        ['📉 What\u2019s been happening in bad sessions', r.bad_sessions],
+      ].filter(([, items]) => items && items.length);
+      if (!sections.length) return;
+      body.innerHTML = sections.map(([title, items]) =>
+        `<div class="skips-read-section"><h3>${title}</h3><ul>${items.map((t) =>
+          `<li>${String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;')}</li>`).join('')}</ul></div>`
+      ).join('');
+      box.hidden = false;
+    })
+    .catch(() => {});
+})();

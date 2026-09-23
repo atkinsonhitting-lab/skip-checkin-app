@@ -634,9 +634,10 @@ details[open] > .routine-summary::after { content: '\25B4'; }
 }
 #tabbar::-webkit-scrollbar { display: none; }
 .tabbar-link {
-  flex: 0 0 auto; min-width: 76px; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 3px; padding: 9px 10px 7px; min-height: 58px; position: relative;
+  flex: 1 1 0; min-width: 60px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 3px; padding: 9px 6px 7px; min-height: 58px; position: relative;
   color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.02em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .tabbar-badge {
   position: absolute; top: 4px; left: calc(50% + 4px);
@@ -1059,3 +1060,16 @@ a.stat-card { padding: 14px 8px; }
 .feel-slider-labels span:nth-child(2) {
   font-size: 20px; font-weight: 800; color: var(--text);
 }
+
+/* Skip's read — Notebook top (Sep 23 2026) */
+.skips-read {
+  border: 1px solid var(--line); border-radius: 16px;
+  background: linear-gradient(135deg, #16161a 0%, #1c1c21 100%);
+  padding: 16px; margin: 12px 0;
+}
+.skips-read-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+.skips-read-title { font-size: 16px; font-weight: 800; }
+.skips-read-section { margin: 10px 0; }
+.skips-read-section h3 { font-size: 13px; margin: 0 0 4px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.skips-read-section ul { margin: 0; padding-left: 18px; }
+.skips-read-section li { font-size: 14px; line-height: 1.5; margin: 3px 0; }

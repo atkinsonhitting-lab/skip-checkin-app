@@ -1064,6 +1064,10 @@ function notebookPage(user, checkins, notes, players, justSubmitted, filter) {
     body: `<h1 class="page-title">Notebook</h1>
     <div class="subnav"><a href="#checkins">Check-ins</a><a href="#notes">Notes</a></div>
     ${justSubmitted ? `<div class="success">Check-in saved. Good work.</div>` : ''}
+    <div id="skips-read" class="skips-read" hidden>
+      <div class="skips-read-head"><span class="skips-read-title">👀 Skip's read</span><span class="hint-inline">patterns from your check-ins</span></div>
+      <div id="skips-read-body"><p class="hint">Reading your check-ins…</p></div>
+    </div>
     <h2 class="section-head" id="checkins">Check-ins</h2>
     ${kindPills}
     ${checkinsHtml}

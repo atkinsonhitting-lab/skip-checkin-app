@@ -929,6 +929,14 @@ CREATE TABLE IF NOT EXISTS learning_notes (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_learning_user_time ON learning_notes(user_id, created_at);
+// Skip's read — cached pattern notes at the top of the Notebook (Sep 23 2026).
+// Regenerated when the check-in count changes.
+CREATE TABLE IF NOT EXISTS notebook_reads (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id),
+  generated_at TEXT NOT NULL,
+  checkin_count INTEGER NOT NULL DEFAULT 0,
+  content TEXT NOT NULL DEFAULT '{}'
+);
 CREATE TABLE IF NOT EXISTS study_players (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL REFERENCES users(id),
