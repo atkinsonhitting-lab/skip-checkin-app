@@ -1818,6 +1818,10 @@ function buildHittingPlan(prog) {
     return 'Tee';
   };
   const isHittingCat = (c) => /tee|toss|flip|bp\b|batting|machine|game|hit/i.test(c || '');
+  // Bobby (Sep 23 2026): these are TRAINING ENVIRONMENTS (conditions), not drills.
+  // They go at the bottom of the doc, not in the drill table.
+  const isEnvVariation = (name) => /open\s*angle|breaking\s*ball|velo|fastball|curve|slider|changeup|machine\s*work|game\s*swings?/i.test(name || '');
+  const envVariations = [];
   for (const block of routine) {
     const cat = block.category || '';
     const items = Array.isArray(block.items) ? block.items : [];
@@ -1832,11 +1836,17 @@ function buildHittingPlan(prog) {
     } else if (isHittingCat(cat)) {
       const env = envOf(cat);
       for (const it of items) {
-        if (it.drill) drills.push({ name: it.drill, volume: it.volume || '', cues: '', why: '', env });
+        if (!it.drill) continue;
+        // Environment variations go to the bottom, not the drill table
+        if (isEnvVariation(it.drill)) {
+          envVariations.push(it.drill);
+        } else {
+          drills.push({ name: it.drill, volume: it.volume || '', cues: '', why: '', env });
+        }
       }
     }
   }
-  return { environments_note: '', env_variations: '', warmup, drills, medball, footer: '' };
+  return { environments_note: '', env_variations: envVariations.join(', '), warmup, drills, medball, footer: '' };
 }
 // ---- Programs tab: lifting + check-offs (Sep 2026) ----
 // Chicago date string (YYYY-MM-DD) used as the check-off day key.

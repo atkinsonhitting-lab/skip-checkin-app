@@ -5069,90 +5069,105 @@ function hittingPlanPage(user, p) {
   const plan = prog.hitting_plan || {};
   const athleteName = (p && p.athlete_name) || prog.athlete || 'Hitter';
 
-  // === Grades (compact) ===
+  // === Grades: "Areas for Improvement = Grades" (Trey style) ===
   const grades = prog.grades && typeof prog.grades === 'object' ? prog.grades : {};
   const gradeWhys = prog.grade_whys && typeof prog.grade_whys === 'object' ? prog.grade_whys : {};
   const gradeEntries = Object.entries(grades).filter(([k, v]) => v && String(v).trim());
   const gradesHtml = gradeEntries.length
-    ? `<div class="grade-grid">${gradeEntries.map(([k, v]) => `
-        <div class="grade-card">
-          <div class="grade-cat">${esc(k)}</div>
-          <div class="grade-val">${esc(String(v))}</div>
-          ${gradeWhys[k] ? `<div class="grade-why">${esc(gradeWhys[k])}</div>` : ''}
-        </div>`).join('')}</div>`
+    ? `<h3>Areas for Improvement = Grades</h3>
+       <p class="grade-scale">Grading scale is based on where you're currently at:</p>
+       <ul class="grade-list">${gradeEntries.map(([k, v]) => `
+         <li><strong>${esc(k)} = ${esc(String(v))}</strong>${gradeWhys[k] ? `, ${esc(gradeWhys[k])}` : ''}</li>`).join('')}</ul>`
     : '';
 
-  // === Where you're at: phase + adjustment (combined, compact) ===
-  const phaseHtml = prog.phase_emphasis ? `<p><strong>Phase focus:</strong> ${esc(prog.phase_emphasis)}</p>` : '';
-  const adjustmentHtml = prog.adjustment ? `<p><strong>The adjustment:</strong> ${esc(prog.adjustment)}</p>` : '';
-  const whereHtml = (gradesHtml || phaseHtml || adjustmentHtml)
-    ? `<section class="doc-section"><h2>Where You're At</h2>${gradesHtml}${phaseHtml}${adjustmentHtml}</section>`
+  // === Key Strengths (Trey style) ===
+  const strengths = Array.isArray(prog.strengths) ? prog.strengths.filter(Boolean) : [];
+  const strengthsHtml = strengths.length
+    ? `<h3>Key Strengths</h3><ul class="std-list">${strengths.map((s) => `<li>${esc(s)}</li>`).join('')}</ul>`
     : '';
 
-  // === Weekly schedule (compact table) ===
+  // === The Need / Adjustment (Trey style: "Need =") ===
+  const needHtml = prog.adjustment
+    ? `<p class="need"><strong>Need =</strong> ${esc(prog.adjustment)}</p>`
+    : '';
+  const phaseHtml = prog.phase_emphasis
+    ? `<p><strong>Phase focus:</strong> ${esc(prog.phase_emphasis)}</p>`
+    : '';
+
+  const evalHtml = (strengthsHtml || gradesHtml || needHtml || phaseHtml)
+    ? `<div class="eval-section">${strengthsHtml}${gradesHtml}${needHtml}${phaseHtml}</div><hr class="doc-rule">`
+    : '';
+
+  // === Weekly schedule (compact) ===
   const schedule = Array.isArray(prog.schedule) ? prog.schedule : [];
   const scheduleHtml = schedule.length
-    ? `<section class="doc-section"><h2>Weekly Schedule</h2>
-       <table class="doc-table"><tbody>${schedule.map((s) => {
+    ? `<p class="sched-line"><strong>Repeat ${esc(String(schedule.length))}x per week:</strong> ${schedule.map((s) => {
         const day = s.day || s.label || '';
         const work = s.work || s.blocks || s.type || '';
         const workStr = Array.isArray(work) ? work.join(', ') : String(work);
-        return `<tr><td class="sched-day">${esc(day)}</td><td>${esc(workStr)}</td></tr>`;
-      }).join('')}</tbody></table></section>`
+        return day ? `${esc(day)} — ${esc(workStr)}` : esc(workStr);
+      }).join(' · ')}</p>`
     : '';
 
-  // === Prep work (compact list) ===
+  // === DRILL TABLE (Trey style: two columns, drill+why left, volume right) ===
+  // Warmup (Prep Work) goes first, then drills. Each row: name -> cues + Why?, volume on right.
   const warmup = Array.isArray(plan.warmup) ? plan.warmup : [];
-  const warmupHtml = warmup.length
-    ? `<section class="doc-section"><h2>Prep Work</h2>
-       <ul class="compact-list">${warmup.map((w) => `<li><strong>${esc(w.name || '')}</strong>${w.detail ? ` <span class="dim">— ${esc(w.detail)}</span>` : ''}</li>`).join('')}</ul>
-       <p class="doc-note">Demos in the Remote library (Videos tab).</p></section>`
+  const drills = Array.isArray(plan.drills) ? plan.drills : [];
+  
+  const drillRow = (d) => {
+    const name = d.name || '';
+    const cues = d.cues || '';
+    const why = d.why || '';
+    const vol = d.volume || d.detail || '';
+    const left = `<strong>${esc(name)}</strong>${cues ? ` -&gt; ${esc(cues)}` : ''}${why ? `<br><span class="why">Why? ${esc(why)}</span>` : ''}`;
+    return `<tr><td>${left}</td><td class="vol">${esc(vol)}</td></tr>`;
+  };
+
+  const tableRows = [];
+  // Prep work first (like Trey's "Warm up" row)
+  for (const w of warmup) {
+    tableRows.push(drillRow({ name: w.name, cues: '', why: '', volume: w.detail }));
+  }
+  // Then all drills (athlete does these across tee/toss/BP/machine — Trey's progression note covers it)
+  for (const d of drills) {
+    tableRows.push(drillRow(d));
+  }
+
+  const drillTableHtml = tableRows.length
+    ? `<table class="drill-table">
+        <thead><tr>
+          <th>Do these vs all progression types &mdash; tee, toss, and BP (or machine)</th>
+          <th>${schedule.length ? `Repeat ${schedule.length}x per week` : 'Volume'}</th>
+        </tr></thead>
+        <tbody>${tableRows.join('')}</tbody>
+      </table>
+      <p class="why-note">Why? Most hitters struggle to blend their drills into their game swing once the ball starts coming in harder. By applying the same drills, feels, and cues during moving ball work, you train your body to execute under speed and pressure &mdash; not just in controlled settings.</p>
+      <p class="doc-note">Drill demos are in the Remote library (Videos tab).</p>`
     : '';
 
-  // === Med ball (non-lifters only, compact) ===
+  // === Training Environments (at bottom — NOT drills, these are conditions) ===
+  // Bobby: open angle, breaking balls, velo, etc. are environments, not drills.
+  const envVariations = plan.env_variations || '';
   const medball = Array.isArray(plan.medball) ? plan.medball : [];
   const hasLifting = !!(p && p.lifting_program_id);
   const medballHtml = (!hasLifting && medball.length)
-    ? `<section class="doc-section"><h2>Med Ball</h2>
-       <ul class="compact-list">${medball.map((m) => `<li><strong>${esc(m.name || '')}</strong>${m.volume ? ` <span class="dim">— ${esc(m.volume)}</span>` : ''}${m.cues ? `<br><span class="cue">${esc(m.cues)}</span>` : ''}</li>`).join('')}</ul></section>`
+    ? `<h3>Med Ball</h3><ul class="std-list">${medball.map((m) => `<li><strong>${esc(m.name || '')}</strong>${m.volume ? ` &mdash; ${esc(m.volume)}` : ''}</li>`).join('')}</ul>`
     : '';
 
-  // === Drills by environment (the core — clean, scannable) ===
-  const ENV_ORDER = ['Tee', 'Toss', 'Front Toss', 'BP', 'Machine', 'Game'];
-  const drills = Array.isArray(plan.drills) ? plan.drills : [];
-  const byEnv = {};
-  for (const d of drills) {
-    const env = d.env || 'Tee';
-    if (!byEnv[env]) byEnv[env] = [];
-    byEnv[env].push(d);
-  }
-  const drillsHtml = drills.length
-    ? `<section class="doc-section"><h2>The Work</h2>
-       ${ENV_ORDER.filter((env) => byEnv[env] && byEnv[env].length).map((env) => `
-        <h3 class="doc-env">${esc(env)}</h3>
-        <ul class="compact-list">${byEnv[env].map((d) => `<li>
-          <strong>${esc(d.name || '')}</strong>${d.volume ? ` <span class="dim">— ${esc(d.volume)}</span>` : ''}
-          ${d.cues ? `<br><span class="cue">${esc(d.cues)}</span>` : ''}
-          ${d.why ? `<br><span class="why">${esc(d.why)}</span>` : ''}
-        </li>`).join('')}</ul>`).join('')}
-       <p class="doc-note">Drill demos in the Remote library (Videos tab).</p></section>`
-    : '';
-
-  // === Your keys: strengths + cues + mental (combined) ===
-  const strengths = Array.isArray(prog.strengths) ? prog.strengths.filter(Boolean) : [];
   const cues = prog.cues && typeof prog.cues === 'object' ? prog.cues : {};
   const cueEntries = Object.entries(cues).filter(([k, v]) => v && String(v).trim());
-  const keysParts = [];
-  if (strengths.length) keysParts.push(`<p><strong>Strengths:</strong> ${strengths.map(esc).join(' · ')}</p>`);
-  if (cueEntries.length) keysParts.push(`<ul class="compact-list">${cueEntries.map(([k, v]) => `<li><strong>${esc(k)}:</strong> ${esc(String(v))}</li>`).join('')}</ul>`);
-  if (prog.mental_framework) keysParts.push(`<p class="mental">${esc(prog.mental_framework)}</p>`);
-  const keysHtml = keysParts.length
-    ? `<section class="doc-section"><h2>Your Keys</h2>${keysParts.join('')}</section>`
+  const cuesHtml = cueEntries.length
+    ? `<h3>Your Cues</h3><ul class="std-list">${cueEntries.map(([k, v]) => `<li><strong>${esc(k)}:</strong> ${esc(String(v))}</li>`).join('')}</ul>`
+    : '';
+  const mentalHtml = prog.mental_framework
+    ? `<p class="mental"><strong>${esc(prog.mental_framework)}</strong></p>`
     : '';
 
-  // === Variations (brief) ===
-  const variationsHtml = plan.env_variations
-    ? `<section class="doc-section"><h2>Make It Game-Like</h2><p>${esc(plan.env_variations)}</p></section>`
+  const bottomHtml = (envVariations || medballHtml || cuesHtml || mentalHtml)
+    ? `<hr class="doc-rule"><div class="bottom-section">
+        ${envVariations ? `<h3>Training Environments</h3><p>${esc(envVariations)}</p><p class="env-note">These aren't drills &mdash; they're conditions. Run your drills above in these environments to make the work game-like.</p>` : ''}
+        ${medballHtml}${cuesHtml}${mentalHtml}
+      </div>`
     : '';
 
   const footer = plan.footer ? `<div class="doc-footer">${esc(plan.footer)}</div>` : '';
@@ -5162,73 +5177,63 @@ function hittingPlanPage(user, p) {
     user,
     tabs: userTabs('program', user),
     body: `<div class="doc-page">
-      <div class="doc-brand">
-        <div class="doc-brand-mark">AH</div>
-        <div class="doc-brand-text">
-          <div class="doc-brand-name">ATKINSON HITTING</div>
-          <div class="doc-brand-sub">Remote Development</div>
+      <div class="doc-header">
+        <div class="doc-logo">ATKINSON<br>HITTING</div>
+        <div class="doc-title-wrap">
+          <h1 class="doc-title">Hitting Program</h1>
+          <p class="doc-athlete">${esc(athleteName)}</p>
         </div>
+        <div class="doc-logo">ATKINSON<br>HITTING</div>
       </div>
-      <h1 class="doc-title">Hitting Program</h1>
-      <p class="doc-athlete">${esc(athleteName)}</p>
-      <hr class="doc-rule">
-      ${whereHtml}
+      <p class="important">⚠️ Important: Do these vs all 3 progression types &mdash; tee, toss, and BP (or machine).</p>
       ${scheduleHtml}
-      ${warmupHtml}
-      ${medballHtml}
-      ${drillsHtml}
-      ${keysHtml}
-      ${variationsHtml}
+      ${evalHtml}
+      ${drillTableHtml}
+      ${bottomHtml}
       ${footer}
     </div>
     <style>
-      .doc-page { max-width: 700px; margin: 0 auto; background: #fff; color: #1a1a1a;
-        padding: 32px 28px; border-radius: 6px; box-shadow: 0 2px 12px rgba(0,0,0,0.1);
-        font-family: -apple-system, Helvetica, Arial, sans-serif; line-height: 1.5; }
-      .doc-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
-      .doc-brand-mark { width: 44px; height: 44px; border-radius: 50%; background: #111; color: #fff;
-        display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 18px; }
-      .doc-brand-name { font-weight: 800; font-size: 16px; letter-spacing: 1.5px; color: #111; }
-      .doc-brand-sub { font-size: 11px; letter-spacing: 2.5px; text-transform: uppercase; color: #666; }
-      .doc-title { font-size: 28px; margin: 14px 0 0; color: #111; }
-      .doc-athlete { font-size: 18px; color: #555; margin: 2px 0 0; }
-      .doc-rule { border: none; border-top: 3px solid #111; margin: 14px 0 20px; }
-      .doc-section { margin: 22px 0; }
-      .doc-section h2 { font-size: 18px; color: #111; border-bottom: 2px solid #111;
-        padding-bottom: 5px; margin: 0 0 10px; text-transform: uppercase; letter-spacing: 0.5px; }
-      .doc-section p { color: #222; font-size: 15px; margin: 8px 0; }
-      .doc-env { font-size: 16px; color: #fff; background: #111; display: inline-block;
-        padding: 4px 12px; border-radius: 4px; margin: 14px 0 8px; }
-      .compact-list { list-style: none; padding: 0; margin: 0; }
-      .compact-list li { padding: 8px 0; border-bottom: 1px solid #eee; font-size: 15px; color: #222; }
-      .compact-list li:last-child { border-bottom: none; }
-      .dim { color: #666; }
-      .cue { color: #0066cc; font-size: 14px; }
-      .why { color: #666; font-size: 14px; font-style: italic; }
-      .mental { background: #f0f4ff; padding: 10px 12px; border-radius: 4px; border-left: 3px solid #0066cc; }
-      .grade-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin: 10px 0; }
-      .grade-card { background: #f8f8f8; border-radius: 6px; padding: 10px; text-align: center; }
-      .grade-cat { font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
-      .grade-val { font-size: 24px; font-weight: 800; color: #111; margin: 4px 0; }
-      .grade-why { font-size: 12px; color: #555; line-height: 1.4; }
-      .doc-table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 14px; }
-      .doc-table td { padding: 8px 10px; border-bottom: 1px solid #e8e8e8; color: #222; vertical-align: top; }
-      .sched-day { font-weight: 700; white-space: nowrap; width: 90px; }
-      .doc-note { font-size: 13px; color: #888; font-style: italic; margin: 8px 0 0; }
-      .doc-footer { margin-top: 20px; padding: 12px 14px; background: #fffbe6;
-        border-left: 4px solid #e6a800; font-style: italic; color: #333; font-size: 14px; border-radius: 0 4px 4px 0; }
+      .doc-page { max-width: 720px; margin: 0 auto; background: #fff; color: #111;
+        padding: 28px 24px; font-family: Arial, Helvetica, sans-serif; line-height: 1.5; }
+      .doc-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+      .doc-logo { font-weight: 900; font-size: 13px; line-height: 1.2; text-align: center; color: #c00;
+        letter-spacing: 1px; }
+      .doc-title-wrap { text-align: center; }
+      .doc-title { font-size: 24px; margin: 0; color: #111; }
+      .doc-athlete { font-size: 16px; color: #444; margin: 2px 0 0; }
+      .important { background: #fffde7; border: 1px solid #f0e68c; padding: 8px 12px; border-radius: 4px;
+        font-size: 14px; margin: 12px 0; }
+      .sched-line { font-size: 14px; color: #333; margin: 10px 0; }
+      .doc-rule { border: none; border-top: 1px solid #ccc; margin: 16px 0; }
+      .eval-section h3 { font-size: 16px; margin: 14px 0 6px; color: #111; }
+      .grade-scale { font-size: 13px; color: #555; font-weight: 700; margin: 4px 0; }
+      .grade-list, .std-list { margin: 6px 0 12px 20px; padding: 0; font-size: 14px; }
+      .grade-list li, .std-list li { margin: 4px 0; color: #222; }
+      .need { font-size: 15px; background: #f5f5f5; padding: 10px 12px; border-radius: 4px; margin: 12px 0; }
+      .drill-table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14px; }
+      .drill-table th { background: #f0f0f0; border: 1px solid #999; padding: 8px 10px; text-align: left; font-size: 13px; }
+      .drill-table td { border: 1px solid #999; padding: 8px 10px; vertical-align: top; }
+      .drill-table .vol { text-align: center; font-weight: 700; white-space: nowrap; }
+      .why { font-size: 13px; color: #333; }
+      .why-note { font-size: 13px; color: #444; margin: 10px 0; line-height: 1.5; }
+      .doc-note { font-size: 13px; color: #888; font-style: italic; }
+      .bottom-section h3 { font-size: 16px; margin: 14px 0 6px; }
+      .bottom-section p, .bottom-section li { font-size: 14px; color: #222; }
+      .env-note { font-size: 13px; color: #666; font-style: italic; }
+      .mental { background: #f0f4ff; padding: 10px 12px; border-radius: 4px; border-left: 3px solid #0066cc; font-size: 14px; }
+      .doc-footer { margin-top: 16px; padding: 10px 12px; background: #fffbe6;
+        border-left: 4px solid #e6a800; font-style: italic; font-size: 14px; }
       @media (max-width: 600px) {
-        .doc-page { padding: 20px 16px; margin: 0 -8px; border-radius: 0; box-shadow: none; }
-        .doc-title { font-size: 24px; }
-        .grade-grid { grid-template-columns: repeat(2, 1fr); }
-      }
-      @media print {
-        .doc-page { box-shadow: none; padding: 0; max-width: none; }
-        .doc-section { break-inside: avoid; }
+        .doc-page { padding: 16px 12px; }
+        .doc-header { flex-direction: column; gap: 8px; }
+        .doc-logo { font-size: 11px; }
+        .drill-table { font-size: 13px; }
+        .drill-table th, .drill-table td { padding: 6px 8px; }
       }
     </style>`,
   });
 }
+
 
 
 
