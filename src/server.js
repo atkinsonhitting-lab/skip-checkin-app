@@ -2192,6 +2192,77 @@ function backfillRemoteLinks() {
   }
 }
 
+// Sync remote programs from Bobby's sheets (Sep 23 2026).
+// Bobby: "use my sheets" — the sheets are the source of truth, not the app DB.
+// This overwrites the routine/grades/etc with clean sheet data, preserving
+// coach-only fields (grade_whys, custom hitting_plan edits).
+function syncProgramsFromSheets() {
+  const fs = require('fs');
+  const path = require('path');
+  const sheetsDir = path.join(__dirname, '..', 'data', 'sheets');
+  if (!fs.existsSync(sheetsDir)) return;
+  
+  const files = fs.readdirSync(sheetsDir).filter(f => f.endsWith('.json'));
+  for (const file of files) {
+    try {
+      const sheet = JSON.parse(fs.readFileSync(path.join(sheetsDir, file), 'utf8'));
+      const athleteName = sheet.athlete || '';
+      if (!athleteName) continue;
+      
+      // Find matching program (by athlete_name, case-insensitive)
+      const prog = db.prepare(
+        "SELECT * FROM remote_programs WHERE LOWER(athlete_name) = LOWER(?)"
+      ).get(athleteName);
+      if (!prog) {
+        console.log(`Sheet sync: no program found for ${athleteName}, skipping`);
+        continue;
+      }
+      
+      let progJson = {};
+      try { progJson = JSON.parse(prog.program_json || '{}'); } catch (e) { progJson = {}; }
+      
+      // Preserve coach-only fields
+      const keepGradeWhys = progJson.grade_whys || {};
+      const keepCustomPlan = progJson.hitting_plan && progJson.hitting_plan._custom ? progJson.hitting_plan : null;
+      
+      // Overwrite with sheet data (clean, no duplicates, no mobility)
+      if (sheet.grades) progJson.grades = sheet.grades;
+      if (sheet.strengths) progJson.strengths = sheet.strengths;
+      if (sheet.cues) progJson.cues = sheet.cues;
+      if (sheet.adjustment) progJson.adjustment = sheet.adjustment;
+      if (sheet.phase_emphasis) progJson.phase_emphasis = sheet.phase_emphasis;
+      if (sheet.mental_framework) progJson.mental_framework = sheet.mental_framework;
+      if (sheet.days) {
+        // Map sheet days -> routine blocks
+        progJson.routine = sheet.days.map(d => ({
+          category: d.category || '',
+          items: (d.items || []).map(it => ({
+            drill: it.drill || '',
+            volume: it.volume || ''
+          }))
+        }));
+      }
+      if (sheet.date_range) progJson.date_range = sheet.date_range;
+      
+      // Restore preserved fields
+      progJson.grade_whys = keepGradeWhys;
+      // Clear hitting_plan so it regenerates from clean data (unless coach customized it)
+      if (!keepCustomPlan) {
+        delete progJson.hitting_plan;
+      }
+      
+      db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?')
+        .run(JSON.stringify(progJson), new Date().toISOString(), prog.id);
+      console.log(`Sheet sync: updated ${athleteName} from ${file}`);
+    } catch (e) {
+      console.error(`Sheet sync failed for ${file}:`, e.message);
+    }
+  }
+}
+
+// Run sheet sync on boot (Bobby's sheets are the source of truth)
+try { syncProgramsFromSheets(); } catch (e) { console.error('Sheet sync on boot failed:', e.message); }
+
 // Hitter's program page — remote athletes only.
 app.get('/program', requireLogin, requireWaiver, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');

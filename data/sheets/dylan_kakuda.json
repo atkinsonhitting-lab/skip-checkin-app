@@ -1,0 +1,244 @@
+{
+ "adjustment": "Load around the hip (no sway). Bat more vertical with space from the body at launch.",
+ "athlete": "Dylan Kakuda",
+ "daily_routine": [
+  "Top Hand",
+  "Bottom Hand",
+  "Open 45 w/ stride",
+  "Kick Through"
+ ],
+ "date_range": "8/30\u20139/30",
+ "days": [
+  {
+   "category": "Tee",
+   "category_note": null,
+   "items": [
+    {
+     "drill": "Top Hand",
+     "volume": "5 swings"
+    },
+    {
+     "drill": "Bottom Hand",
+     "volume": "5 swings"
+    },
+    {
+     "drill": "Open 45 w/ stride",
+     "volume": "5 swings"
+    },
+    {
+     "drill": "Kick Through",
+     "volume": "5 swings"
+    }
+   ],
+   "title": "Day 1"
+  },
+  {
+   "category": "Side Flips",
+   "items": [
+    {
+     "drill": "Tracer Drill",
+     "note": "Keep bat tall and space away from body (flat bat if available)",
+     "volume": "5 swings"
+    },
+    {
+     "drill": "Open 45 w/ stride",
+     "volume": "5 swings"
+    }
+   ],
+   "title": "Day 1"
+  },
+  {
+   "category": "Front Toss",
+   "items": [
+    {
+     "drill": "Tracer Drill",
+     "note": "Keep bat tall and space away from body",
+     "volume": "5 swings"
+    },
+    {
+     "drill": "Med Ball Drill",
+     "volume": "5 swings"
+    },
+    {
+     "drill": "Game Swings",
+     "volume": "2 sets \u00d7 5 swings"
+    }
+   ],
+   "title": "Day 1"
+  },
+  {
+   "category": "Machine",
+   "items": [
+    {
+     "drill": "Open Angled Machine",
+     "volume": "Up to you"
+    },
+    {
+     "drill": "Open Angle LH Breaking Ball",
+     "volume": "Up to you"
+    }
+   ],
+   "title": "Day 1"
+  },
+  {
+   "category": "Tee",
+   "items": [
+    {
+     "drill": "Top Hand",
+     "volume": "5 swings"
+    },
+    {
+     "drill": "Bottom Hand",
+     "volume": "5 swings"
+    },
+    {
+     "drill": "Open 45 w/ stride",
+     "volume": "5 swings"
+    },
+    {
+     "drill": "Kick Through",
+     "volume": "5 swings"
+    }
+   ],
+   "title": "Day 2"
+  },
+  {
+   "category": "Side Flips",
+   "items": [
+    {
+     "drill": "Tracer Drill",
+     "note": "Keep bat tall and space away from body (flat bat if available)",
+     "volume": "5 swings"
+    },
+    {
+     "drill": "Open 45 w/ stride",
+     "volume": "5 swings"
+    }
+   ],
+   "title": "Day 2"
+  },
+  {
+   "category": "Front Toss",
+   "items": [
+    {
+     "drill": "Tracer Drill",
+     "note": "Keep bat tall and space away from body",
+     "volume": "5 swings"
+    },
+    {
+     "drill": "Med Ball Drill",
+     "volume": "5 swings"
+    },
+    {
+     "drill": "Game Swings",
+     "volume": "2 sets \u00d7 5 swings"
+    }
+   ],
+   "title": "Day 2"
+  },
+  {
+   "category": "Machine",
+   "items": [
+    {
+     "drill": "Firm FB Machine (foam balls OK)",
+     "volume": "Up to you"
+    },
+    {
+     "drill": "Closed Angle RH Breaking Ball",
+     "volume": "Up to you"
+    }
+   ],
+   "title": "Day 2"
+  },
+  {
+   "category": "Tee",
+   "items": [
+    {
+     "drill": "Top Hand",
+     "volume": "5 swings"
+    },
+    {
+     "drill": "Bottom Hand",
+     "volume": "5 swings"
+    },
+    {
+     "drill": "Open 45 w/ stride",
+     "volume": "5 swings"
+    },
+    {
+     "drill": "Kick Through",
+     "volume": "5 swings"
+    }
+   ],
+   "title": "Day 3"
+  },
+  {
+   "category": "Side Flips",
+   "items": [
+    {
+     "drill": "Tracer Drill",
+     "note": "Keep bat tall and space away from body (flat bat if available)",
+     "volume": "5 swings"
+    },
+    {
+     "drill": "Open 45 w/ stride",
+     "volume": "5 swings"
+    }
+   ],
+   "title": "Day 3"
+  },
+  {
+   "category": "Front Toss",
+   "items": [
+    {
+     "drill": "Tracer Drill",
+     "note": "Keep bat tall and space away from body",
+     "volume": "5 swings"
+    },
+    {
+     "drill": "Med Ball Drill",
+     "volume": "5 swings"
+    },
+    {
+     "drill": "Game Swings",
+     "volume": "2 sets \u00d7 5 swings"
+    }
+   ],
+   "title": "Day 3"
+  },
+  {
+   "category": "Machine",
+   "items": [
+    {
+     "drill": "Closed Angle FB Machine",
+     "volume": "Up to you"
+    },
+    {
+     "drill": "Mixed Machine Feeds",
+     "note": "Feeder mixes height, in/out, etc. \u2014 make swing decisions",
+     "volume": "Up to you"
+    }
+   ],
+   "title": "Day 3"
+  }
+ ],
+ "phase_emphasis": "Load and Bat Position at Launch",
+ "grades": {
+  "Load": "B-",
+  "Path": "B",
+  "Connection": "B",
+  "Timing": "B+",
+  "Power Production": "C"
+ },
+ "strengths": [
+  "Bat to ball skills",
+  "On time",
+  "Wants to work to get better"
+ ],
+ "cues": {
+  "movement": "Load around the hip \u2014 no sway. Keep the bat tall with space from the body.",
+  "timing": "Let the ball travel.",
+  "game": "Tall and free. See it."
+ },
+ "mental_framework": "PREPARED \u2192 PRESENT \u2192 COMPETE"
+}
