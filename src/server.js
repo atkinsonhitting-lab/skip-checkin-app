@@ -1786,7 +1786,7 @@ function getProgram(id) {
   let prog = null;
   try { prog = JSON.parse(row.program_json || '{}'); } catch (e) { prog = {}; }
   if (!prog || typeof prog !== 'object') prog = {};
-  return { id: row.id, athlete_name: row.athlete_name, updated_at: row.updated_at, prog, session_order: row.session_order || 'hitting_first' };
+  return { id: row.id, athlete_name: row.athlete_name, updated_at: row.updated_at, prog, session_order: row.session_order || 'hitting_first', component_order: row.component_order || '' };
 }
 // ---- Programs tab: lifting + check-offs (Sep 2026) ----
 // Chicago date string (YYYY-MM-DD) used as the check-off day key.
@@ -2115,6 +2115,180 @@ app.get('/program/workout', requireLogin, requireWaiver, (req, res) => {
   const wd = buildWorkoutDay(req.user.id, lifting, ldayIdx, today);
   if (!wd.day) return res.redirect('/program?sub=lifting');
   res.send(views.workoutPage(req.user, p, wd, ldayIdx));
+});
+
+// ---- Guided Today session (Sep 2026) ----
+// One tap runs the whole day: Mobility / Med Ball / Hitting / Lifting in an
+// order the athlete chooses. Item keys match the Programs-tab checkoff keys
+// exactly, so progress syncs both ways.
+const SESSION_COMPS = [
+  { id: 'mobility', label: 'Mobility', icon: '🧘', tag: 'Warm up first' },
+  { id: 'medball', label: 'Med Ball', icon: '💥', tag: 'Power' },
+  { id: 'hitting', label: 'Hitting', icon: '⚾', tag: 'Cage work' },
+  { id: 'lifting', label: 'Lifting', icon: '🏋️', tag: 'Get strong' },
+];
+const DEFAULT_COMP_ORDER = ['mobility', 'medball', 'hitting', 'lifting'];
+
+// Athlete's saved component order (DB), default when unset/invalid.
+function compOrderFor(p) {
+  let saved = [];
+  try {
+    saved = JSON.parse((p && p.component_order) || '[]');
+  } catch (e) { saved = []; }
+  const ids = SESSION_COMPS.map((c) => c.id);
+  const out = (Array.isArray(saved) ? saved : []).filter((id) => ids.includes(id));
+  for (const id of DEFAULT_COMP_ORDER) if (!out.includes(id)) out.push(id);
+  return { order: out, saved: !!((p && p.component_order) || '').trim() };
+}
+
+// Resolve a program item's video URL into a typed object for the session UI:
+// YouTube embeds, Drive files use the in-app preview player, anything else
+// opens directly. Hidden library videos resolve to nothing.
+function resolveVideo(url, videoLib) {
+  const u = String(url || '').trim();
+  if (!u) return null;
+  const ym = /(?:youtube\.com\/(?:watch\?v=|shorts\/|embed\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})/.exec(u);
+  if (ym) return { type: 'yt', id: ym[1] };
+  const dm = /drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/.exec(u);
+  if (dm) {
+    const v = (videoLib || {})[dm[1]];
+    if (v && v.hidden) return null;
+    return { type: 'drive', fileId: dm[1], watch: v ? '/videos/watch/' + v.id : u };
+  }
+  return { type: 'url', url: u };
+}
+
+// Full-day session data: every component with items for the selected program
+// day, plus the athlete's component order. Empty components are dropped.
+function buildSessionDay(userId, p, dayLabel, checkoffs, lifting, ldayIdx, videoLib, subs) {
+  const prog = (p && p.prog) || {};
+  const routine = Array.isArray(prog.routine) ? prog.routine : [];
+  const realItems = (items) => (Array.isArray(items) ? items : []).filter((it) => String((it && it.drill) || '').trim());
+  const dayPrefix = (cat) => {
+    const m = /^([A-Za-z]+ ?\d+|Pregame)/i.exec(String(cat || '').trim());
+    return m ? m[1].trim() : '';
+  };
+  const inDay = (cat) => dayPrefix(cat).toLowerCase() === String(dayLabel || '').toLowerCase();
+  const mob = (cat, it) => ({
+    comp: 'mobility', type: 'block', kind: 'mob',
+    key: `mob::::${cat}::${it.drill}`,
+    name: String(it.drill || ''), meta: String(it.volume || it.prescription || ''),
+    notes: String(it.notes || ''), block: String(cat || ''),
+    video: resolveVideo(it.video, videoLib), done: !!checkoffs[`mob::::${cat}::${it.drill}`],
+  });
+  const med = (cat, it) => {
+    const key = `med::${dayPrefix(cat)}::${cat}::${it.drill}`;
+    const sw = (subs || {})[key];
+    return {
+      comp: 'medball', type: 'block', kind: 'med', key,
+      name: String((sw && sw.sub_name) || it.drill || ''), swappedFrom: sw ? String(it.drill || '') : '',
+      meta: String(it.volume || it.prescription || ''), notes: String(it.notes || ''),
+      block: String(cat || ''), video: resolveVideo(it.video, videoLib), done: !!checkoffs[key],
+    };
+  };
+  const hit = (cat, it, dayScoped) => {
+    const key = `hit::${dayScoped ? dayLabel : ''}::${cat}::${it.drill}`;
+    return {
+      comp: 'hitting', type: 'block', kind: 'hit', key,
+      name: String(it.drill || ''), meta: String(it.prescription || it.volume || ''),
+      notes: String(it.notes || ''), block: String(cat || ''),
+      video: resolveVideo(it.video, videoLib), done: !!checkoffs[key],
+    };
+  };
+
+  const mobilityItems = [];
+  const medballItems = [];
+  const hittingItems = [];
+  for (const c of routine) {
+    const items = realItems(c.items);
+    if (!items.length) continue;
+    const n = String(c.category || '');
+    const cat = String(c.category || '');
+    if (/mobility/i.test(n)) for (const it of items) mobilityItems.push(mob(cat, it));
+    else if (/med\s*ball/i.test(n)) { if (inDay(cat)) for (const it of items) medballItems.push(med(cat, it)); }
+    else if (/prep/i.test(n)) { if (inDay(cat)) for (const it of items) hittingItems.push({ ...hit(cat, it, true), section: 'Prep' }); }
+    // "Hitting — ..." guide blocks (week plan) are reference material on the
+    // Hitting tab, not tap-through check-offs.
+    else if (!/metabol|conditioning/i.test(n) && !/^hitting\s*[—–-]/i.test(n)) {
+      if (inDay(cat)) for (const it of items) hittingItems.push({ ...hit(cat, it, true), section: 'Hitting' });
+      else if (!dayPrefix(cat)) for (const it of items) hittingItems.push({ ...hit(cat, it, false), section: 'Every day' });
+    }
+  }
+
+  // Lifting component: speed -> lifting-day med ball -> lifts (same order as
+  // the Lifting tab). Legacy Metabolic blocks fold into Speed.
+  const wd = buildWorkoutDay(userId, lifting, ldayIdx, chiToday());
+  const liftingItems = [];
+  if (wd && wd.day) {
+    for (const s of wd.day.speed || []) liftingItems.push({ ...s, comp: 'lifting', kind: 'spd' });
+    for (const m of wd.day.medball || []) liftingItems.push({ ...m, comp: 'lifting', kind: 'med' });
+    for (const l of wd.day.lifts || []) liftingItems.push({ ...l, comp: 'lifting', kind: 'lift' });
+  }
+
+  const comps = {};
+  const def = (id, items) => {
+    const meta = SESSION_COMPS.find((c) => c.id === id) || {};
+    comps[id] = { id, label: meta.label || id, icon: meta.icon || '', tag: meta.tag || '', items };
+  };
+  def('mobility', mobilityItems);
+  def('medball', medballItems);
+  def('hitting', hittingItems);
+  def('lifting', liftingItems);
+  // Drop empty components so the athlete never taps through nothing.
+  const { order, saved } = compOrderFor(p);
+  const live = order.filter((id) => comps[id] && comps[id].items.length);
+  return { order: live, savedOrder: saved, components: comps };
+}
+
+app.get('/program/session', requireLogin, requireWaiver, (req, res) => {
+  if (req.user.role === 'coach') return res.redirect('/coach');
+  if (!req.user.remoteProgramId) return res.redirect('/');
+  if (req.user.viewAs) return res.redirect('/program');
+  const p = getProgram(req.user.remoteProgramId);
+  if (!p) return res.redirect('/');
+  const prog = p.prog || {};
+  const schedule = (Array.isArray(prog.schedule) ? prog.schedule : []).map(schedEntry);
+  const labels = programDayLabels(p);
+  const rawAuto = programCurrentDay(p);
+  const weekday = new Date().toLocaleDateString('en-US', { weekday: 'long', timeZone: 'America/Chicago' });
+  const reqDay = String(req.query.day || '').trim();
+  const day = labels.some((l) => l.toLowerCase() === reqDay.toLowerCase())
+    ? labels.find((l) => l.toLowerCase() === reqDay.toLowerCase())
+    : (rawAuto || labels[0] || '');
+  const schedLabel = (schedule.find((s) => s.weekday.toLowerCase() === weekday.toLowerCase()) || {}).label || '';
+  const restToday = /^(off|rest)/i.test(String(day || schedLabel || '').trim());
+  const liftingId = db.prepare('SELECT lifting_program_id FROM remote_programs WHERE id = ?').get(p.id);
+  const lifting = getLifting(liftingId && liftingId.lifting_program_id);
+  const liftDays = lifting && Array.isArray(lifting.days)
+    ? lifting.days.filter((d) => (Array.isArray(d.exercises) ? d.exercises : []).some((ex) => String((ex && ex.name) || '').trim()))
+    : [];
+  const ldayIdx = liftDays.length ? Math.max(0, Math.min(liftDays.length - 1, parseInt(req.query.lday, 10) || 0)) : 0;
+  const today = chiToday();
+  const checkoffs = getCheckoffs(req.user.id, today);
+  const sess = buildSessionDay(req.user.id, p, day, checkoffs, lifting, ldayIdx, videoLibMap(), todaySubs(req.user.id));
+  res.send(views.sessionPage(req.user, {
+    dayLabel: day, weekday, date: today, rest: restToday,
+    order: sess.order, savedOrder: sess.savedOrder, components: sess.components,
+    ldayIdx, backUrl: '/program?day=' + encodeURIComponent(day || ''),
+  }));
+});
+
+// The athlete picks the order their Today session runs in. Bobby can change
+// it for them in the program editor if they ask.
+app.post('/program/component-order', requireLogin, requireWaiver, (req, res) => {
+  if (req.user.role === 'coach' || !req.user.remoteProgramId || req.user.viewAs) {
+    return req.accepts('json') ? res.status(403).json({ ok: false }) : res.redirect('/program');
+  }
+  const ids = SESSION_COMPS.map((c) => c.id);
+  const arr = Array.isArray(req.body.order) ? req.body.order : String(req.body.order || '').split(',');
+  const clean = arr.map((x) => String(x).trim()).filter((x) => ids.includes(x));
+  const order = [];
+  for (const id of clean) if (!order.includes(id)) order.push(id);
+  for (const id of DEFAULT_COMP_ORDER) if (!order.includes(id)) order.push(id);
+  db.prepare('UPDATE remote_programs SET component_order = ? WHERE id = ?')
+    .run(JSON.stringify(order), req.user.remoteProgramId);
+  if (req.accepts('json')) return res.json({ ok: true, order });
+  res.redirect('/program/session');
 });
 
 // Athlete (or Bobby via the program edit page) picks which runs first in a
@@ -3266,11 +3440,11 @@ app.post('/coach/program/:id/save', requireCoach, (req, res) => {
         })
         .filter(Boolean)
         .slice(0, 20);
-      cats.push({ category: name, items, _i: Number(m[1]) });
+      cats.push({ category: name, items, _i: Number(m[1]), guide: !!((curByCat[name] || {}).guide) });
     }
   }
   cats.sort((a, b) => a._i - b._i);
-  prog.routine = cats.map(({ category, items }) => ({ category, items }));
+  prog.routine = cats.map(({ category, items, guide }) => (guide ? { category, items, guide: true } : { category, items }));
   const schedDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
   prog.schedule = schedDays
     .map((day, i) => [day, String(b['sched_' + i] || '').trim().slice(0, 40)])
@@ -3732,18 +3906,51 @@ function buildHittingBase(a, nDays, env) {
   const r = (off, inS) => (inSeason ? inS : off);
   const goal = String(((a.goals || [])[0]) || '').toLowerCase();
   const wantsVelo = /exit|velo|power|drive/.test(goal);
+  // A place to actually hit balls: tee, machine, cage, or a feeder.
+  const canHit = env.hasTee || env.hasMachine || env.hasCage || env.hasFeeder;
+  // Weekly guideline — drills + a plan for the week + cues, not a deep
+  // script. Bobby finalizes the drills and sets the cues in the editor.
+  // Category starts with "Hitting —" (no Day prefix): renders under
+  // "Every day" on the Hitting tab and is skipped by the guided session
+  // tap-through (reference material, not check-offs).
+  const envList = [];
+  if (env.hasTee) envList.push('tee');
+  if (env.hasNet) envList.push('net');
+  if (env.hasCage) envList.push('cage');
+  if (env.hasMachine) envList.push('machine');
+  envList.push(env.hasFeeder ? 'feed partner' : 'NO feed partner');
+  const planItems = [
+    { drill: 'Week structure', prescription: `${nDays} hitting day${nDays === 1 ? '' : 's'} — Day 1–${nDays} below` },
+    { drill: 'Environments', prescription: envList.join(' · ') },
+  ];
+  if (inSeason)
+    planItems.push({ drill: 'In-season rule', prescription: 'Stay sharp — drill volume cut in half, no max-intent work the day before a game' });
+  else if (a.season_phase === 'preseason')
+    planItems.push({ drill: 'Pre-season rule', prescription: 'Build toward game speed — keep 1 intent round, feel and timing first' });
+  else
+    planItems.push({ drill: 'Off-season rule', prescription: 'Build volume through the week — finish machine/cage days with 1 intent round (max effort, full rest between swings)' });
+  if (!env.hasFeeder)
+    planItems.push({ drill: 'No feed partner', prescription: 'Tee / dry / machine / cage work carries the week — Bobby sets the mix when he reviews' });
+  if (!canHit)
+    planItems.push({ drill: 'Dry work only this cycle', prescription: 'No tee, machine, cage, or feeder on file — Bobby will adjust when he reviews' });
+  planItems.push({ drill: 'How to run a day', prescription: 'Rhythm round easy → drill work with your cue → environment rounds → game swings, compete every pitch' });
+  blocks.push({ category: 'Hitting — Week plan', guide: true, items: planItems });
   for (let i = 0; i < nDays; i++) {
     const items = [];
-    items.push({ drill: 'Tee — rhythm round', prescription: '10 swings, easy — find your move' });
-    items.push({ drill: 'Tee drill work — Bobby picks', prescription: r('3 rounds × 10', '2 rounds × 8') });
+    // Never program tee work when the athlete has no tee — dry swings instead.
+    if (env.hasTee) {
+      items.push({ drill: 'Tee — rhythm round', prescription: '10 swings, easy — find your move' });
+      items.push({ drill: 'Tee drill work — Bobby picks', prescription: r('3 rounds × 10', '2 rounds × 8') });
+    } else {
+      items.push({ drill: 'Dry swings — rhythm round', prescription: '10 swings, easy — find your move, no tee needed' });
+      items.push({ drill: 'Dry move work — Bobby picks', prescription: r('3 rounds × 10', '2 rounds × 8') });
+    }
     if (env.hasFeeder) items.push({ drill: 'Front toss / side toss', prescription: r('4 rounds × 10', '3 rounds × 10') });
     if (env.hasMachine) items.push({ drill: 'Machine rounds', prescription: r('3 rounds × 12', '2 rounds × 10') });
     else if (env.hasCage) items.push({ drill: 'Cage BP', prescription: r('3 rounds × 12', '2 rounds × 10') });
-    if (wantsVelo && !inSeason) items.push({ drill: 'Intent round — move it', prescription: '1 round × 8, max intent, full rest between swings' });
-    items.push({ drill: 'Game swings', prescription: r('15 swings — compete every pitch', '10 swings — compete every pitch') });
-    if (!env.hasFeeder && !env.hasMachine && !env.hasCage) {
-      items.push({ drill: 'NOTE — tee + net only this cycle', prescription: 'No feeder, machine, or cage on file — Bobby will adjust', notes: '' });
-    }
+    if (wantsVelo && !inSeason && canHit) items.push({ drill: 'Intent round — move it', prescription: '1 round × 8, max intent, full rest between swings' });
+    if (canHit) items.push({ drill: 'Game swings', prescription: r('15 swings — compete every pitch', '10 swings — compete every pitch') });
+    else items.push({ drill: 'Dry game-speed swings', prescription: r('15 swings — compete on every rep', '10 swings — compete on every rep') });
     blocks.push({ category: 'Day ' + (i + 1) + ' — Hitting', items });
   }
   return blocks;
@@ -3780,7 +3987,7 @@ function buildIntakeProgram(a, athleteName) {
   if (env.hasNet) envs.push('net');
   if (env.hasCage) envs.push('cage');
   if (env.hasMachine) envs.push('machine');
-  envs.push(env.hasFeeder ? 'front/side toss (has feeder)' : 'NO feed partner — tee/net/cage work only');
+  envs.push(env.hasFeeder ? 'front/side toss (has feeder)' : 'NO feed partner');
   // The week as a calendar: training days -> Day 1..N (Monday-first), then
   // recovery / mobility days onto free weekdays, everything else OFF.
   const ordered = WEEKDAYS.filter((d) => a.train_days.includes(d));
@@ -3810,6 +4017,17 @@ function buildIntakeProgram(a, athleteName) {
   // checked it get the standalone Med Ball tab.
   if (has('lifting') || has('medball')) for (const b of medballBlocks(tags)) prog.routine.push(b);
   if (has('metabolic')) for (const b of metabolicBlocks(tags)) prog.routine.push(b);
+  // "The focus" — seeded from the athlete's own words (goals, what worked /
+  // didn't), never a mechanical diagnosis. Bobby rewrites this when he
+  // reviews the draft; the cues themselves stay his (editor: Movement /
+  // Timing / Game), seeded blank.
+  const focusBits = [];
+  if ((a.goals || [])[0]) focusBits.push('Goal: ' + a.goals[0]);
+  if ((a.goals || []).length > 1) focusBits.push('Also: ' + a.goals.slice(1).join(', '));
+  if (a.goals_other) focusBits.push('Wants: ' + a.goals_other);
+  if (a.what_worked) focusBits.push("What's worked: " + a.what_worked);
+  if (a.what_didnt) focusBits.push("Hasn't worked: " + a.what_didnt);
+  if (focusBits.length) prog.adjustment = focusBits.join(' · ').slice(0, 480);
   const flags = [];
   const inj = [a.injury_area && ('Area: ' + a.injury_area), a.injury_current, a.injury_severity && ('Severity: ' + a.injury_severity), a.injury_cleared && ('Cleared: ' + a.injury_cleared), a.pain_now && ('Current pain: ' + a.pain_now)].filter(Boolean).join(' · ');
   if (inj) flags.push('INJURIES: ' + inj);

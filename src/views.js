@@ -12,6 +12,11 @@ const ASSET_V = (() => {
   } catch (e) { return 'dev'; }
 })();
 
+// Guided Today session entry point. The route (/program/session) exists for
+// testing, but the athlete-facing button stays hidden until the flow is
+// finished and verified end-to-end (Change 2). Flip to true then.
+const GUIDED_SESSION_LIVE = false;
+
 // Warm-up normalization (Sep 23 2026): legacy programs store warmup as a plain
 // string; the editor saves an array of lines. Normalize both to string[].
 function normWarmup(w) {
@@ -2637,12 +2642,15 @@ function programPage(user, p, opts) {
       <span class="routine-name">${esc(shown || '')}</span>${volume ? `<span class="hint-inline">${esc(volume)}</span>` : ''}${watchLink(video)}${subBadge}
     </form>`;
   };
-  const blockCard = (cat, items, kind, dayScope, extra) => {
+  const blockCard = (cat, items, kind, dayScope, extra, guide) => {
     const real = realItems(items);
     if (!real.length) return '';
-    return `<details class="card routine-group" open><summary class="routine-summary"><span class="routine-station">${esc(cat)}</span></summary>${real
-      .map((it) => checkRow(kind, `${kind}::${dayScope || ''}::${cat}::${it.drill}`, it.drill, it.volume, it.video, extra))
-      .join('')}</details>`;
+    // Guide blocks (e.g. "Hitting — Week plan") are reference material, not
+    // check-offs: render plain rows.
+    const rows = guide
+      ? real.map((it) => `<div class="guide-row"><span class="routine-name">${esc(it.drill || '')}</span>${it.volume || it.prescription ? `<span class="hint-inline">${esc(it.volume || it.prescription)}</span>` : ''}</div>`).join('')
+      : real.map((it) => checkRow(kind, `${kind}::${dayScope || ''}::${cat}::${it.drill}`, it.drill, it.volume, it.video, extra)).join('');
+    return `<details class="card routine-group" open><summary class="routine-summary"><span class="routine-station">${esc(cat)}</span></summary>${rows}</details>`;
   };
 
   let content = '';
@@ -2724,9 +2732,21 @@ function programPage(user, p, opts) {
       ${prepToday.map((c) => blockCard(c.category, c.items, 'hit', day)).join('')}
       ${hitToday.map((c) => blockCard(c.category, c.items, 'hit', day)).join('')}
       ${!daySpecific.length && !flat.length ? '<div class="card empty">Nothing scheduled for this day.</div>' : ''}
-      ${flat.length ? `<h3 class="prog-h3">Every day</h3>${flat.map((c) => blockCard(c.category, c.items, 'hit', '')).join('')}` : ''}
+      ${flat.length ? `<h3 class="prog-h3">Every day</h3>${flat.map((c) => blockCard(c.category, c.items, 'hit', '', null, c.guide)).join('')}` : ''}
       ${pregame.length ? `<h3 class="prog-h3">Pregame</h3>${pregame.map((c) => blockCard(c.category, c.items, 'hit', dayPrefix(c.category))).join('')}` : ''}`}
       ${programSection('The focus', prog.adjustment ? `<p>${esc(prog.adjustment)}</p>` : '', 'focus')}
+      ${(() => {
+        // Bobby's cues (Movement / Timing / Game) — the athlete finally sees
+        // them here. Empty until he sets them in the program editor.
+        const cu = (prog.cues && typeof prog.cues === 'object') ? prog.cues : {};
+        const rows = [['Movement', cu.movement], ['Timing', cu.timing], ['Game', cu.game]]
+          .filter(([, v]) => String(v || '').trim());
+        return programSection(
+          'Cues to work on',
+          rows.length ? `<ul class="works-list">${rows.map(([k, v]) => `<li><strong>${esc(k)}:</strong> ${esc(String(v).trim())}</li>`).join('')}</ul>` : '',
+          'cues'
+        );
+      })()}
       ${programSection('Grades', gradeChips ? `<div class="grade-row">${gradeChips}</div>` : '', 'grades')}
       ${programSection(
         'Strengths',
@@ -2748,6 +2768,16 @@ function programPage(user, p, opts) {
     ${meta ? `<p class="lede">${meta}</p>` : ''}
     ${tabHtml}
     ${weekStrip()}
+    ${(() => {
+      // Guided Today session: one tap runs the whole day in the athlete's
+      // chosen order. Hidden on rest days, when no day is selected, and
+      // until GUIDED_SESSION_LIVE flips (Change 2).
+      if (!GUIDED_SESSION_LIVE || isRest || !day) return '';
+      const lday = (o.ldayIdx || 0);
+      const href = '/program/session?day=' + encodeURIComponent(day) +
+        (tabs.some((t) => t.id === 'lifting') ? '&lday=' + lday : '');
+      return `<a class="btn-primary session-cta" href="${href}">▶ Start ${isToday ? 'today\u2019s' : 'this day\u2019s'} session</a>`;
+    })()}
     ${orderToggle}
     ${content}
     <div class="card finish-card"><p style="margin:0 0 8px">Done with the work? <a href="/checkin"><strong>Log your session →</strong></a></p>
@@ -2802,6 +2832,109 @@ function workoutPage(user, program, wd, ldayIdx) {
     </div>
     <script>window.WO_DAY = ${dayJson};</script>
     <script src="/workout.js?v=${ASSET_V}"></script>`,
+  });
+}
+
+// ---- Guided Today session (Sep 2026) ----
+// Today → pick your order → tap through every exercise → done. One guided
+// flow for Mobility, Med Ball, Hitting, and Lifting, in the order the athlete
+// chooses. Screen stays awake during the session (Wake Lock). Progress logs
+// through the same checkoffs as the Programs tab, so everything syncs.
+function sessionPage(user, s) {
+  const comps = s.components || {};
+  const order = (s.order || []).filter((id) => comps[id] && comps[id].items.length);
+  const totalItems = order.reduce((n, id) => n + comps[id].items.length, 0);
+  const sessJson = JSON.stringify({
+    dayLabel: s.dayLabel, weekday: s.weekday, date: s.date,
+    order, components: order.reduce((o, id) => ((o[id] = comps[id]), o), {}),
+    skipOrder: !!s.savedOrder, ldayIdx: s.ldayIdx, backUrl: s.backUrl,
+  }).replace(/</g, '\\u003c');
+
+  // Rest day: nothing to run — offer the mobility flow only.
+  if (s.rest && !totalItems) {
+    return layout({
+      title: 'Today · Rest',
+      user,
+      tabs: [],
+      body: `<div class="sess-rest"><p class="wo-kicker">Today · ${esc(s.weekday || '')}</p>
+        <h1 class="sess-title">Rest day</h1>
+        <p class="lede">No work scheduled — recover and come back tomorrow.</p>
+        <div class="wo-card"><p style="margin:0">Want to move a little? The mobility flow is always fair game.</p>
+        <p style="margin:10px 0 0"><a class="btn-primary" href="/program?sub=mobility" style="display:block;text-align:center;text-decoration:none">Mobility flow</a></p></div>
+        <p style="margin-top:14px"><a href="${esc(s.backUrl || '/program')}" class="hint-inline">← Back to program</a></p></div>`,
+    });
+  }
+
+  const orderRows = order
+    .map((id, i) => {
+      const c = comps[id];
+      const n = c.items.length;
+      return `<div class="sess-orderrow" data-comp="${esc(id)}" data-i="${i}">
+        <span class="sess-grip" aria-hidden="true">⋮⋮</span>
+        <span class="sess-icon" aria-hidden="true">${esc(c.icon || '')}</span>
+        <div class="sess-ordermeta"><strong>${esc(c.label)}</strong>
+          <span class="hint-inline">${n} ${n === 1 ? 'exercise' : 'exercises'}${c.tag ? ' · ' + esc(c.tag) : ''}</span></div>
+        <div class="sess-arrows">
+          <button type="button" class="sess-arrow" data-move="-1" aria-label="Move up"${i === 0 ? ' disabled' : ''}>↑</button>
+          <button type="button" class="sess-arrow" data-move="1" aria-label="Move down"${i === order.length - 1 ? ' disabled' : ''}>↓</button>
+        </div>
+      </div>`;
+    })
+    .join('');
+
+  return layout({
+    title: (s.dayLabel || 'Today') + ' · Session',
+    user,
+    tabs: [],
+    body: `<div class="wo sess">
+      <div class="sess-order" id="sess-order">
+        <p class="wo-kicker">Today · ${esc(s.weekday || '')}</p>
+        <h1 class="sess-title">${esc(s.dayLabel || 'Today')}</h1>
+        <p class="lede">Run the whole day in one flow. Put the pieces in the order you want — we'll remember it.</p>
+        <div class="sess-orderlist" id="sess-orderlist">${orderRows}</div>
+        <button type="button" class="btn-primary sess-start" id="sess-start">▶ Start session</button>
+        <p style="margin-top:12px"><a href="${esc(s.backUrl || '/program')}" class="hint-inline">← Back to program</a></p>
+      </div>
+      <div class="sess-flow" id="sess-flow" hidden>
+        <div class="wo-top">
+          <a class="wo-end" href="${esc(s.backUrl || '/program')}">✕ End</a>
+          <div class="wo-prog"><div class="wo-bar"><div class="wo-fill" id="wo-fill"></div></div>
+          <div class="wo-count" id="wo-count"></div></div>
+          <button type="button" class="wo-end sess-reorder" id="sess-reorder" title="Change order">Order</button>
+          <div class="wo-day">${esc(s.dayLabel || '')}</div>
+        </div>
+        <div class="wo-seq" id="wo-seq"></div>
+        <main class="wo-body" id="wo-body"></main>
+        <nav class="wo-nav">
+          <button type="button" class="wo-navbtn" id="wo-prev">‹ Prev</button>
+          <button type="button" class="wo-navbtn primary" id="wo-next">Next ›</button>
+        </nav>
+        <div class="wo-rest" id="wo-rest" hidden>
+          <div class="wo-rest-card">
+            <div class="wo-rest-label">Rest</div>
+            <div class="wo-rest-time" id="wo-rest-time">2:00</div>
+            <div class="wo-rest-next" id="wo-rest-next"></div>
+            <div class="wo-rest-btns">
+              <button type="button" class="wo-chipbtn" id="wo-rest-less">−15s</button>
+              <button type="button" class="wo-chipbtn primary" id="wo-rest-skip">Skip</button>
+              <button type="button" class="wo-chipbtn" id="wo-rest-more">+15s</button>
+            </div>
+          </div>
+        </div>
+        <div class="wo-finish" id="wo-finish" hidden>
+          <div class="wo-finish-card">
+            <div class="wo-finish-emoji">🔒</div>
+            <h2>Day complete</h2>
+            <p class="hint" id="wo-finish-stats"></p>
+            <p><a class="btn-primary" href="/checkin" style="display:block;text-align:center;text-decoration:none">Log your session →</a></p>
+            <p><a class="btn" href="${esc(s.backUrl || '/program')}" style="display:block;text-align:center;text-decoration:none">Back to program</a></p>
+            <p><button type="button" class="btn-quiet" id="sess-reorder2" style="width:100%">Change my order</button></p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script>window.SESSION = ${sessJson};</script>
+    <script src="/session.js?v=${ASSET_V}"></script>`,
   });
 }
 
@@ -4709,9 +4842,27 @@ function intakeDetailPage(user, row) {
     ${sec('Goals', list('Goals', a.goals) + kv('Other goals', a.goals_other) + kv('90-day goal', a.goals_90) + kv('Current EV / bat speed', [a.current_ev, a.current_bat_speed].filter(Boolean).join(' / ')))}
     ${sec('Health & injuries', kv('Current injuries', a.injury_current) + kv('Area', a.injury_area) + kv('Severity', a.injury_severity) + kv('Cleared to train', a.injury_cleared) + kv('Past injuries/surgeries', a.injury_past) + kv('Current pain', a.pain_now) + kv("Doctor's notes", a.doctor_notes))}
     ${sec('Training background', kv('Years training', a.years_training) + kv('Lifting experience', a.lifting_experience) + kv('Past programs', a.past_programs) + kv('What worked', a.what_worked) + kv("What didn't", a.what_didnt) + kv('Best lifts', [a.squat_max && ('Squat ' + a.squat_max), a.bench_max && ('Bench ' + a.bench_max), a.deadlift_max && ('DL ' + a.deadlift_max)].filter(Boolean).join(' / ')) + kv('Strong but not explosive', a.strong_not_explosive ? 'Yes' : '—'))}
-    ${sec('Equipment', (a.missing_equipment && a.missing_equipment.length ? kv('Does NOT have', a.missing_equipment.join(', ')) : kv('Missing equipment', 'Has everything')) + kv('Details', a.equipment_detail))}
+    ${sec('Equipment', (() => {
+      // New answers: what they DON'T have. Legacy answers: positive `equipment` list.
+      const miss = (a.missing_equipment && a.missing_equipment.length) ? kv('Does NOT have', a.missing_equipment.join(', ')) : '';
+      const leg = (!a.missing_equipment || !a.missing_equipment.length) && a.equipment && a.equipment.length ? kv('Has (legacy answer)', a.equipment.join(', ')) : '';
+      const none = (!miss && !leg) ? kv('Missing equipment', 'Has everything') : '';
+      return miss + leg + none + kv('Details', a.equipment_detail);
+    })())}
     ${sec('Availability & season', list('Components', a.components) + kv('Hit days/week', a.hit_days_per_week) + kv('Lift days/week', a.lift_days_per_week) + list('Training weekdays', a.train_days) + list('Recovery / mobility days', a.weekly_days) + kv('Session length', a.session_length) + kv('Games/week', a.games_per_week) + kv('Season phase', a.season_phase) + kv('Season detail', a.season_detail) + kv('Schedule constraints', a.schedule_constraints))}
-    ${sec('Hitting resources', (a.missing_hitting && a.missing_hitting.length ? kv('Does NOT have', a.missing_hitting.join(', ')) : kv('Missing resources', 'Has everything')) + kv('Feeder detail', a.feed_partner_detail) + list('Environments', a.hitting_progression))}
+    ${sec('Hitting resources', (() => {
+      // New answers: what they DON'T have. Legacy answers: has_* booleans.
+      if (a.missing_hitting && a.missing_hitting.length) {
+        return kv('Does NOT have', a.missing_hitting.join(', ')) + kv('Feeder detail', a.feed_partner_detail) + list('Environments', a.hitting_progression);
+      }
+      const yn2 = (b) => (b === undefined || b === null || b === '') ? null : (b ? 'Yes' : 'No');
+      const legParts = [
+        ['Tee', yn2(a.has_tee)], ['Net', yn2(a.has_net)], ['Cage', yn2(a.has_cage)],
+        ['Machine', yn2(a.has_machine)], ['Feed partner', yn2(a.has_feed_partner)],
+      ].filter(([, v]) => v !== null);
+      const leg = legParts.length ? kv('Has (legacy answers)', legParts.map(([k, v]) => k + ': ' + v).join(' · ')) : '';
+      return (leg || kv('Missing resources', 'Has everything')) + kv('Feeder detail', a.feed_partner_detail) + list('Environments', a.hitting_progression);
+    })())}
     ${sec('Lifestyle', kv('Sleep', [a.sleep_hours, a.sleep_quality].filter(Boolean).join(' ')) + kv('Nutrition', a.nutrition) + kv('Stress', a.stress) + kv('Other notes', a.other_notes))}`,
   });
 }
@@ -4855,6 +5006,7 @@ module.exports = {
   resetPasswordPage,
   programPage,
   workoutPage,
+  sessionPage,
   programRoutinePage,
   mentalGamePage,
   programEditPage,

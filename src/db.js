@@ -1634,6 +1634,8 @@ db.exec('CREATE INDEX IF NOT EXISTS idx_intake_invites_lead ON intake_invites(le
 // automatically (or be approved early by Bobby).
 // session_order (Sep 2026): 'hitting_first' (default) or 'lifting_first' —
 // Bobby or the athlete picks which runs first in a session.
+// component_order (Sep 2026): JSON array of ['mobility','medball','hitting','lifting']
+// — the athlete's chosen order for the guided Today session. '' = default.
 {
   const cols = db.prepare('PRAGMA table_info(remote_programs)').all().map((c) => c.name);
   for (const [col, ddl] of [
@@ -1643,6 +1645,7 @@ db.exec('CREATE INDEX IF NOT EXISTS idx_intake_invites_lead ON intake_invites(le
     ['next_lifting_id', 'INTEGER'],
     ['next_block_start', "TEXT DEFAULT ''"],
     ['session_order', "TEXT DEFAULT 'hitting_first'"],
+    ['component_order', "TEXT DEFAULT ''"],
   ]) {
     if (!cols.includes(col)) db.exec(`ALTER TABLE remote_programs ADD COLUMN ${col} ${ddl};`);
   }

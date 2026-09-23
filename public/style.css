@@ -1245,6 +1245,37 @@ main.wrap { animation: pageIn 0.18s ease-out; }
 .wo-finish-emoji { font-size: 48px; margin-bottom: 8px; }
 .wo-finish-card h2 { margin: 0 0 8px; }
 
+/* ============ Guided Today session (Sep 23 2026) ============ */
+.session-cta {
+  display: block; text-align: center; text-decoration: none;
+  margin: 12px 0 4px; padding: 15px; font-size: 17px; font-weight: 800; border-radius: 14px;
+}
+.sess { min-height: 70vh; }
+.sess-order { padding: 18px 14px 30px; max-width: 520px; margin: 0 auto; }
+.sess-title { font-size: 34px; margin: 0 0 4px; line-height: 1.1; }
+.sess-rest { padding: 26px 16px; max-width: 520px; margin: 0 auto; }
+.sess-orderlist { display: grid; gap: 10px; margin: 16px 0 18px; }
+.sess-orderrow {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 10px 12px 6px;
+}
+.sess-grip { color: var(--muted); font-size: 16px; letter-spacing: 1px; padding: 6px 4px; }
+.sess-icon { font-size: 26px; flex-shrink: 0; }
+.sess-ordermeta { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.sess-ordermeta strong { font-size: 17px; }
+.sess-arrows { display: flex; flex-direction: column; gap: 4px; }
+.sess-arrow {
+  width: 40px; height: 32px; border-radius: 10px; border: 1px solid var(--line);
+  background: #1c1c1f; color: var(--text); font-size: 16px; cursor: pointer; line-height: 1;
+}
+.sess-arrow:active { transform: scale(.94); }
+.sess-arrow:disabled { opacity: .25; }
+.sess-start { width: 100%; padding: 16px; font-size: 18px; border-radius: 14px; }
+.sess-reorder { background: none; border: 0; cursor: pointer; }
+.wo-drive { min-height: 120px; display: flex; align-items: center; justify-content: center; gap: 10px; }
+.wo-drivetap { font-size: 15px; font-weight: 700; color: var(--muted); }
+.wo-seqchip { font-variant-numeric: tabular-nums; }
+
 /* ============ Coach dashboard — manage-first (Sep 23 2026) ============ */
 .dash-sec-head { display: flex; align-items: baseline; justify-content: space-between; margin: 18px 0 8px; }
 .ppl-list { padding: 4px 0; }
@@ -1539,3 +1570,9 @@ a.ws-cell:active { background: #2c2c2e; }
 .sched-cal-cell input:focus { border-color: #0a84ff; outline: none; }
 .sched-cal-cell.is-off { opacity: 0.6; }
 @media (max-width: 560px) { .sched-cal { grid-template-columns: repeat(7, 1fr); gap: 4px; } .sched-cal-cell { padding: 8px 4px; } }
+
+/* Guide blocks (e.g. "Hitting — Week plan"): reference rows, no check-offs. */
+.guide-row { display: flex; align-items: baseline; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); }
+.guide-row:last-child { border-bottom: none; }
+.guide-row .routine-name { font-weight: 600; }
+.guide-row .hint-inline { color: var(--muted); font-size: 13px; }
