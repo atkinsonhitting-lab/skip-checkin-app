@@ -5139,7 +5139,11 @@ function mobilityPage(user, p, opts) {
   const athleteName = (p && p.athlete_name) || prog.athlete || 'Hitter';
   const o = opts || {};
   const tabs = o.tabs || [];
+  // Bobby (Sep 23 2026): med ball rotates daily — use todaysMedball if provided
   const blocks = o.blocks || { mobility: [], medball: [] };
+  if (o.todaysMedball) {
+    blocks.medball = o.todaysMedball;
+  }
   const tabBar = tabs.length > 1 ? `<div class="prog-tabs">${tabs.map(t =>
     `<a href="/program?sub=${t.id}" class="prog-tab${t.id === 'mobility' ? ' active' : ''}">${esc(t.label)}</a>`
   ).join('')}</div>` : '';

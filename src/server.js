@@ -2351,8 +2351,37 @@ app.get('/program/mobility', requireLogin, requireWaiver, (req, res) => {
   const lifting = getLifting(liftingId && liftingId.lifting_program_id);
   const tabs = programSubTabs(p, lifting);
   const blocks = splitProgramBlocks(p);
-  res.send(views.mobilityPage(req.user, p, { tabs, blocks }));
+  // Bobby (Sep 23 2026): med ball rotates daily on the Warm-up page too
+  const todaysMedball = todaysMedballBlocks(p, blocks);
+  res.send(views.mobilityPage(req.user, p, { tabs, blocks, todaysMedball }));
 });
+
+// Bobby (Sep 23 2026): med ball rotates daily. Uses the athlete's own
+// Day 1/2/3 med ball blocks; falls back to Ryan Seddon's 3-day template.
+function todaysMedballBlocks(p, blocks) {
+  const med = blocks.medball || [];
+  if (!med.length) return [];
+  // Group by day title (Day 1, Day 2, Day 3) — skip Pregame/special blocks
+  const byDay = {};
+  for (const b of med) {
+    const t = String(b.title || b.category || '').trim();
+    if (/pregame/i.test(t)) continue;
+    const m = t.match(/day\s*(\d+)/i);
+    if (!m) continue;
+    const dayNum = parseInt(m[1], 10);
+    if (!byDay[dayNum]) byDay[dayNum] = [];
+    byDay[dayNum].push(b);
+  }
+  const dayKeys = Object.keys(byDay).map(Number).sort((a, b) => a - b);
+  if (!dayKeys.length) return med;
+  // Rotate by Chicago date: day-of-year mod number of days
+  const today = chiToday(); // YYYY-MM-DD
+  const d = new Date(today + 'T12:00:00');
+  const start = new Date(d.getFullYear(), 0, 0);
+  const dayOfYear = Math.floor((d - start) / 86400000);
+  const idx = dayOfYear % dayKeys.length;
+  return byDay[dayKeys[idx]] || med;
+}
 
 // Mobility workout (Sep 23 2026): guided mobility/med ball session —
 // interactive check-offs, weight tracking for med ball, like the lifting workout.
@@ -2395,7 +2424,9 @@ app.get('/program/mobility-workout', requireLogin, requireWaiver, (req, res) => 
       });
     }
   }
-  for (const b of blocks.medball) {
+  // Bobby (Sep 23 2026): med ball rotates daily, not the same every day
+  const todaysMed = todaysMedballBlocks(p, blocks);
+  for (const b of todaysMed) {
     for (const it of (b.items || [])) {
       if (!it.drill) continue;
       const key = 'medball::' + it.drill;
