@@ -1006,7 +1006,7 @@ CREATE TABLE IF NOT EXISTS settings (
     flying10: 'https://www.youtube.com/shorts/MiS6sNYial8',
     sprint20: 'https://www.youtube.com/watch?v=wHDGKBJEnOQ',
     agility545: 'https://www.youtube.com/watch?v=tYhCJd7LaBU',
-    mbRot: 'https://www.youtube.com/watch?v=l2R7f3r1228',
+    mbRot: 'https://www.youtube.com/watch?v=o9BC7lgN1bo',
     mbSlam: 'https://www.youtube.com/watch?v=EsAhU1jHpiQ',
     mbScoop: 'https://www.youtube.com/watch?v=KT7iAYA3g7Y',
     mbShotput: 'https://www.youtube.com/watch?v=EXV9UhUMTiY',
@@ -1437,6 +1437,47 @@ CREATE TABLE IF NOT EXISTS settings (
       }
       db.prepare("INSERT INTO settings (key, value) VALUES ('lifting_video_fill_v4', '1')").run();
       console.log(`Lifting video fill: filled ${filled} blank video(s) across ${rows} program row(s).`);
+    }
+  }
+
+  // MB Rotational Throw video swap (Sep 23 2026, Bobby: "the one video has
+  // three different videos in there"). Replaces the 3-in-1 compilation
+  // (l2R7f3r1228) with a single-exercise demo (o9BC7lgN1bo). Only replaces
+  // the old URL — never touches custom videos.
+  {
+    const done = db.prepare("SELECT value FROM settings WHERE key = 'lifting_mbrotswap_v4'").get();
+    if (!done) {
+      const OLD = 'https://www.youtube.com/watch?v=l2R7f3r1228';
+      const NEW = 'https://www.youtube.com/watch?v=o9BC7lgN1bo';
+      const now = new Date().toISOString();
+      let swapped = 0, rows = 0;
+      for (const r of db.prepare('SELECT id, program_json FROM lifting_programs').all()) {
+        let prog = null;
+        try { prog = JSON.parse(r.program_json || '{}'); } catch (e) { continue; }
+        if (!prog || !Array.isArray(prog.days)) continue;
+        let changed = false;
+        for (const d of prog.days) {
+          for (const key of ['speed', 'medball', 'exercises']) {
+            const arr = d[key];
+            if (!Array.isArray(arr)) continue;
+            for (const ex of arr) {
+              if (!ex || typeof ex !== 'object') continue;
+              if (String(ex.video || '').trim() === OLD) {
+                ex.video = NEW;
+                changed = true;
+                swapped++;
+              }
+            }
+          }
+        }
+        if (changed) {
+          db.prepare('UPDATE lifting_programs SET program_json = ?, updated_at = ? WHERE id = ?')
+            .run(JSON.stringify(prog), now, r.id);
+          rows++;
+        }
+      }
+      db.prepare("INSERT INTO settings (key, value) VALUES ('lifting_mbrotswap_v4', '1')").run();
+      console.log(`Lifting mbRot swap: replaced ${swapped} video(s) across ${rows} program row(s).`);
     }
   }
 

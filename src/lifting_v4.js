@@ -8,6 +8,7 @@
 // video '' rather than a wrong link.
 
 const YT_V4 = {
+  mbRot: 'https://www.youtube.com/watch?v=o9BC7lgN1bo',
   latBoxSquat: 'https://www.youtube.com/watch?v=bjkyer2hCxQ',
   rearLateral: 'https://www.youtube.com/watch?v=p1yQnTNE808',
   pallofHold: 'https://www.youtube.com/watch?v=XypX3A_0Kbg',
