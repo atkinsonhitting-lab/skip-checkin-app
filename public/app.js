@@ -805,3 +805,28 @@
     try { rec.start(); } catch (e) { listening = false; }
   });
 })();
+
+// Routine inline edit (Sep 23 2026)
+(function () {
+  document.addEventListener('click', function (ev) {
+    const btn = ev.target.closest('.routine-edit');
+    if (!btn) return;
+    const li = btn.closest('[data-routine-li]');
+    if (!li || li.querySelector('.routine-edit-form')) return;
+    const textSpan = li.querySelector('[data-routine-text]');
+    const current = textSpan ? textSpan.textContent : '';
+    const which = btn.getAttribute('data-which');
+    const idx = btn.getAttribute('data-idx');
+    const form = document.createElement('form');
+    form.method = 'post';
+    form.action = '/mental-game/routine/edit';
+    form.className = 'routine-edit-form';
+    form.innerHTML = `<input type="hidden" name="which" value="${which}"><input type="hidden" name="idx" value="${idx}"><input type="text" name="text" value="" maxlength="200" style="flex:1"><button type="submit" class="btn btn-sm">Save</button>`;
+    form.querySelector('input[name="text"]').value = current;
+    const label = li.querySelector('label');
+    if (label) label.style.display = 'none';
+    btn.style.display = 'none';
+    li.insertBefore(form, li.firstChild);
+    form.querySelector('input[name="text"]').focus();
+  });
+})();

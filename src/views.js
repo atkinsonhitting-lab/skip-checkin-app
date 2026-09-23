@@ -3034,11 +3034,24 @@ function mentalGamePage(user, data) {
       </div>
     </div>`;
   
+  const routineList = (items, which) => items.length ? `<ul class="routine-list">${items.map((item, i) => `
+      <li data-routine-li>
+        <label><input type="checkbox"${item.done ? ' checked' : ''}> <span data-routine-text>${esc(item.text)}</span></label>
+        <span class="routine-actions">
+          <button type="button" class="routine-edit" data-which="${which}" data-idx="${i}" aria-label="Edit">✎</button>
+          <form method="post" action="/mental-game/routine/delete" style="display:inline;margin:0">
+            <input type="hidden" name="which" value="${which}">
+            <input type="hidden" name="idx" value="${i}">
+            <button type="submit" class="routine-del" aria-label="Remove">✕</button>
+          </form>
+        </span>
+      </li>
+    `).join('')}</ul>` : '<p class="hint">No routine yet — add your first item below.</p>';
+  
   const routineContent = `
-    ${routineItems.length ? `<ul class="routine-list">${routineItems.map((item, i) => `
-      <li><label><input type="checkbox" data-routine-item="${i}"${item.done ? ' checked' : ''}> ${esc(item.text)}</label></li>
-    `).join('')}</ul>` : '<p class="hint">No routine yet — add your first item below.</p>'}
+    ${routineList(routineItems, 'morning')}
     <form method="post" action="/mental-game/routine/add" class="form" style="margin-top:8px">
+      <input type="hidden" name="which" value="morning">
       <div style="display:flex;gap:8px">
         <input type="text" name="text" placeholder="Add to morning routine..." maxlength="200" style="flex:1">
         <button type="submit" class="btn btn-sm">Add</button>
@@ -3079,9 +3092,7 @@ function mentalGamePage(user, data) {
       <button type="button" class="gp-btn" data-gp="practice">Practice Day</button>
     </div>
     <div id="gp-game">
-      ${pregameItems.length ? `<ul class="routine-list">${pregameItems.map((item) => `
-        <li><label><input type="checkbox"${item.done ? ' checked' : ''}> ${esc(item.text)}</label></li>
-      `).join('')}</ul>` : '<p class="hint">No pregame routine yet.</p>'}
+      ${routineList(pregameItems, 'pregame')}
       <form method="post" action="/mental-game/routine/add" class="form" style="margin-top:8px">
         <input type="hidden" name="which" value="pregame">
         <div style="display:flex;gap:8px">
@@ -3092,9 +3103,7 @@ function mentalGamePage(user, data) {
       ${pregameItems.length && !pregame.done ? `<form method="post" action="/mental-game/routine/done" style="margin:8px 0 0"><input type="hidden" name="card" value="pregame"><button type="submit" class="btn btn-primary btn-sm">Mark pregame done</button></form>` : ''}
     </div>
     <div id="gp-practice" hidden>
-      ${practiceItems.length ? `<ul class="routine-list">${practiceItems.map((item) => `
-        <li><label><input type="checkbox"${item.done ? ' checked' : ''}> ${esc(item.text)}</label></li>
-      `).join('')}</ul>` : '<p class="hint">No pre-practice routine yet.</p>'}
+      ${routineList(practiceItems, 'practice')}
       <form method="post" action="/mental-game/routine/add" class="form" style="margin-top:8px">
         <input type="hidden" name="which" value="practice">
         <div style="display:flex;gap:8px">

@@ -2422,6 +2422,37 @@ app.post('/mental-game/routine/done', requireLogin, (req, res) => {
     .run(req.user.id, today, card, new Date().toISOString());
   res.redirect('/mental-game');
 });
+app.post('/mental-game/routine/delete', requireLogin, (req, res) => {
+  const which = req.body.which === 'pregame' ? 'pregame' : req.body.which === 'practice' ? 'practice' : 'morning';
+  const col = which === 'pregame' ? 'pregame_json' : which === 'practice' ? 'prepractice_json' : 'morning_json';
+  const idx = parseInt(req.body.idx, 10);
+  const row = db.prepare(`SELECT ${col} FROM mental_routines WHERE user_id = ?`).get(req.user.id);
+  if (row && Number.isInteger(idx)) {
+    const items = JSON.parse(row[col] || '[]');
+    if (idx >= 0 && idx < items.length) {
+      items.splice(idx, 1);
+      db.prepare(`UPDATE mental_routines SET ${col} = ?, updated_at = ? WHERE user_id = ?`)
+        .run(JSON.stringify(items), new Date().toISOString(), req.user.id);
+    }
+  }
+  res.redirect('/mental-game');
+});
+app.post('/mental-game/routine/edit', requireLogin, (req, res) => {
+  const which = req.body.which === 'pregame' ? 'pregame' : req.body.which === 'practice' ? 'practice' : 'morning';
+  const col = which === 'pregame' ? 'pregame_json' : which === 'practice' ? 'prepractice_json' : 'morning_json';
+  const idx = parseInt(req.body.idx, 10);
+  const text = String(req.body.text || '').trim().slice(0, 200);
+  const row = db.prepare(`SELECT ${col} FROM mental_routines WHERE user_id = ?`).get(req.user.id);
+  if (row && Number.isInteger(idx) && text) {
+    const items = JSON.parse(row[col] || '[]');
+    if (idx >= 0 && idx < items.length) {
+      items[idx].text = text;
+      db.prepare(`UPDATE mental_routines SET ${col} = ?, updated_at = ? WHERE user_id = ?`)
+        .run(JSON.stringify(items), new Date().toISOString(), req.user.id);
+    }
+  }
+  res.redirect('/mental-game');
+});
 app.post('/mental-game/bible/done', requireLogin, (req, res) => {
   const today = todayChicagoDate();
   db.prepare('INSERT OR IGNORE INTO mental_card_done (user_id, day, card, completed_at) VALUES (?, ?, ?, ?)')
