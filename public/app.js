@@ -789,8 +789,9 @@ window.SkipMic = (function () {
   let stopFn = null;
   const setStatus = (t) => { if (status) { status.style.display = t ? 'block' : 'none'; status.textContent = t; } };
   const fillForm = (transcript) => {
-    if (!transcript.trim()) { setStatus(''); btn.textContent = '🎙 Talk it out'; return; }
-    setStatus('Skip is sorting that out…');
+    btn.textContent = '🎙 Talk it out';
+    if (!transcript.trim()) { setStatus('Didn\u2019t catch that — try again.'); return; }
+    setStatus('Heard: "' + transcript.slice(0, 120) + (transcript.length > 120 ? '…" — sorting it out…' : '" — sorting it out…'));
     fetch('/api/checkin/parse', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
