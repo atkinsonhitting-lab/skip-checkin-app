@@ -1995,24 +1995,60 @@ function buildWorkoutDay(userId, lifting, ldayIdx, today) {
   if (!day) return { days: days.map((d) => d.label || ''), day: null };
   const dayKey = String(day.label || '');
   const checkoffs = getCheckoffs(userId, today);
+  const parseVol = (v) => {
+    const m = String(v || '').match(/(\d+)\s*x\s*(\d+)/i);
+    return m ? { sets: Math.max(1, Math.min(20, parseInt(m[1], 10))), reps: m[2] } : { sets: 3, reps: '' };
+  };
   const spd = (Array.isArray(day.speed) ? day.speed : [])
     .filter((s) => String((s && s.name) || '').trim() && !(s && s.held))
     .map((s) => {
       const key = `spd::lifting::${dayKey}::${s.name}`;
+      const row = checkoffs[key] || null;
+      const loggedSets = parseSets(row);
+      const vol = parseVol(s.volume);
+      const last = lastLiftLog(userId, key, today);
+      const lastSets = last && Array.isArray(last.sets) ? last.sets : [];
+      const dispSets = loggedSets.length
+        ? loggedSets
+        : Array.from({ length: vol.sets }, (_, k) => {
+            const prev = lastSets[k];
+            return {
+              w: null,
+              r: prev && prev.r != null ? prev.r : (vol.reps === '' ? null : parseInt(vol.reps, 10) || null),
+              done: 0,
+            };
+          });
       return {
         type: 'speed', key, name: String(s.name || ''),
         volume: String(s.volume || ''), notes: String(s.notes || ''), video: String(s.video || ''),
         intent: String(s.intent || ''), done: !!checkoffs[key],
+        dispSets, progSetCount: vol.sets, progReps: vol.reps,
       };
     });
   const med = (Array.isArray(day.medball) ? day.medball : [])
     .filter((s) => String((s && s.name) || '').trim() && !(s && s.held))
     .map((s) => {
       const key = `med::lifting::${dayKey}::${s.name}`;
+      const row = checkoffs[key] || null;
+      const loggedSets = parseSets(row);
+      const vol = parseVol(s.volume);
+      const last = lastLiftLog(userId, key, today);
+      const lastSets = last && Array.isArray(last.sets) ? last.sets : [];
+      const dispSets = loggedSets.length
+        ? loggedSets
+        : Array.from({ length: vol.sets }, (_, k) => {
+            const prev = lastSets[k];
+            return {
+              w: prev && prev.w != null ? prev.w : null,
+              r: prev && prev.r != null ? prev.r : (vol.reps === '' ? null : parseInt(vol.reps, 10) || null),
+              done: 0,
+            };
+          });
       return {
         type: 'medball', key, name: String(s.name || ''),
         volume: String(s.volume || ''), notes: String(s.notes || ''), video: String(s.video || ''),
         intent: String(s.intent || ''), done: !!checkoffs[key],
+        dispSets, progSetCount: vol.sets, progReps: vol.reps,
       };
     });
   const lifts = (Array.isArray(day.exercises) ? day.exercises : [])
@@ -2417,7 +2453,7 @@ function applyProgramLog(userId, body) {
     db.prepare('UPDATE program_checkoffs SET sets_json = ? WHERE id = ?').run(JSON.stringify(sets), rowId);
   };
   let sets = null, checked = null, rowRpe = null;
-  if (kind === 'lift' && liftOp) {
+  if ((kind === 'lift' || kind === 'spd' || kind === 'med') && liftOp) {
     const setIdx = Math.max(0, parseInt(body.set_idx, 10) || 0);
     let row = existing;
     if (!row) {

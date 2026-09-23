@@ -142,13 +142,27 @@
   function blockHtml(it) {
     var kindLabel = it.type === 'speed' ? 'Speed' : 'Med Ball';
     var meta = [it.volume, it.notes].filter(Boolean).join(' · ');
+    var isMed = it.type === 'medball';
+    var rows = (it.dispSets || []).map(function (s, k) {
+      var cur = !s.done && (it.dispSets || []).slice(0, k).every(function (x) { return x.done; });
+      return '<div class="wo-setrow' + (s.done ? ' done' : '') + (cur ? ' current' : '') + '" data-k="' + k + '">' +
+        '<div class="wo-setnum">' + (k + 1) + '</div>' +
+        (isMed
+          ? '<label>ball lbs<input type="number" inputmode="decimal" min="0" step="1" class="wo-w" value="' +
+            (s.w != null ? esc(s.w) : '') + '" placeholder="—" ' + (s.done ? 'disabled' : '') + '></label>'
+          : '') +
+        '<label>reps<input type="number" inputmode="numeric" min="0" class="wo-r" value="' +
+          (s.r != null ? esc(s.r) : '') + '" placeholder="—" ' + (s.done ? 'disabled' : '') + '></label>' +
+        '<button type="button" class="wo-logbtn" data-act="' + (s.done ? 'unset' : 'set') + '">' +
+          (s.done ? '✓' : 'Log') + '</button>' +
+        '</div>';
+    }).join('');
     return '<div class="wo-card' + (it.done ? ' done' : '') + '">' +
       '<div class="wo-kicker">' + kindLabel + '</div>' +
       '<h2 class="wo-name">' + esc(it.name) + intentBadge(it) + '</h2>' +
       (meta ? '<p class="wo-meta">' + esc(meta) + '</p>' : '') +
       videoHtml(it) +
-      '<button type="button" class="wo-bigbtn' + (it.done ? ' done' : '') + '" id="wo-block-done">' +
-        (it.done ? '✓ Done — tap to undo' : 'Mark done') + '</button>' +
+      '<div class="wo-sets">' + rows + '</div>' +
       '</div>';
   }
 
@@ -224,17 +238,25 @@
 
   /* ---------- speed / medball ---------- */
   function wireBlock(it) {
-    var btn = document.getElementById('wo-block-done');
-    btn.addEventListener('click', function () {
-      buzz();
-      btn.disabled = true;
-      log({ kind: it.type === 'speed' ? 'spd' : 'med', item_key: it.key })
-        .then(function (r) {
-          it.done = !!r.checked;
-          if (it.done) advance();
-          else render();
-        })
-        .catch(function () { btn.disabled = false; });
+    body.querySelectorAll('.wo-setrow').forEach(function (row) {
+      var k = Number(row.getAttribute('data-k'));
+      var btn = row.querySelector('.wo-logbtn');
+      btn.addEventListener('click', function () {
+        var w = row.querySelector('.wo-w');
+        var r = row.querySelector('.wo-r').value;
+        var act = btn.getAttribute('data-act');
+        buzz();
+        btn.disabled = true;
+        log({
+          kind: it.type === 'speed' ? 'spd' : 'med', item_key: it.key, lift_op: act, set_idx: k,
+          set_weight: w ? w.value : '', set_reps: r,
+          prog_sets: it.progSetCount, prog_reps: it.progReps,
+        }).then(function (res) {
+          if (Array.isArray(res.sets)) it.dispSets = res.sets;
+          it.done = !!res.checked;
+          render();
+        }).catch(function () { btn.disabled = false; });
+      });
     });
   }
 
