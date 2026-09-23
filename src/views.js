@@ -5153,7 +5153,6 @@ function hittingPlanPage(user, p) {
         </div>
         <div class="doc-logo">ATKINSON<br>HITTING</div>
       </div>
-      <p class="doc-nav"><a href="/program/lifting" class="doc-nav-link">💪 View Lifting Program →</a></p>
       ${evalHtml}
       <hr class="doc-rule">
       <h1 class="doc-sec-title">Hitting Program - ${esc(athleteName)}</h1>
@@ -5168,9 +5167,7 @@ function hittingPlanPage(user, p) {
     <style>
       .doc-page { max-width: 720px; margin: 0 auto; background: #fff; color: #111;
         padding: 28px 24px; font-family: Arial, Helvetica, sans-serif; line-height: 1.5; }
-      .doc-nav { text-align: center; margin: 0 0 16px; }
-      .doc-nav-link { display: inline-block; background: #111; color: #fff; padding: 10px 20px;
-        border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 15px; }
+
       .doc-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
       .doc-logo { font-weight: 900; font-size: 13px; line-height: 1.2; text-align: center; color: #c00;
         letter-spacing: 1px; }

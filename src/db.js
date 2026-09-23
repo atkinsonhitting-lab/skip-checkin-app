@@ -1556,6 +1556,18 @@ CREATE TABLE IF NOT EXISTS settings (
   }
 }
 
+// One-time cleanup (Sep 23 2026): Bobby confirmed none of the remote hitters
+// paid for lifting — unlink lifting programs from all remote programs.
+// Non-destructive: lifting_programs rows are kept, just unlinked.
+{
+  const done = db.prepare("SELECT value FROM settings WHERE key = 'unlink_remote_lifting'").get();
+  if (!done) {
+    const result = db.prepare("UPDATE remote_programs SET lifting_program_id = NULL WHERE lifting_program_id IS NOT NULL").run();
+    db.prepare("INSERT INTO settings (key, value) VALUES ('unlink_remote_lifting', '1')").run();
+    console.log(`Unlinked lifting from ${result.changes} remote program(s) — Bobby: remote hitters didn't pay for lifting.`);
+  }
+}
+
 // One-time cleanup (Sep 15 2026): Bobby asked to remove ALL test accounts
 // except test@atkinsonhitting.com. Keeps every coach account and that one
 // athlete account; deletes everyone else plus their check-ins, chats,
