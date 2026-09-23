@@ -97,18 +97,18 @@ function fmtDate(iso) {
 // Talk to Skip — one thumb-tap away for hitters. The hamburger drawer keeps
 // every tab (Mental Game, Program, Routine, Videos, Settings); the bar is
 // additive, hitter-only, hidden on desktop where the drawer is the nav.
-const TABBAR_HREFS = ['/mental-game', '/checkin', '/messages', '/notebook', '/chat'];
+const TABBAR_HREFS = ['/mental-game', '/checkin', '/notebook', '/chat'];
 // Remote-program players already work from their program: the tab bar shows
 // Program first, then the rest. Bobby (Sep 23 2026): remote guys get Messages
 // in the bottom tab bar too.
 // Bottom tab bar for Bobby's remote hitters only (mobile). Program comes
 // before Check In — the program is the point of the app for these guys.
-const REMOTE_TABBAR_HREFS = ['/program', '/mental-game', '/checkin', '/notebook', '/chat', '/messages'];
+const REMOTE_TABBAR_HREFS = ['/program', '/mental-game', '/checkin', '/notebook', '/chat'];
 // Coach tab bar (Sep 2026, Bobby: Messages in the tab bar instead of Train
 // Skip): Bobby's coaching loop — Home (attention), My Players, Approvals
 // (badge), Messages (badge). Train Skip, Programs, Videos, Finances, and
 // Settings stay in the drawer. Same bar for every coach, including view-only Cam.
-const COACH_TABBAR_HREFS = ['/coach', '/coach/my-players', '/coach/approvals', '/coach/messages'];
+const COACH_TABBAR_HREFS = ['/coach', '/coach/my-players', '/coach/approvals'];
 const COACH_TABBAR_ICONS = {
   '/coach': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>',
   '/coach/my-players': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
@@ -232,10 +232,6 @@ function userTabs(active, user) {
     { href: '/notebook', label: 'Notebook', active: active === 'notebook' },
     { href: '/chat', label: 'Talk to Skip', sub: 'your personally trained coach', active: active === 'chat' },
   );
-  // Bobby (Sep 23 2026): only remote guys get the Messages tab.
-  if (isRemote) {
-    tabs.push({ href: '/messages', label: 'Messages', active: active === 'messages', badge: user && user.unreadMessages > 0 ? String(user.unreadMessages) : null });
-  }
   // Bobby (Sep 23 2026): Settings back in the sidebar drawer (not the bottom bar).
   tabs.push({ href: '/settings', label: 'Settings', active: active === 'settings' });
   // Organizations can turn Talk to Skip off for their players: no tab, no FAB,
@@ -265,7 +261,6 @@ function coachTabs(active, approvalCount, user) {
     { href: '/coach', label: 'Home', active: active === 'home' },
     { href: '/coach/my-players', label: 'My Players', active: active === 'my-players' },
     { href: '/coach/hitters', label: 'All Players', active: active === 'hitters' },
-    { href: '/coach/messages', label: 'Messages', active: active === 'messages', badge: user && user.unreadMessages > 0 ? String(user.unreadMessages) : null },
     { href: '/coach/videos', label: 'Remote Library', active: active === 'videos' },
     { href: '/coach/organizations', label: 'Organizations', active: active === 'organizations' },
     { href: '/coach/skip', label: 'Train Skip', active: active === 'skip' },
@@ -1934,7 +1929,6 @@ function coachHomeManage(user, quiet, latest, pending, pushOn, leads, myGuys, bi
       </details>
       <a class="ppl-row" href="/coach/organizations"><span class="ppl-main"><strong>Organizations</strong></span><span class="org-chev" aria-hidden="true">›</span></a>
       <a class="ppl-row" href="/coach/lifting"><span class="ppl-main"><strong>Lifting programs</strong></span><span class="org-chev" aria-hidden="true">›</span></a>
-      <a class="ppl-row" href="/coach/messages"><span class="ppl-main"><strong>Messages</strong>${user.unreadMessages ? ` <span class="tab-badge">${esc(String(user.unreadMessages))}</span>` : ''}</span><span class="org-chev" aria-hidden="true">›</span></a>
     </div>`,
   });
 }
@@ -2098,7 +2092,7 @@ function coachHittersPage(user, userStats, opts) {
           <div class="athlete-card-meta">${a.total} check-in${a.total === 1 ? '' : 's'}${a.streak ? ` · 🔥 ${a.streak}-day streak` : ''}${a.weekCount != null ? ` · ${a.weekCount}/7 days` : ''}${a.last ? ` · last ${fmtDate(a.last)}` : ' · none yet'}${a.age != null ? ` · age ${a.age}` : ''}${a.team ? ` · ${esc(a.team)}` : ''}${!o.filterOrg && a.orgName ? ` · ${esc(a.orgName)}` : ''}</div>
         </a>
         <div style="display:flex;gap:8px;margin:8px 0 0;flex-wrap:wrap">
-          ${o.messageButton && a.isRemote ? `<a class="btn-small" href="/coach/messages/${a.id}">Message</a>` : ''}
+          
           ${o.notifyButton ? `<form method="post" action="/coach/player/${a.id}/notify-checkin" style="margin:0">
             <input type="hidden" name="back" value="${esc(o.tab === 'my-players' ? '/coach/my-players' : '/coach/hitters')}">
             <button class="btn-small btn-quiet" type="submit" title="${a.notifyOn ? 'Log alerts ON — tap to mute' : 'Log alerts OFF — tap to unmute'}">${a.notifyOn ? '🔔 Alerts on' : '🔕 Alerts off'}</button>
@@ -2132,263 +2126,18 @@ function coachHittersPage(user, userStats, opts) {
 // iMessage-style messaging (Sep 23 2026, Bobby): blue sent bubbles,
 // gray received bubbles, day dividers, sticky input bar. Shared by the
 // athlete thread and the coach 1:1 thread.
-function imsgInitials(name) {
-  const parts = String(name || '?').trim().split(/\s+/);
-  return ((parts[0] || '?')[0] + ((parts[1] || '')[0] || '')).toUpperCase();
-}
-function imsgDayLabel(iso) {
-  try {
-    const tz = 'America/Chicago';
-    const key = new Date(iso).toLocaleDateString('en-CA', { timeZone: tz });
-    const today = new Date().toLocaleDateString('en-CA', { timeZone: tz });
-    const yest = new Date(Date.now() - 864e5).toLocaleDateString('en-CA', { timeZone: tz });
-    if (key === today) return 'Today';
-    if (key === yest) return 'Yesterday';
-    return new Date(iso).toLocaleDateString('en-US', { timeZone: tz, weekday: 'short', month: 'short', day: 'numeric' });
-  } catch (e) { return ''; }
-}
-function imsgTime(iso) {
-  try {
-    return new Date(iso).toLocaleTimeString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit' });
-  } catch (e) { return ''; }
-}
-function imsgAttach(m) {
-  if (!m.attachment_path) return '';
-  const url = `/msg-attachments/${esc(m.attachment_path)}`;
-  if (m.attachment_type === 'video') {
-    return `<video src="${url}" controls playsinline preload="metadata" class="imsg-media"></video>`;
-  }
-  return `<img src="${url}" alt="Attachment" class="imsg-media" loading="lazy">`;
-}
-function imsgBubbles(meId, msgs) {
-  let lastDay = '';
-  return (msgs || []).map((m) => {
-    const mine = m.sender_id === meId;
-    let day = '';
-    try {
-      const k = new Date(m.created_at).toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
-      if (k !== lastDay) { lastDay = k; day = `<div class="imsg-day"><span>${esc(imsgDayLabel(m.created_at))}</span></div>`; }
-    } catch (e) {}
-    const inner = `${m.body ? `<div class="imsg-text">${linkify(m.body)}</div>` : ''}${imsgAttach(m)}`;
-    if (!inner) return day;
-    return `${day}<div class="imsg-row${mine ? ' mine' : ''}">
-      <div class="imsg-bubble">${inner}</div></div>
-      <div class="imsg-ts${mine ? ' mine' : ''}">${esc(imsgTime(m.created_at))}</div>`;
-  }).join('');
-}
 
-function playerMessagesPage(user, msgs, opts) {
-  const o = opts || {};
-  return layout({
-    title: 'Messages',
-    user,
-    tabs: userTabs('messages', user),
-    body: `<div class="imsg">
-    <div class="imsg-head"><span class="imsg-avatar">${esc(imsgInitials('Coach'))}</span>
-      <strong>Coach</strong></div>
-    ${o.nudge ? `<div class="card push-card" style="margin:10px 14px 0"><p style="margin:0 0 10px"><strong>Turn on notifications</strong> <span class="hint">so you never miss a message from Coach.</span></p><p style="margin:0"><button type="button" class="btn-primary" id="push-enable-btn" style="margin-top:0">Turn on notifications</button></p></div>` : ''}
-    ${o.error ? `<p class="error" style="margin:10px 14px 0">${esc(o.error)}</p>` : ''}
-    <div class="imsg-list" id="imsg-list">${imsgBubbles(user.id, msgs) || '<div class="imsg-empty">No messages yet — say hey to Coach.</div>'}</div>
-    ${o.canMessage ? `<form class="imsg-bar" method="post" action="/messages/to-coach" enctype="multipart/form-data">
-      <label class="imsg-clip" aria-label="Attach a video or photo">📎
-        <input type="file" name="attachment" accept="video/mp4,video/quicktime,video/webm,image/*" hidden></label>
-      <input class="imsg-input" name="body" maxlength="500" placeholder="Message Coach" autocomplete="off" value="${esc(o.prefill || '')}">
-      <button class="imsg-send" type="submit" aria-label="Send">↑</button>
-    </form>` : ''}
-    </div>
-    <script>(function(){var l=document.getElementById('imsg-list');if(l)l.scrollTop=l.scrollHeight;})();</script>`,
-  });
-}
 
 // Coach inbox (Sep 17 2026): one row per athlete with message traffic.
 // The messaging hub — "New message" opens the clean compose screen.
-function coachMessagesPage(user, threads, opts) {
-  const o = opts || {};
-  const rows = threads
-    .map(
-      (t) => `<a href="/coach/messages/${t.id}" class="imsg-thread-row">
-        <span class="imsg-avatar">${esc(imsgInitials(t.name))}</span>
-        <span class="imsg-thread-main">
-          <span class="imsg-thread-top"><strong>${esc(t.name)}</strong>
-            <span class="hint-inline">${esc(imsgTime(t.last.created_at))}</span></span>
-          <span class="imsg-thread-sub"><span>${t.last.attachment_type === 'video' ? '🎥 Video' : esc(t.last.body.slice(0, 60))}${t.last.body.length > 60 ? '…' : ''}</span>
-            ${t.unread ? `<span class="imsg-unread">${t.unread}</span>` : ''}</span>
-        </span></a>`
-    )
-    .join('');
-  return layout({
-    title: 'Messages',
-    user,
-    tabs: coachTabs('messages', user.approvalCount, user),
-    body: `<h1 class="page-title">Messages</h1>
-    <p style="margin:0 0 14px"><a class="btn-primary" href="/coach/messages/new" style="text-decoration:none;display:inline-block">New message</a></p>
-    ${o.sent ? `<p class="notice"><strong>Sent</strong> to ${esc(String(o.sent))} player${String(o.sent) === '1' ? '' : 's'}.</p>` : ''}
-    <div class="card imsg-thread-list">${rows || '<div class="card empty">No message threads yet. Tap New message to start one.</div>'}</div>`,
-  });
-}
 
 // New message composer (Sep 23 2026, Bobby: "make this look way better"):
 // iMessage-style dark card, segmented recipient control, tappable player
 // rows with avatar initials + check circles, selected-player chips, live
 // send label. Field names kept: to_mode + user_ids checkboxes.
-function coachComposePage(user, players, opts) {
-  const o = opts || {};
-  const n = (players || []).length;
-  const list = (players || [])
-    .map(
-      (a) => `<button type="button" class="cmp-row" data-name="${esc(a.name.toLowerCase())}" data-id="${a.id}" data-label="${esc(a.name)}">
-        <span class="imsg-avatar cmp-ava">${esc(imsgInitials(a.name))}</span>
-        <span class="cmp-name">${esc(a.name)}</span>
-        <span class="cmp-check" aria-hidden="true"></span>
-      </button>`
-    )
-    .join('');
-  return layout({
-    title: 'New message',
-    user,
-    tabs: coachTabs('messages', user.approvalCount, user),
-    body: `<h1 class="page-title">New message</h1>
-    <p class="hint"><a href="/coach/messages">← All messages</a></p>
-    ${o.error ? `<p class="error">${esc(o.error)}</p>` : ''}
-    <form method="post" action="/coach/messages/new" class="cmp-card" id="cmp-form" enctype="multipart/form-data">
-      <div class="cmp-seg">
-        <button type="button" class="cmp-seg-btn on" data-mode="all">All my players <span class="cmp-count">${n}</span></button>
-        <button type="button" class="cmp-seg-btn" data-mode="choose">Choose players</button>
-      </div>
-      <input type="hidden" name="to_mode" id="cmp-mode" value="all">
-      <div id="choose-box" hidden>
-        <div id="cmp-chips" class="cmp-chips" hidden></div>
-        <div class="cmp-tools">
-          <input type="search" id="compose-search" class="cmp-search" placeholder="Search players…" autocomplete="off">
-          <button type="button" class="btn-small btn-quiet" id="compose-all">All</button>
-          <button type="button" class="btn-small btn-quiet" id="compose-clear">Clear</button>
-        </div>
-        <div class="cmp-list" id="cmp-list">
-          ${list || '<p class="hint">No players yet.</p>'}
-        </div>
-        <div id="cmp-ids" aria-hidden="true"></div>
-      </div>
-      <label class="cmp-label">Message <span class="hint-inline"><span id="char-count">0</span>/500</span></label>
-      <textarea name="body" id="compose-body" maxlength="500" rows="4" class="cmp-textarea" placeholder="Write your message…"></textarea>
-      <label class="cmp-attach" aria-label="Attach a video or photo">📎 <span class="hint-inline">Attach video/photo</span>
-        <input type="file" name="attachment" accept="video/mp4,video/quicktime,video/webm,image/*" hidden></label>
-      <button class="btn-primary cmp-send" type="submit"><span id="cmp-send-label">Send to all ${n} player${n === 1 ? '' : 's'}</span></button>
-    </form>
-    <script>
-    (function () {
-      var modeInput = document.getElementById('cmp-mode');
-      var box = document.getElementById('choose-box');
-      var segBtns = Array.prototype.slice.call(document.querySelectorAll('.cmp-seg-btn'));
-      var search = document.getElementById('compose-search');
-      var rows = Array.prototype.slice.call(document.querySelectorAll('.cmp-row'));
-      var chips = document.getElementById('cmp-chips');
-      var idsBox = document.getElementById('cmp-ids');
-      var sendLabel = document.getElementById('cmp-send-label');
-      var total = rows.length;
-      var selected = new Set();
-      function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-      function rowById(id) { return rows.filter(function (r) { return r.dataset.id === id; })[0]; }
-      function syncUI() {
-        rows.forEach(function (r) { r.classList.toggle('on', selected.has(r.dataset.id)); });
-        // hidden checkboxes the server reads
-        idsBox.innerHTML = '';
-        selected.forEach(function (id) {
-          var cb = document.createElement('input');
-          cb.type = 'checkbox'; cb.name = 'user_ids'; cb.value = id; cb.checked = true; cb.style.display = 'none';
-          idsBox.appendChild(cb);
-        });
-        // chips
-        var items = [];
-        selected.forEach(function (id) {
-          var r = rowById(id);
-          if (r) items.push({ id: id, label: r.dataset.label });
-        });
-        chips.hidden = !items.length;
-        chips.innerHTML = items.map(function (it) {
-          return '<span class="cmp-chip">' + esc(it.label) + '<button type="button" data-uncheck="' + esc(it.id) + '" aria-label="Remove">×</button></span>';
-        }).join('');
-        // send label
-        if (modeInput.value === 'all') {
-          sendLabel.textContent = 'Send to all ' + total + ' player' + (total === 1 ? '' : 's');
-        } else {
-          var c = selected.size;
-          sendLabel.textContent = c ? 'Send to ' + c + ' player' + (c === 1 ? '' : 's') : 'Choose players to send';
-        }
-      }
-      segBtns.forEach(function (b) {
-        b.addEventListener('click', function () {
-          segBtns.forEach(function (x) { x.classList.toggle('on', x === b); });
-          modeInput.value = b.dataset.mode;
-          box.hidden = b.dataset.mode !== 'choose';
-          syncUI();
-        });
-      });
-      rows.forEach(function (r) {
-        r.addEventListener('click', function () {
-          var id = r.dataset.id;
-          if (selected.has(id)) selected.delete(id); else selected.add(id);
-          syncUI();
-        });
-      });
-      chips.addEventListener('click', function (e) {
-        var b = e.target.closest('[data-uncheck]');
-        if (!b) return;
-        selected.delete(b.dataset.uncheck);
-        syncUI();
-      });
-      search.addEventListener('input', function () {
-        var q = search.value.toLowerCase();
-        rows.forEach(function (r) { r.style.display = r.dataset.name.indexOf(q) === -1 ? 'none' : ''; });
-      });
-      document.getElementById('compose-all').addEventListener('click', function () {
-        rows.forEach(function (r) { if (r.style.display !== 'none') selected.add(r.dataset.id); });
-        syncUI();
-      });
-      document.getElementById('compose-clear').addEventListener('click', function () {
-        selected.clear();
-        syncUI();
-      });
-      var body = document.getElementById('compose-body');
-      var count = document.getElementById('char-count');
-      body.addEventListener('input', function () { count.textContent = body.value.length; });
-      document.getElementById('cmp-form').addEventListener('submit', function (e) {
-        if (modeInput.value === 'choose' && !selected.size) {
-          e.preventDefault();
-          box.hidden = false;
-          search.focus();
-        }
-      });
-      syncUI();
-    })();
-    </script>`,
-  });
-}
 
 // Coach 1:1 thread (Sep 17 2026): full history with one player, both
 // directions. The reply box only renders for full-access coaches.
-function coachThreadPage(user, other, msgs, opts) {
-  const o = opts || {};
-  const canReply = user.canEdit !== false;
-  return layout({
-    title: 'Messages',
-    user,
-    tabs: coachTabs('messages', user.approvalCount, user),
-    body: `<div class="imsg">
-    <div class="imsg-head"><a class="imsg-back" href="/coach/messages" aria-label="Back to messages">‹</a>
-      <span class="imsg-avatar">${esc(imsgInitials(other.name))}</span>
-      <strong>${esc(other.name)}</strong></div>
-    ${o.error ? `<p class="error" style="margin:10px 14px 0">${esc(o.error)}</p>` : ''}
-    <div class="imsg-list" id="imsg-list">${imsgBubbles(user.id, msgs) || '<div class="imsg-empty">No messages yet.</div>'}</div>
-    ${canReply ? `<form class="imsg-bar" method="post" action="/coach/messages/to/${other.id}" enctype="multipart/form-data">
-      <label class="imsg-clip" aria-label="Attach a video or photo">📎
-        <input type="file" name="attachment" accept="video/mp4,video/quicktime,video/webm,image/*" hidden></label>
-      <input class="imsg-input" name="body" maxlength="500" placeholder="Message" autocomplete="off">
-      <button class="imsg-send" type="submit" aria-label="Send">↑</button>
-    </form>` : ''}
-    </div>
-    <script>(function(){var l=document.getElementById('imsg-list');if(l)l.scrollTop=l.scrollHeight;})();</script>`,
-  });
-}
 
 function coachProgramsPage(user, remotePrograms, intake) {
   const canEdit = user.role === 'coach' && user.canEdit !== false;
@@ -4451,7 +4200,7 @@ function coachUser(user, name, checkins, whatWorks, thread, email, memories, rou
     user,
     tabs: coachTabs('hitters', user.approvalCount, user),
     body: `<h1 class="page-title">${esc(name)} ${rolePill(pt)}</h1>
-    <p><a href="/coach/hitters">← Back to players</a>${msgUserId ? ` · <a class="btn-small" href="/coach/messages/${msgUserId}">Message</a>` : ''}${viewAsBtn}</p>
+    <p><a href="/coach/hitters">← Back to players</a>${viewAsBtn}</p>
     ${pt === 'pitcher' ? '' : routineReadonly(routine)}
     ${pt !== 'hitter' ? throwingSummarySection(throwSum) : ''}
     ${memorySection(email, memories, canEdit)}
@@ -5287,7 +5036,7 @@ function substitutePage(user, o) {
     </div>` : ''}
     <div class="card">
       <p style="margin:0 0 10px"><strong>None of these work?</strong></p>
-      <p style="margin:0"><a class="btn-primary" href="/messages?prefill=${askBody}" style="text-decoration:none;display:inline-block">Ask your coach</a></p>
+      
       <p class="hint" style="margin:8px 0 0">Opens a message pre-filled with the details — just add your reason and send.</p>
     </div>
     <p><a href="${esc(o.back)}">← Back to program</a></p>
