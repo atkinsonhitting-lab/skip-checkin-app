@@ -96,10 +96,11 @@ function fmtDate(iso) {
 // additive, hitter-only, hidden on desktop where the drawer is the nav.
 const TABBAR_HREFS = ['/mental-game', '/checkin', '/messages', '/notebook', '/chat'];
 // Remote-program players already work from their program: the tab bar shows
-// Program in the Messages slot. Messages stays in their sidebar drawer.
+// Program first, then the rest. Bobby (Sep 23 2026): remote guys get Messages
+// in the bottom tab bar too.
 // Bottom tab bar for Bobby's remote hitters only (mobile). Program comes
 // before Check In — the program is the point of the app for these guys.
-const REMOTE_TABBAR_HREFS = ['/program', '/mental-game', '/checkin', '/notebook', '/chat'];
+const REMOTE_TABBAR_HREFS = ['/program', '/mental-game', '/checkin', '/notebook', '/chat', '/messages'];
 // Coach tab bar (Sep 2026, Bobby: Messages in the tab bar instead of Train
 // Skip): Bobby's coaching loop — Home (attention), My Players, Approvals
 // (badge), Messages (badge). Train Skip, Programs, Videos, Finances, and
@@ -2733,8 +2734,10 @@ function programPage(user, p, opts) {
     const heldHtml = (held) => held.length
       ? held.map(() => `<div class="card lift-held"><p style="margin:0"><strong>Your coach is picking the right exercise for this spot.</strong></p><p class="hint-inline" style="margin:4px 0 0">Check back soon — it will appear here when it's ready.</p></div>`).join('')
       : '';
-    const metBlocks = routine.filter((c) => kindOf(c.category) === 'metabolic' && realItems(c.items).length);
-    const speedHtml = (daySpeed.length || heldSpeed.length || metBlocks.length)
+    // Different Animal bans metabolic circuits (Sep 23 2026, Bobby's video):
+    // the Speed section shows ONLY the lifting program's speed work. The old
+    // routine 'metabolic' blocks are never rendered here.
+    const speedHtml = (daySpeed.length || heldSpeed.length)
       ? `<h3 class=\"prog-h3\"><span class=\"flow-num\">1</span> ⚡ Speed — sprints first</h3>\n` +
         (daySpeed.length
           ? `<div class=\"card routine-group\">${daySpeed.map((s) =>
@@ -2744,17 +2747,15 @@ function programPage(user, p, opts) {
               liftVideoHtml(s.video, watchLink) + `</div>`
             ).join('')}</div>`
           : '') +
-        heldHtml(heldSpeed) +
-        metBlocks.map((c) => blockCard(c.category, c.items, 'spd', dayPrefix(c.category), ldayExtra)).join('')
+        heldHtml(heldSpeed)
       : '';
-    const medBlocks = routine.filter((c) => kindOf(c.category) === 'medball' && realItems(c.items).length);
-    const mbToday = day ? medBlocks.filter((c) => inDay(c.category, day)) : medBlocks;
-    const mbOthers = day ? medBlocks.filter((c) => !inDay(c.category, day)) : [];
-    // Lifting-day power work renders first, then any routine med-ball blocks.
+    // Lifting-day power work is ONLY the program's medball work (Sep 23 2026,
+    // Bobby's video): the old routine med-ball blocks are not rendered here.
+    // The v4 template's medball array is the source of truth.
     const dayMedballAll = Array.isArray(curDay.medball) ? curDay.medball.filter((s) => String(s && s.name || '').trim()) : [];
     const dayMedball = dayMedballAll.filter((s) => !s.held);
     const heldMedball = dayMedballAll.filter((s) => s.held);
-    const medHtml = (dayMedball.length || heldMedball.length || mbToday.length || mbOthers.length)
+    const medHtml = (dayMedball.length || heldMedball.length)
       ? `<h3 class=\"prog-h3\"><span class=\"flow-num\">2</span> 💥 Power — jumps & med ball</h3>\n` +
         (dayMedball.length
           ? `<div class=\"card routine-group\">${dayMedball.map((s) =>
@@ -2764,13 +2765,11 @@ function programPage(user, p, opts) {
               liftVideoHtml(s.video, watchLink) + `</div>`
             ).join('')}</div>`
           : '') +
-        heldHtml(heldMedball) +
-        mbToday.map((c) => blockCard(c.category, c.items, 'med', dayPrefix(c.category), ldayExtra)).join('') +
-        mbOthers.map((c) => blockCard(c.category, c.items, 'med', dayPrefix(c.category), ldayExtra)).join('')
+        heldHtml(heldMedball)
       : '';
     // Section flow numbers continue after speed/power (liftSubTab renders
     // Strength / Rotational / Brakes groups).
-    const secBase = (daySpeed.length || heldSpeed.length || metBlocks.length ? 1 : 0) + (dayMedball.length || heldMedball.length || mbToday.length || mbOthers.length ? 1 : 0);
+    const secBase = (daySpeed.length || heldSpeed.length ? 1 : 0) + (dayMedball.length || heldMedball.length ? 1 : 0);
     const weekStripTop = liftWeekStrip(o.sched, o.weekday, days, effLday);
     if (isRestDay) {
       // Recovery / Mobility / OFF day on the real seven-day calendar:

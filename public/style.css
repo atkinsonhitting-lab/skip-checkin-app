@@ -789,9 +789,15 @@ a.stat-card { padding: 14px 8px; }
   background: var(--accent, #d92323); color: #fff;
   font-size: 13px; font-weight: 800; margin-right: 6px; vertical-align: 1px;
 }
-.checkrow { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); margin: 0; }
+.checkrow { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); margin: 0; flex-wrap: wrap; }
 .checkrow:last-child { border-bottom: none; }
 .checkrow.done .routine-name { text-decoration: line-through; opacity: 0.55; }
+.checkrow .routine-name { min-width: 0; flex: 1 1 auto; }
+/* Speed/Power rows (Sep 23 2026): keep the name + volume on one line, push
+   the video/substitute links below on narrow phones so nothing overlaps. */
+.spd-row .checkrow { align-items: flex-start; }
+.spd-row .routine-name { flex-basis: 60%; }
+.spd-row .hint-inline { flex-basis: 100%; margin-top: 2px; }
 .checkbtn { background: none; border: none; font-size: 22px; line-height: 1; cursor: pointer; padding: 2px; color: var(--text); }
 .finish-card { margin-top: 18px; border-color: var(--red); }
 
