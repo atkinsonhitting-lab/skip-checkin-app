@@ -1308,13 +1308,27 @@ CREATE TABLE IF NOT EXISTS settings (
       let added = 0;
       const ids = {};
       for (const p of programs) {
-        const exists = db.prepare('SELECT id FROM lifting_programs WHERE name = ? AND is_template = 1').get(p.name);
+        const exists = db.prepare('SELECT id, program_json FROM lifting_programs WHERE name = ? AND is_template = 1').get(p.name);
         if (!exists) {
           const r = db.prepare('INSERT INTO lifting_programs (name, is_template, program_json, updated_at) VALUES (?, 1, ?, ?)')
             .run(p.name, JSON.stringify({ days: p.days, notes: p.notes }), now);
           ids[p.name] = Number(r.lastInsertRowid);
           added++;
-        } else { ids[p.name] = exists.id; }
+        } else {
+          ids[p.name] = exists.id;
+          // Repair: if the template exists but has no days (corrupted/empty),
+          // refresh it from the v4 definition. A template with zero days is
+          // never a valid customization (Sep 23 2026).
+          try {
+            const cur = JSON.parse(exists.program_json || '{}');
+            const curDays = Array.isArray(cur.days) ? cur.days : [];
+            if (curDays.length === 0 && Array.isArray(p.days) && p.days.length > 0) {
+              db.prepare('UPDATE lifting_programs SET program_json = ?, updated_at = ? WHERE id = ?')
+                .run(JSON.stringify({ days: p.days, notes: p.notes }), now, exists.id);
+              added++;
+            }
+          } catch (e) {}
+        }
       }
       // Point remote athletes at M1 (Absorb) when they have no lifting program
       // or their program row is gone (replaced template). Custom programs are
@@ -1375,6 +1389,36 @@ CREATE TABLE IF NOT EXISTS settings (
       }
       db.prepare("INSERT INTO settings (key, value) VALUES ('lifting_update_v4b', '1')").run();
       console.log(`Lifting v4b: updated ${updated} template(s), kept ${kept} (customized or missing).`);
+    }
+  }
+
+  // Template repair (Sep 23 2026): if a v4 system template exists but has
+  // zero days (corrupted/empty — the coach editor shows "No days yet"),
+  // refresh it from the v4 definition. A zero-day template is never a
+  // valid customization. Runs once.
+  {
+    const done = db.prepare("SELECT value FROM settings WHERE key = 'lifting_template_repair_20260923'").get();
+    if (!done) {
+      const { YT_V4, buildPrograms } = require('./lifting_v4');
+      Object.assign(YT, YT_V4);
+      const programs = buildPrograms(YT);
+      const now = new Date().toISOString();
+      let repaired = 0;
+      for (const p of programs) {
+        const row = db.prepare('SELECT id, program_json FROM lifting_programs WHERE name = ? AND is_template = 1').get(p.name);
+        if (!row) continue;
+        try {
+          const cur = JSON.parse(row.program_json || '{}');
+          const curDays = Array.isArray(cur.days) ? cur.days : [];
+          if (curDays.length === 0 && Array.isArray(p.days) && p.days.length > 0) {
+            db.prepare('UPDATE lifting_programs SET program_json = ?, updated_at = ? WHERE id = ?')
+              .run(JSON.stringify({ days: p.days, notes: p.notes }), now, row.id);
+            repaired++;
+          }
+        } catch (e) {}
+      }
+      db.prepare("INSERT INTO settings (key, value) VALUES ('lifting_template_repair_20260923', '1')").run();
+      if (repaired) console.log(`Lifting template repair: refreshed ${repaired} empty template(s).`);
     }
   }
 }
