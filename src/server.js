@@ -3307,17 +3307,28 @@ app.post('/coach/lifting/:id/save', requireLiftingCoach, (req, res) => {
       const exName = String(req.body['lex_' + i + '_' + j + '_name'] || '').trim().slice(0, 120);
       if (!exName) continue;
       const trpe = String(req.body['lex_' + i + '_' + j + '_trpe'] || '').trim();
+      const video = String(req.body['lex_' + i + '_' + j + '_video'] || '').trim().slice(0, 300);
       exercises.push({
         name: exName,
         sets: String(req.body['lex_' + i + '_' + j + '_sets'] || '').trim().slice(0, 12),
         reps: String(req.body['lex_' + i + '_' + j + '_reps'] || '').trim().slice(0, 24),
         target_rpe: trpe && /^[1-9]$|^10$/.test(trpe) ? Number(trpe) : '',
         notes: String(req.body['lex_' + i + '_' + j + '_notes'] || '').trim().slice(0, 200),
+        video: /^https?:\/\//i.test(video) ? video : '',
       });
     }
     const warmup = String(req.body['lday_' + i + '_warmup'] || '')
       .split('\n').map((x) => x.trim().slice(0, 200)).filter(Boolean);
-    days.push({ label: label || ('Day ' + String.fromCharCode(65 + i)), warmup, exercises });
+    // Speed + med ball blocks (one per line: Name | volume | notes).
+    const parseBlock = (key) => String(req.body[key] || '').split('\n')
+      .map((l) => l.trim()).filter(Boolean).slice(0, 12)
+      .map((l) => {
+        const p = l.split('|').map((s) => s.trim());
+        return { name: (p[0] || '').slice(0, 120), volume: (p[1] || '').slice(0, 60), notes: (p[2] || '').slice(0, 200) };
+      }).filter((s) => s.name);
+    const speed = parseBlock('lday_' + i + '_speed');
+    const medball = parseBlock('lday_' + i + '_medball');
+    days.push({ label: label || ('Day ' + String.fromCharCode(65 + i)), warmup, speed, medball, exercises });
   }
   db.prepare('UPDATE lifting_programs SET name = ?, program_json = ?, updated_at = ? WHERE id = ?').run(
     // Saving clears the intake-draft marker — Bobby has reviewed the program.

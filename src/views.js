@@ -2454,8 +2454,17 @@ function programPage(user, p, opts) {
     const medBlocks = routine.filter((c) => kindOf(c.category) === 'medball' && realItems(c.items).length);
     const mbToday = day ? medBlocks.filter((c) => inDay(c.category, day)) : medBlocks;
     const mbOthers = day ? medBlocks.filter((c) => !inDay(c.category, day)) : [];
-    const medHtml = mbToday.length || mbOthers.length
+    // Lifting-day med ball (Sep 23 2026 rebuild): the day's own throws render
+    // first, then any routine med-ball blocks.
+    const dayMedball = Array.isArray(curDay.medball) ? curDay.medball.filter((s) => String(s && s.name || '').trim()) : [];
+    const medHtml = (dayMedball.length || mbToday.length || mbOthers.length)
       ? `<h3 class="prog-h3"><span class="flow-num">2</span> Power — med ball</h3>\n` +
+        (dayMedball.length
+          ? `<div class="card routine-group">${dayMedball.map((s) =>
+              checkRow('med', `med::${dayScope || ''}::${curDay.label || ''}::${s.name}`, s.name,
+                [s.volume, s.notes].filter(Boolean).join(' — '), s.video, ldayExtra)
+            ).join('')}</div>`
+          : '') +
         mbToday.map((c) => blockCard(c.category, c.items, 'med', dayPrefix(c.category), ldayExtra)).join('') +
         (mbOthers.length
           ? `<details class="card"><summary class="routine-summary"><span class="routine-station">Other days</span></summary>` +
@@ -2863,6 +2872,8 @@ function liftingEditPage(user, lp) {
           <textarea name="lday_${i}_warmup" rows="3" style="width:100%;box-sizing:border-box" placeholder="Jump rope — 2 min&#10;Leg swings — 10 each leg">${esc((d.warmup || []).join('\n'))}</textarea></label>
         <label class="lift-field">Speed — sprints first <span class="hint-inline">(one per line: Name | volume | notes — the day's opening block)</span>
           <textarea name="lday_${i}_speed" rows="3" style="width:100%;box-sizing:border-box" placeholder="Build-Up Sprints | 6 x 40 yd | Walk-back recovery">${esc((d.speed || []).map((s) => [s.name, s.volume, s.notes].filter(Boolean).join(' | ')).join('\n'))}</textarea></label>
+        <label class="lift-field">Med ball — power <span class="hint-inline">(one per line: Name | volume | notes — throws after sprints)</span>
+          <textarea name="lday_${i}_medball" rows="3" style="width:100%;box-sizing:border-box" placeholder="Rotational Throw | 3 x 6 each side | Explode through the hips">${esc((d.medball || []).map((s) => [s.name, s.volume, s.notes].filter(Boolean).join(' | ')).join('\n'))}</textarea></label>
         <div class="lift-ex-list" data-exlist>
         ${(d.exercises || [])
           .map(

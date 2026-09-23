@@ -827,55 +827,147 @@ CREATE TABLE IF NOT EXISTS settings (
 {
   let seeded = null;
   try { seeded = db.prepare("SELECT value FROM settings WHERE key = 'lifting_templates_seeded'").get(); } catch (e) { /* table just created */ }
+  // Lifting rebuild v2 (Sep 23 2026, Bobby): every day flows Speed →
+  // Med Ball → Lifts. No standalone Metabolic section, no static stretching,
+  // no hitting drills, no hang/power cleans. Every exercise carries a
+  // verified YouTube demo link (verified via oEmbed Sep 23 2026).
+  const YT = {
+    sprint10: 'https://www.youtube.com/watch?v=aLzKKgrZI30',
+    flying10: 'https://www.youtube.com/shorts/MiS6sNYial8',
+    sprint20: 'https://www.youtube.com/watch?v=wHDGKBJEnOQ',
+    agility545: 'https://www.youtube.com/watch?v=tYhCJd7LaBU',
+    mbRot: 'https://www.youtube.com/watch?v=l2R7f3r1228',
+    mbSlam: 'https://www.youtube.com/watch?v=EsAhU1jHpiQ',
+    mbScoop: 'https://www.youtube.com/watch?v=KT7iAYA3g7Y',
+    mbShotput: 'https://www.youtube.com/watch?v=EXV9UhUMTiY',
+    trapbar: 'https://www.youtube.com/watch?v=dfYIApfWS5o',
+    dbBench: 'https://www.youtube.com/watch?v=xhEhjF5ozuY',
+    csRow: 'https://www.youtube.com/watch?v=kNvy2_9Ji2w',
+    pallof: 'https://www.youtube.com/watch?v=YI4Yewxn_sg',
+    frontSquat: 'https://www.youtube.com/watch?v=Q1R0_CbgHpc',
+    ohp: 'https://www.youtube.com/watch?v=S3kYKH32VqI',
+    latPull: 'https://www.youtube.com/watch?v=FDtwvLNjSYs',
+    farmers: 'https://www.youtube.com/watch?v=8OtwXwrJizk',
+    bbBench: 'https://www.youtube.com/watch?v=ejI1Nlsul9k',
+    bbRow: 'https://www.youtube.com/watch?v=Ola0WMb0mXc',
+    dbOhp: 'https://www.youtube.com/watch?v=9Uj1LL-rvF8',
+    facePull: 'https://www.youtube.com/watch?v=sd4W2lFmIMM',
+    backSquat: 'https://www.youtube.com/watch?v=rrJIyZGlK8c',
+    rdl: 'https://www.youtube.com/watch?v=5bJEigM5iVg',
+    bulgarian: 'https://www.youtube.com/watch?v=je7lk51Vl8c',
+    kneeRaise: 'https://www.youtube.com/watch?v=dDd2gMmbWJU',
+  };
+  const spd = (name, volume, notes, video) => ({ name, volume, notes: notes || '', video: video || '' });
+  const ex = (name, sets, reps, target_rpe, notes, video) => ({
+    name, sets: String(sets), reps: String(reps), target_rpe: target_rpe || '', notes: notes || '', video: video || '',
+  });
+  const LIFTING_TEMPLATES_V2 = [
+    {
+      name: 'Full-Body A/B',
+      days: [
+        { label: 'Day A',
+          speed: [
+            spd('10-Yard Sprint', '6 x 10 yd', 'Explode out — walk-back recovery', YT.sprint10),
+            spd('Flying 10 Sprint', '4 x flying 10', 'Build up, then max speed — full recovery', YT.flying10),
+          ],
+          medball: [
+            spd('Med Ball Rotational Throw', '3 x 6 each side', 'Explode through the hips', YT.mbRot),
+            spd('Med Ball Overhead Slam', '3 x 8', 'All out, every rep', YT.mbSlam),
+          ],
+          exercises: [
+            ex('Trap Bar Deadlift', '4', '5', 8, 'Hinge, brace, drive the floor away', YT.trapbar),
+            ex('DB Bench Press', '3', '8', 7, '', YT.dbBench),
+            ex('Chest-Supported DB Row', '3', '10', 7, '', YT.csRow),
+            ex('Pallof Press', '3', '10 each side', 6, '', YT.pallof),
+          ]},
+        { label: 'Day B',
+          speed: [
+            spd('20-Yard Sprint', '5 x 20 yd', 'Stay tall, drive — walk-back recovery', YT.sprint20),
+            spd('5-10-5 Pro Agility', '4 reps', 'Full recovery between reps', YT.agility545),
+          ],
+          medball: [
+            spd('Med Ball Scoop Toss', '3 x 6', 'Triple extension — throw it far', YT.mbScoop),
+            spd('Med Ball Shotput Throw', '3 x 6 each side', 'Punch through the throw', YT.mbShotput),
+          ],
+          exercises: [
+            ex('Front Squat', '4', '6', 8, 'Elbows high, knees forward', YT.frontSquat),
+            ex('Overhead Press', '3', '8', 7, '', YT.ohp),
+            ex('Lat Pulldown', '3', '10', 7, '', YT.latPull),
+            ex("Farmer's Carry", '3', '40 yards', 6, 'Heavy — stand tall', YT.farmers),
+          ]},
+      ],
+    },
+    {
+      name: 'Upper / Lower',
+      days: [
+        { label: 'Upper',
+          speed: [
+            spd('10-Yard Sprint', '6 x 10 yd', 'Explode out — walk-back recovery', YT.sprint10),
+          ],
+          medball: [
+            spd('Med Ball Rotational Throw', '3 x 6 each side', 'Explode through the hips', YT.mbRot),
+            spd('Med Ball Overhead Slam', '3 x 8', 'All out, every rep', YT.mbSlam),
+          ],
+          exercises: [
+            ex('Bench Press', '4', '6', 8, '', YT.bbBench),
+            ex('Bent-Over Row', '4', '8', 8, 'Chest over the plate', YT.bbRow),
+            ex('DB Overhead Press', '3', '10', 7, '', YT.dbOhp),
+            ex('Face Pull', '3', '12', 6, '', YT.facePull),
+          ]},
+        { label: 'Lower',
+          speed: [
+            spd('20-Yard Sprint', '5 x 20 yd', 'Stay tall, drive — walk-back recovery', YT.sprint20),
+            spd('Flying 10 Sprint', '4 x flying 10', 'Build up, then max speed — full recovery', YT.flying10),
+          ],
+          medball: [
+            spd('Med Ball Scoop Toss', '3 x 6', 'Triple extension — throw it far', YT.mbScoop),
+            spd('Med Ball Shotput Throw', '3 x 6 each side', 'Punch through the throw', YT.mbShotput),
+          ],
+          exercises: [
+            ex('Back Squat', '4', '6', 8, '', YT.backSquat),
+            ex('Romanian Deadlift', '3', '8', 7, 'Feel the hamstrings load', YT.rdl),
+            ex('Bulgarian Split Squat', '3', '10 each', 7, '', YT.bulgarian),
+            ex('Hanging Knee Raise', '3', '12', 6, '', YT.kneeRaise),
+          ]},
+      ],
+    },
+  ];
+  const buildTemplateJson = (t) => JSON.stringify({ days: t.days, notes: [] });
   if (!seeded) {
     const now = new Date().toISOString();
     const ins = db.prepare(
       'INSERT INTO lifting_programs (name, is_template, program_json, updated_at) VALUES (?, 1, ?, ?)'
     );
-    const ex = (name, sets, reps, target_rpe, notes) => ({
-      name, sets: String(sets), reps: String(reps), target_rpe: target_rpe || '', notes: notes || '',
-    });
-    const templates = [
-      {
-        name: 'Full-Body A/B',
-        days: [
-          { label: 'Day A', exercises: [
-            ex('Trap Bar Deadlift', '4', '5', 8, 'Hinge, brace, drive the floor away'),
-            ex('DB Bench Press', '3', '8', 7, ''),
-            ex('Chest-Supported DB Row', '3', '10', 7, ''),
-            ex('Pallof Press', '3', '10 each side', 6, ''),
-          ]},
-          { label: 'Day B', exercises: [
-            ex('Front Squat', '4', '6', 8, 'Elbows high, knees forward'),
-            ex('Overhead Press', '3', '8', 7, ''),
-            ex('Lat Pulldown', '3', '10', 7, ''),
-            ex("Farmer's Carry", '3', '40 yards', 6, ''),
-          ]},
-        ],
-      },
-      {
-        name: 'Upper / Lower',
-        days: [
-          { label: 'Upper', exercises: [
-            ex('Bench Press', '4', '6', 8, ''),
-            ex('Bent-Over Row', '4', '8', 8, 'Chest over the plate'),
-            ex('DB Overhead Press', '3', '10', 7, ''),
-            ex('Face Pull', '3', '12', 6, ''),
-          ]},
-          { label: 'Lower', exercises: [
-            ex('Back Squat', '4', '6', 8, ''),
-            ex('Romanian Deadlift', '3', '8', 7, 'Feel the hamstrings load'),
-            ex('Bulgarian Split Squat', '3', '10 each', 7, ''),
-            ex('Hanging Knee Raise', '3', '12', 6, ''),
-          ]},
-        ],
-      },
-    ];
-    for (const t of templates) {
-      ins.run(t.name, JSON.stringify({ days: t.days, notes: [] }), now);
-    }
+    for (const t of LIFTING_TEMPLATES_V2) ins.run(t.name, buildTemplateJson(t), now);
     db.prepare("INSERT INTO settings (key, value) VALUES ('lifting_templates_seeded', '1')").run();
+    db.prepare("INSERT INTO settings (key, value) VALUES ('lifting_rebuild_v2', '1')").run();
     console.log('Seeded lifting templates: Full-Body A/B, Upper / Lower.');
+  } else {
+    // Rebuild legacy templates still on the old shape (lifts only, no video
+    // links, no speed/med-ball blocks). Templates Bobby already customized
+    // with the new fields are left alone.
+    const done = db.prepare("SELECT value FROM settings WHERE key = 'lifting_rebuild_v2'").get();
+    if (!done) {
+      const now = new Date().toISOString();
+      const tpls = db.prepare('SELECT * FROM lifting_programs WHERE is_template = 1').all();
+      let rebuilt = 0;
+      for (const tpl of tpls) {
+        let p = {};
+        try { p = JSON.parse(tpl.program_json || '{}'); } catch (e) {}
+        const days = Array.isArray(p.days) ? p.days : [];
+        const isLegacy = days.length && days.every((d) =>
+          !(d.speed && d.speed.length) && !(d.medball && d.medball.length) &&
+          (d.exercises || []).every((e) => !e.video));
+        const match = LIFTING_TEMPLATES_V2.find((t) => t.name === tpl.name);
+        if (isLegacy && match) {
+          db.prepare('UPDATE lifting_programs SET program_json = ?, updated_at = ? WHERE id = ?')
+            .run(buildTemplateJson(match), now, tpl.id);
+          rebuilt++;
+        }
+      }
+      db.prepare("INSERT INTO settings (key, value) VALUES ('lifting_rebuild_v2', '1')").run();
+      console.log('Lifting rebuild v2: rebuilt ' + rebuilt + ' template(s).');
+    }
   }
 }
 
