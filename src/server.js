@@ -2354,6 +2354,49 @@ app.get('/program/mobility', requireLogin, requireWaiver, (req, res) => {
   res.send(views.mobilityPage(req.user, p, { tabs, blocks }));
 });
 
+// Mobility workout (Sep 23 2026): guided mobility/med ball session —
+// interactive check-offs, weight tracking for med ball, like the lifting workout.
+app.get('/program/mobility-workout', requireLogin, requireWaiver, (req, res) => {
+  if (req.user.role === 'coach') return res.redirect('/coach');
+  if (!req.user.remoteProgramId) return res.redirect('/');
+  const preview = !!req.user.viewAs;
+  const p = getProgram(req.user.remoteProgramId);
+  if (!p) return res.redirect('/');
+  const blocks = splitProgramBlocks(p);
+  const today = chiToday();
+  // Build flat list of mobility + medball exercises
+  const exercises = [];
+  for (const b of blocks.mobility) {
+    for (const it of (b.items || [])) {
+      if (!it.drill) continue;
+      const key = 'mobility::' + it.drill;
+      exercises.push({
+        name: it.drill,
+        volume: it.volume || '',
+        type: 'mobility',
+        key,
+        last: lastLiftLog(req.user.id, key, today),
+        history: liftHistory(req.user.id, key, 8),
+      });
+    }
+  }
+  for (const b of blocks.medball) {
+    for (const it of (b.items || [])) {
+      if (!it.drill) continue;
+      const key = 'medball::' + it.drill;
+      exercises.push({
+        name: it.drill,
+        volume: it.volume || '',
+        type: 'medball',
+        key,
+        last: lastLiftLog(req.user.id, key, today),
+        history: liftHistory(req.user.id, key, 8),
+      });
+    }
+  }
+  res.send(views.mobilityWorkoutPage(req.user, p, { exercises, today, preview }));
+});
+
 // Hitting plan document (Sep 23 2026): one-page document per remote hitter —
 // training environments, warmup (Bobby's prep work), drills. Videos live in
 // the Remote library; the document just points there.

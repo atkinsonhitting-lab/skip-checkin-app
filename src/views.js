@@ -5073,6 +5073,62 @@ function substitutePage(user, o) {
 }
 
 
+function mobilityWorkoutPage(user, p, opts) {
+  const prog = (p && p.prog) || {};
+  const athleteName = (p && p.athlete_name) || prog.athlete || 'Hitter';
+  const o = opts || {};
+  const exercises = o.exercises || [];
+  const today = o.today || '';
+  const preview = !!o.preview;
+  const exHtml = exercises.map((ex, i) => {
+    const last = ex.last;
+    const lastStr = last && (last.weight || last.sets)
+      ? `<div class="last-perf">Last: ${last.weight ? esc(String(last.weight)) + ' lbs' : ''} ${last.sets ? esc(JSON.stringify(last.sets)) : ''}</div>`
+      : '';
+    const isMedball = ex.type === 'medball';
+    return `<div class="wo-ex" data-key="${esc(ex.key)}" data-idx="${i}">
+      <div class="wo-ex-head">
+        <span class="wo-ex-num">${i + 1}</span>
+        <div>
+          <div class="wo-ex-name">${esc(ex.name)}</div>
+          <div class="wo-ex-vol">${esc(ex.volume)}</div>
+          ${lastStr}
+        </div>
+      </div>
+      <div class="wo-ex-controls">
+        ${isMedball ? `<label>Ball weight (lbs): <input type="number" class="wo-weight" inputmode="decimal" placeholder="e.g. 8" ${preview ? 'disabled' : ''}></label>` : ''}
+        <label>Sets completed: <input type="number" class="wo-sets" inputmode="numeric" min="0" placeholder="0" ${preview ? 'disabled' : ''}></label>
+        <button class="btn btn-sm wo-done" ${preview ? 'disabled' : ''}>✓ Done</button>
+      </div>
+      <div class="wo-ex-status"></div>
+    </div>`;
+  }).join('');
+  return layout({
+    title: `Mobility Workout — ${athleteName}`,
+    user,
+    body: `<h1 class="page-title">Mobility & Med Ball</h1>
+    <p><a href="/program/mobility">← Back</a></p>
+    <p class="hint">Tap through each exercise. Log your med ball weight and sets.</p>
+    <div class="wo-list">${exHtml || '<div class="empty">No mobility exercises found.</div>'}</div>
+    <script src="/mobility-workout.js"></script>
+    <style>
+      .wo-list { max-width: 600px; margin: 0 auto; }
+      .wo-ex { background: #fff; border: 1px solid #e0e0e0; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+      .wo-ex-head { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 12px; }
+      .wo-ex-num { background: #111; color: #fff; width: 28px; height: 28px; border-radius: 50%;
+        display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; flex-shrink: 0; }
+      .wo-ex-name { font-weight: 700; font-size: 16px; }
+      .wo-ex-vol { color: #666; font-size: 14px; }
+      .last-perf { font-size: 13px; color: #888; margin-top: 4px; }
+      .wo-ex-controls { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+      .wo-ex-controls label { font-size: 14px; }
+      .wo-ex-controls input { width: 80px; padding: 8px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; }
+      .wo-ex-status { margin-top: 8px; font-size: 14px; color: #2a7; font-weight: 600; }
+      .wo-ex.done { border-color: #2a7; background: #f0faf0; }
+    </style>`,
+  });
+}
+
 function mobilityPage(user, p, opts) {
   const prog = (p && p.prog) || {};
   const athleteName = (p && p.athlete_name) || prog.athlete || 'Hitter';
@@ -5097,6 +5153,7 @@ function mobilityPage(user, p, opts) {
     <div class="doc-page">
       <div class="doc-header"><div class="doc-logo">ATKINSON<br>HITTING</div></div>
       <h1 class="doc-sec-title">Mobility & Med Ball - ${esc(athleteName)}</h1>
+      <p style="text-align:center;margin-bottom:20px"><a href="/program/mobility-workout" class="btn" style="display:inline-block;text-decoration:none;padding:12px 24px;background:#111;color:#fff;border-radius:8px;font-weight:700">▶ Start Workout</a></p>
       ${mobilityHtml}
       ${medballHtml}
       <style>
@@ -5475,6 +5532,7 @@ module.exports = {
   waiverPage,
   substitutePage,
   routineEditPage,
+  mobilityWorkoutPage,
   mobilityPage,
   hittingPlanPage,
   hittingPlanEditPage,
