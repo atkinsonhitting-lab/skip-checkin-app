@@ -7,6 +7,8 @@ window.SkipMic = (function () {
   // Falls back to MediaRecorder + server transcribe where unsupported.
   // Like the iOS keyboard mic (Bobby, Sep 23 2026): words appear in the
   // text box LIVE as they speak. `target` is the textarea to fill.
+  // Dialed in: iOS kills recognition on silence — auto-restart so the kid
+  // never has to "go again". Only stops when they tap.
   function webspeechRecord(onDone, onStatus, target) {
     const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!Rec || !target) return null;
@@ -16,10 +18,14 @@ window.SkipMic = (function () {
     rec.continuous = true;
     const base = target.value ? target.value.replace(/\s+$/, '') + ' ' : '';
     let finalText = '';
-    let stopped = false;
+    let userStopped = false;
+    let restarts = 0;
     const paint = (interim) => {
       target.value = base + finalText + interim;
       target.scrollTop = target.scrollHeight;
+    };
+    const startRec = () => {
+      try { rec.start(); } catch (e) { /* already started */ }
     };
     rec.onresult = (ev) => {
       let interim = '';
@@ -29,22 +35,43 @@ window.SkipMic = (function () {
         else interim += t;
       }
       paint(interim);
+      restarts = 0; // got speech — reset the restart budget
       if (onStatus) onStatus('Listening… tap again to stop');
     };
     rec.onerror = (ev) => {
-      if (stopped) return;
-      stopped = true;
+      if (userStopped) return;
+      const err = ev && ev.error;
+      // "no-speech" / "aborted" just mean iOS cut it — restart, don't quit.
+      if ((err === 'no-speech' || err === 'aborted') && restarts < 5) {
+        restarts++;
+        setTimeout(() => { if (!userStopped) startRec(); }, 300);
+        return;
+      }
+      userStopped = true;
       try { rec.stop(); } catch (e) {}
       onDone(finalText.trim());
     };
     rec.onend = () => {
-      if (stopped) return;
-      stopped = true;
-      onDone(finalText.trim());
+      if (userStopped) return;
+      // iOS ended it (silence/timeout) — keep going until they tap stop.
+      if (restarts < 5) {
+        restarts++;
+        setTimeout(() => { if (!userStopped) startRec(); }, 300);
+      } else {
+        userStopped = true;
+        onDone(finalText.trim());
+      }
     };
-    try { rec.start(); } catch (e) { return null; }
+    startRec();
     if (onStatus) onStatus('Listening… tap again to stop');
-    return () => { if (!stopped) { stopped = true; try { rec.stop(); } catch (e) {} } };
+    return () => {
+      if (!userStopped) {
+        userStopped = true;
+        try { rec.stop(); } catch (e) {}
+        // Give onend a beat; if it doesn't fire, finish now.
+        setTimeout(() => onDone(finalText.trim()), 400);
+      }
+    };
   }
   let stream = null;
   async function getStream() {
