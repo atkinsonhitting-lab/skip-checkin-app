@@ -5070,6 +5070,31 @@ function hittingPlanPage(user, p) {
     ? `<table class="doc-table grades-table"><tbody><tr>${gradeEntries.map(([k, v]) => `<th>${esc(k)}</th>`).join('')}</tr><tr>${gradeEntries.map(([k, v]) => `<td class="grade-val">${esc(String(v))}</td>`).join('')}</tr></tbody></table>`
     : '';
 
+  // Weekly schedule/calendar
+  const schedule = Array.isArray(prog.schedule) ? prog.schedule : [];
+  const scheduleHtml = schedule.length
+    ? `<table class="doc-table schedule-table"><thead><tr><th>Day</th><th>Work</th></tr></thead><tbody>${schedule.map((s) => {
+        const day = s.day || s.label || '';
+        const work = s.work || s.blocks || s.type || '';
+        const workStr = Array.isArray(work) ? work.join(', ') : String(work);
+        return `<tr><td><strong>${esc(day)}</strong></td><td>${esc(workStr)}</td></tr>`;
+      }).join('')}</tbody></table>`
+    : '';
+
+  // Med ball — for guys without lifting (Bobby, Sep 23 2026)
+  const medball = Array.isArray(plan.medball) ? plan.medball : [];
+  const hasLifting = !!(p && p.lifting_program_id);
+  const medballHtml = (!hasLifting && medball.length)
+    ? `<table class="doc-table">
+        <thead><tr><th>Throw</th><th>Volume</th><th>Cues</th></tr></thead>
+        <tbody>${medball.map((m) => `<tr>
+          <td><strong>${esc(m.name || '')}</strong></td>
+          <td>${esc(m.volume || '')}</td>
+          <td>${esc(m.cues || '')}</td>
+        </tr>`).join('')}</tbody>
+      </table>`
+    : '';
+
   // Training environments explainer
   const defaultEnvironments = `<p>Do your work across all <strong>training environments</strong>. Each one trains something different:</p>
 <ul>
@@ -5140,6 +5165,7 @@ function hittingPlanPage(user, p) {
       <p class="doc-athlete">${esc(athleteName)}</p>
       <hr class="doc-rule">
       ${gradesHtml ? `<section class="doc-section"><h2>Grades</h2>${gradesHtml}</section>` : ''}
+      ${scheduleHtml ? `<section class="doc-section"><h2>Weekly Schedule</h2>${scheduleHtml}</section>` : ''}
       <section class="doc-section">
         <h2>Training Environments</h2>
         ${environmentsHtml}
@@ -5148,6 +5174,7 @@ function hittingPlanPage(user, p) {
         <h2>Warmup — Prep Work</h2>
         ${warmupHtml}
       </section>
+      ${medballHtml ? `<section class="doc-section"><h2>Med Ball</h2>${medballHtml}<p class="doc-note">Med ball demos are in the Remote library (Videos tab).</p></section>` : ''}
       <section class="doc-section">
         <h2>The Work — Drill Progression</h2>
         ${drillsHtml}
@@ -5247,6 +5274,21 @@ function hittingPlanEditPage(user, p) {
       <input type="text" name="d_why_${i}" value="" placeholder="Why? (what it trains)" maxlength="300">
     </div>`;
   }).join('');
+  const medball = Array.isArray(plan.medball) ? plan.medball : [];
+  const medballRows = medball.map((mb, i) => `
+    <div class="plan-drill">
+      <input type="text" name="m_name_${i}" value="${esc(mb.name || '')}" placeholder="Throw name" maxlength="100" class="drill-name">
+      <input type="text" name="m_volume_${i}" value="${esc(mb.volume || '')}" placeholder="Volume" maxlength="100">
+      <input type="text" name="m_cues_${i}" value="${esc(mb.cues || '')}" placeholder="Cues" maxlength="200">
+    </div>`).join('');
+  const medballBlanks = [0, 1, 2].map((k) => {
+    const i = medball.length + k;
+    return `<div class="plan-drill">
+      <input type="text" name="m_name_${i}" value="" placeholder="Throw name" maxlength="100" class="drill-name">
+      <input type="text" name="m_volume_${i}" value="" placeholder="Volume" maxlength="100">
+      <input type="text" name="m_cues_${i}" value="" placeholder="Cues" maxlength="200">
+    </div>`;
+  }).join('');
 
   return layout({
     title: 'Edit Hitting Plan',
@@ -5264,6 +5306,9 @@ function hittingPlanEditPage(user, p) {
       <h3>The Work — Drills</h3>
       <p class="hint-inline">Drill demos are all in the Remote library. Add the "why" for each.</p>
       ${drillRows}${drillBlanks}
+      <h3>Med Ball (no lifting guys only)</h3>
+      <p class="hint-inline">Only shows on the document if he has no lifting program.</p>
+      ${medballRows}${medballBlanks}
       <label class="fld">Environment variations (open angle, breaking balls, velo, etc. — leave blank for defaults)
         <textarea name="env_variations" rows="4" placeholder="Custom variations, or blank for default...">${esc(plan.env_variations || '')}</textarea>
       </label>

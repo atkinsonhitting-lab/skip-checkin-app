@@ -1802,7 +1802,10 @@ function buildHittingPlan(prog) {
   const routine = Array.isArray(prog.routine) ? prog.routine : [];
   const warmup = [];
   const drills = [];
-  const isWarmupCat = (c) => /prep|mobility|daily|warm/i.test(c || '');
+  const medball = [];
+  // Bobby (Sep 23 2026): mobility lives in lifting now — hitting plan warmup is prep work only.
+  const isWarmupCat = (c) => /prep|daily|warm/i.test(c || '') && !/mobility/i.test(c || '');
+  const isMedballCat = (c) => /med\s*ball/i.test(c || '');
   // Map category → training environment for the drill progression
   const envOf = (c) => {
     const s = String(c || '').toLowerCase();
@@ -1818,7 +1821,11 @@ function buildHittingPlan(prog) {
   for (const block of routine) {
     const cat = block.category || '';
     const items = Array.isArray(block.items) ? block.items : [];
-    if (isWarmupCat(cat)) {
+    if (isMedballCat(cat)) {
+      for (const it of items) {
+        if (it.drill) medball.push({ name: it.drill, volume: it.volume || '', cues: '', why: '' });
+      }
+    } else if (isWarmupCat(cat)) {
       for (const it of items) {
         if (it.drill) warmup.push({ name: it.drill, detail: it.volume || '' });
       }
@@ -1829,7 +1836,7 @@ function buildHittingPlan(prog) {
       }
     }
   }
-  return { environments_note: '', env_variations: '', warmup, drills, footer: '' };
+  return { environments_note: '', env_variations: '', warmup, drills, medball, footer: '' };
 }
 // ---- Programs tab: lifting + check-offs (Sep 2026) ----
 // Chicago date string (YYYY-MM-DD) used as the check-off day key.
@@ -3747,6 +3754,7 @@ app.post('/coach/program/:id/hitting-plan', requireCoach, (req, res) => {
     env_variations: String(b.env_variations || '').trim(),
     warmup: [],
     drills: [],
+    medball: [],
     footer: String(b.footer || '').trim(),
   };
   // Warmup items: w_name_0, w_detail_0, ...
@@ -3765,6 +3773,16 @@ app.post('/coach/program/:id/hitting-plan', requireCoach, (req, res) => {
       volume: String(b[`d_volume_${i}`] || '').trim(),
       cues: String(b[`d_cues_${i}`] || '').trim(),
       why: String(b[`d_why_${i}`] || '').trim(),
+    });
+  }
+  // Med ball: m_name_0, m_volume_0, m_cues_0, ...
+  for (let i = 0; i < 30; i++) {
+    const name = String(b[`m_name_${i}`] || '').trim();
+    if (!name) continue;
+    plan.medball.push({
+      name,
+      volume: String(b[`m_volume_${i}`] || '').trim(),
+      cues: String(b[`m_cues_${i}`] || '').trim(),
     });
   }
   p.prog.hitting_plan = plan;
