@@ -382,6 +382,57 @@ db.exec(`CREATE TABLE IF NOT EXISTS remote_programs (
      WHERE lower(athlete_name) = 'sam chapman' AND (aliases IS NULL OR aliases = '')`
   ).run();
 }
+// The 4 program files were built at different times with different
+// shapes — normalize to one canonical shape on the way in.
+function normalizeSeedProgram(raw) {
+  const normItems = (items) =>
+    (Array.isArray(items) ? items : [])
+      .map((it) => {
+        if (typeof it === 'string') return { drill: it.trim() };
+        const drill = String((it && it.drill) || '').trim();
+        if (!drill) return null;
+        const o = { drill };
+        if (it.volume) o.volume = String(it.volume).trim();
+        return o;
+      })
+      .filter(Boolean);
+  const p = { ...(raw || {}) };
+  const blocks = [];
+  if (Array.isArray(p.routine)) {
+    for (const c of p.routine) {
+      const items = normItems(c.items);
+      if (c.category || items.length) blocks.push({ category: String(c.category || 'Training'), items });
+    }
+  }
+  if (Array.isArray(p.daily_routine) && p.daily_routine.length) {
+    blocks.unshift({ category: 'Daily Routine', items: normItems(p.daily_routine) });
+  }
+  if (Array.isArray(p.mobility) && p.mobility.length) {
+    blocks.push({ category: 'Mobility', items: normItems(p.mobility) });
+  }
+  if (Array.isArray(p.days)) {
+    for (const d of p.days) {
+      const title = [d.title, d.section || d.category].filter(Boolean).join(' \u2014 ');
+      const items = normItems(d.items);
+      if (title || items.length) blocks.push({ category: title || 'Training Day', items });
+    }
+  }
+  p.routine = blocks;
+  delete p.daily_routine;
+  delete p.mobility;
+  delete p.days;
+  if (!Array.isArray(p.notes)) p.notes = [];
+  if (!Array.isArray(p.schedule)) p.schedule = [];
+  // Attach video links from Bobby's drill registry on the way in
+  // (YouTube for mobility/med-ball, Drive library for hitting/prep).
+  // The video library is empty on a fresh seed, so only the registry
+  // matches here; the library sync auto-links the rest later.
+  try { videoLinks.attachVideoLinks(p, []); } catch (e) { /* registry missing */ }
+  if (!p.grades || typeof p.grades !== 'object') p.grades = {};
+  if (!Array.isArray(p.strengths)) p.strengths = [];
+  if (!p.cues || typeof p.cues !== 'object') p.cues = { movement: '', timing: '', game: '' };
+  return p;
+}
 // Seed the 4 remote programs from the bundled snapshots (first boot only —
 // Bobby's in-app edits are never overwritten). Then link any existing
 // accounts whose name matches, so a remote guy who already signed up just
@@ -395,64 +446,40 @@ db.exec(`CREATE TABLE IF NOT EXISTS remote_programs (
     const ins = db.prepare(
       'INSERT INTO remote_programs (athlete_name, program_json, updated_at) VALUES (?, ?, ?)'
     );
-    // The 4 program files were built at different times with different
-    // shapes — normalize to one canonical shape on the way in.
-    const normItems = (items) =>
-      (Array.isArray(items) ? items : [])
-        .map((it) => {
-          if (typeof it === 'string') return { drill: it.trim() };
-          const drill = String((it && it.drill) || '').trim();
-          if (!drill) return null;
-          const o = { drill };
-          if (it.volume) o.volume = String(it.volume).trim();
-          return o;
-        })
-        .filter(Boolean);
-    const normalizeProgram = (raw) => {
-      const p = { ...(raw || {}) };
-      const blocks = [];
-      if (Array.isArray(p.routine)) {
-        for (const c of p.routine) {
-          const items = normItems(c.items);
-          if (c.category || items.length) blocks.push({ category: String(c.category || 'Training'), items });
-        }
-      }
-      if (Array.isArray(p.daily_routine) && p.daily_routine.length) {
-        blocks.unshift({ category: 'Daily Routine', items: normItems(p.daily_routine) });
-      }
-      if (Array.isArray(p.mobility) && p.mobility.length) {
-        blocks.push({ category: 'Mobility', items: normItems(p.mobility) });
-      }
-      if (Array.isArray(p.days)) {
-        for (const d of p.days) {
-          const title = [d.title, d.section || d.category].filter(Boolean).join(' \u2014 ');
-          const items = normItems(d.items);
-          if (title || items.length) blocks.push({ category: title || 'Training Day', items });
-        }
-      }
-      p.routine = blocks;
-      delete p.daily_routine;
-      delete p.mobility;
-      delete p.days;
-      if (!Array.isArray(p.notes)) p.notes = [];
-      if (!Array.isArray(p.schedule)) p.schedule = [];
-      // Attach video links from Bobby's drill registry on the way in
-      // (YouTube for mobility/med-ball, Drive library for hitting/prep).
-      // The video library is empty on a fresh seed, so only the registry
-      // matches here; the library sync auto-links the rest later.
-      try { videoLinks.attachVideoLinks(p, []); } catch (e) { /* registry missing */ }
-      if (!p.grades || typeof p.grades !== 'object') p.grades = {};
-      if (!Array.isArray(p.strengths)) p.strengths = [];
-      if (!p.cues || typeof p.cues !== 'object') p.cues = { movement: '', timing: '', game: '' };
-      return p;
-    };
     for (const f of fs.readdirSync(dir)) {
       if (!f.endsWith('.json')) continue;
       try {
-        const prog = normalizeProgram(JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')));
+        const prog = normalizeSeedProgram(JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')));
         const name = String(prog.athlete || f.replace(/\.json$/, '')).trim();
         if (name) ins.run(name, JSON.stringify(prog), new Date().toISOString());
       } catch (e) { console.warn('program seed skipped', f, e.message); }
+    }
+  }
+  // Repair (Sep 23 2026): one of the 4 founder programs (Ryan Seddon's) went
+  // missing from the DB. Re-insert any founder program that has no row —
+  // from the bundled seed — without touching the ones Bobby customized.
+  {
+    const fs = require('fs');
+    const path = require('path');
+    const dir = path.join(__dirname, 'seed_programs');
+    const have = new Set(
+      db.prepare('SELECT athlete_name FROM remote_programs').all()
+        .map((r) => String(r.athlete_name || '').trim().toLowerCase())
+    );
+    const ins = db.prepare(
+      'INSERT INTO remote_programs (athlete_name, program_json, updated_at) VALUES (?, ?, ?)'
+    );
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.endsWith('.json')) continue;
+      try {
+        const prog = normalizeSeedProgram(JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')));
+        const name = String(prog.athlete || f.replace(/\.json$/, '')).trim();
+        if (name && !have.has(name.toLowerCase())) {
+          ins.run(name, JSON.stringify(prog), new Date().toISOString());
+          have.add(name.toLowerCase());
+          console.log(`Restored missing remote program for ${name}.`);
+        }
+      } catch (e) { console.warn('program restore skipped', f, e.message); }
     }
   }
   // One-time repair: Dylan's seed lost section names ("Day 1" x4 instead of
@@ -566,16 +593,45 @@ db.exec(`CREATE TABLE IF NOT EXISTS remote_programs (
   // + the synced video library. Only fills items with no link and no manual
   // decision; his in-app edits always win. Guarded by a settings flag; the
   // library sync re-runs auto-linking on every sync after this.
+  // v2 (Sep 23 2026): the registry gained the mobility YouTube links and
+  // dropped the wrong Banded Loads/Turns video AFTER v1 ran, so v1 left
+  // items unlinked. Re-run once — still only fills blanks, never overrides.
   {
     try {
       db.exec('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT \'\');');
-      const done = db.prepare("SELECT value FROM settings WHERE key = 'video_links_v1'").get();
+      const done = db.prepare("SELECT value FROM settings WHERE key = 'video_links_v2'").get();
       if (!done) {
         const r = videoLinks.autoLinkAllPrograms(db, videoLinks.getLibraryRows(db));
-        console.log(`Video links attached: ${r.linked} items across ${r.programs} programs.`);
-        db.prepare("INSERT INTO settings (key, value) VALUES ('video_links_v1', '1')").run();
+        console.log(`Video links attached (v2): ${r.linked} items across ${r.programs} programs.`);
+        db.prepare("INSERT INTO settings (key, value) VALUES ('video_links_v2', '1')").run();
       }
     } catch (e) { console.warn('video link migration skipped', e.message); }
+  }
+  // Cleanup (Sep 23 2026): Bobby rejected the old Banded Loads/Turns video
+  // mapping (it was a generic "resistance band hitting drills" video, not a
+  // Banded Loads demo) and the mapping is gone from the registry. Clear any
+  // stale AUTO-linked copies of that URL still stored on program items —
+  // manual links are never touched.
+  {
+    try {
+      const bad = 'https://www.youtube.com/watch?v=k1XTovi8X6s';
+      const rows = db.prepare('SELECT id, program_json FROM remote_programs').all();
+      const upd = db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?');
+      for (const row of rows) {
+        let prog;
+        try { prog = JSON.parse(row.program_json || '{}'); } catch (e) { continue; }
+        let changed = false;
+        for (const c of (Array.isArray(prog.routine) ? prog.routine : [])) {
+          for (const it of (c && c.items) || []) {
+            if (it && it.video === bad && it.video_source !== 'manual') {
+              it.video = '';
+              changed = true;
+            }
+          }
+        }
+        if (changed) upd.run(JSON.stringify(prog), new Date().toISOString(), row.id);
+      }
+    } catch (e) { /* best effort */ }
   }
   // Backfill: match accounts by full name, honoring aliases
   // (runs every boot; idempotent).
@@ -711,6 +767,46 @@ db.exec(`CREATE TABLE IF NOT EXISTS intake_custom_questions (
       }
     } catch (e) { /* best effort */ }
     db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('migration_medball_youtube', ?)").run(String(fixed));
+  }
+}
+// v2 (Sep 23 2026): the med-ball YouTube links landed in the registry AFTER
+// v1 ran, so v1 re-pointed nothing. Re-run the repair, and purge any
+// auto-linked NON-YouTube (Drive/library) video from med-ball items —
+// Bobby's rule is YouTube-only for med ball, and the fuzzy matcher had
+// attached the "Med Ball Drill" hitting video to real throws. Manual links
+// are never touched; items with no registry match are left blank (no guess).
+{
+  const flag = db.prepare("SELECT value FROM settings WHERE key = 'migration_medball_youtube_v2'").get();
+  if (!flag) {
+    let fixed = 0;
+    let purged = 0;
+    try {
+      const vl = require('./video_links');
+      const rows = db.prepare('SELECT id, program_json FROM remote_programs').all();
+      const upd = db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?');
+      for (const row of rows) {
+        let prog;
+        try { prog = JSON.parse(row.program_json || '{}'); } catch (e) { continue; }
+        let changed = false;
+        const n1 = vl.repairMedBallLinks(prog);
+        if (n1 > 0) { fixed += n1; changed = true; }
+        const blocks = Array.isArray(prog.routine) ? prog.routine : [];
+        for (const c of blocks) {
+          if (!/med\s*ball/i.test(String((c && c.category) || ''))) continue;
+          for (const it of (c && c.items) || []) {
+            if (!it || it.video_source === 'manual' || !it.video) continue;
+            const isYT = /^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\//i.test(it.video);
+            if (!isYT) {
+              it.video = '';
+              purged++;
+              changed = true;
+            }
+          }
+        }
+        if (changed) upd.run(JSON.stringify(prog), new Date().toISOString(), row.id);
+      }
+    } catch (e) { /* best effort */ }
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('migration_medball_youtube_v2', ?)").run(`${fixed}f/${purged}p`);
   }
 }
 // NOTE: starter lifting templates are seeded after the settings table is
@@ -967,6 +1063,143 @@ CREATE TABLE IF NOT EXISTS settings (
       }
       db.prepare("INSERT INTO settings (key, value) VALUES ('lifting_rebuild_v2', '1')").run();
       console.log('Lifting rebuild v2: rebuilt ' + rebuilt + ' template(s).');
+    }
+  }
+
+  // Lifting rebuild v3 (Sep 23 2026, Bobby's Different Animal method): the
+  // v2 templates were generic. These follow his actual system — Kelly's
+  // 4-day offseason split, 2-day in-season maintenance, contrast pairings
+  // (heavy → explosive, same plane, ~3-min rest), triphasic tempo, monthly
+  // Absorb → Produce → Express blocks, test/retest every 2 weeks.
+  // Every video link verified via oEmbed Sep 23 2026; exercises without a
+  // verified demo carry no video rather than a wrong one.
+  Object.assign(YT, {
+    plyoPushup: 'https://www.youtube.com/watch?v=hDP-oskzYUs',
+    saRow: 'https://www.youtube.com/watch?v=BPi7PYlWPos',
+    cableRot: 'https://www.youtube.com/watch?v=he4IhLc1d5k',
+    trapJump: 'https://www.youtube.com/watch?v=QsuwFIcQ440',
+    nordic: 'https://www.youtube.com/watch?v=HrOhaEnwDQY',
+    landmine: 'https://www.youtube.com/watch?v=7UHzSSqlC7w',
+    broadJump: 'https://www.youtube.com/watch?v=uhz-ia-2UcM',
+    pushPress: 'https://www.youtube.com/watch?v=yklSQG1_Ovc',
+  });
+  const LIFTING_TEMPLATES_V3 = [
+    {
+      name: 'Offseason 4-Day — Kelly Split',
+      notes: [
+        'Triphasic month: Absorb → Produce → Express. Test/retest every 2 weeks.',
+        'Contrast pairings: heavy lift → explosive same-plane movement, ~3 min rest.',
+        'Stop explosive work when rep quality drops.',
+      ],
+      days: [
+        { label: 'Day 1 — Upper: Horiz Press + Vert Pull',
+          medball: [
+            spd('MB Shot-Put Throw', '4 x 5', 'Max intent, every throw', YT.mbShotput),
+          ],
+          exercises: [
+            ex('Plyo Push-Up', '3', '5', 8, 'CONTRAST with DB bench press — 3 min rest', YT.plyoPushup),
+            ex('DB Bench Press', '4', '6', 8, 'Triphasic tempo. CONTRAST: bench → plyo push-up', YT.dbBench),
+            ex('DB Single-Arm Row', '4', '6 each side', 8, '', YT.saRow),
+            ex('Cable Rotation', '3', '5 each side', 8, 'Max intent — rotate through the hips', YT.cableRot),
+            ex('Pallof Press', '3', '10 each side', 6, '', YT.pallof),
+          ]},
+        { label: 'Day 2 — Bilateral Lower',
+          speed: [
+            spd('10-Yard Sprint', '3 x 10 yd', 'Explode out — full recovery', YT.sprint10),
+            spd('Trap-Bar Jump', '4 x 5 @ ~50% BW', 'Max intent. CONTRAST after deadlift — 3 min rest', YT.trapJump),
+          ],
+          exercises: [
+            ex('Trap-Bar Deadlift', '3', '3 @ 85–90%', 9, 'Triphasic tempo. CONTRAST: deadlift → trap-bar jump', YT.trapbar),
+            ex('Nordic Curl', '3', '5', 8, 'Slow eccentrics — control the way down', YT.nordic),
+            ex('Lateral Box Squat', '3', '5–8 each side', 7, '', ''),
+          ]},
+        { label: 'Day 3 — Upper: Horiz Pull + Vert Press',
+          medball: [
+            spd('MB Rotational Throw', '4 x 5', 'Max intent, every throw', YT.mbRot),
+          ],
+          exercises: [
+            ex('Single-Arm Landmine Press', '4', '5 each side', 8, 'Explosive press', YT.landmine),
+            ex('DB Single-Arm Row', '4', '6 each side', 8, 'Triphasic tempo', YT.saRow),
+            ex('DB Shoulder Press', '3', '6', 8, 'Triphasic tempo', YT.dbOhp),
+            ex('DB Rear-Lateral Raise', '3', '8–10', 7, '', ''),
+            ex('Pallof Hold', '3', '15 sec each side', 7, 'Max weight you can hold with perfect posture', ''),
+          ]},
+        { label: 'Day 4 — Unilateral Lower (alone on purpose)',
+          speed: [
+            spd('Drop-Catch Split Jump', '3 x 5', 'Max intent — stick the landing', ''),
+          ],
+          exercises: [
+            ex('Split-Squat ISO Pull', '3', '5 each side', 7, 'Potentiation primer before Bulgarians', ''),
+            ex('Bulgarian Split Squat', '3', '6 each leg', 8, 'Month 1: 3-sec down. Months 2–3 CONTRAST: Bulgarian → drop-catch split jump', YT.bulgarian),
+            ex('Pin Split Squat', '3', '5 each leg @ challenging load', 8, '', ''),
+            ex('Nordic Curl', '3', '5', 8, 'Slow eccentrics', YT.nordic),
+            ex('DB Trunk Rotation', '3', '8 each side', 7, 'Build the brakes — control the rotation', ''),
+          ]},
+      ],
+    },
+    {
+      name: 'In-Season 2-Day Maintenance',
+      notes: [
+        'In-season floor: keep 1 high-quality lift per week minimum. Cut volume, never intensity.',
+        'Remove excess work when games pile up. No "easy J-band only" maintenance.',
+      ],
+      days: [
+        { label: 'Day 1 — Lower + Acceleration',
+          speed: [
+            spd('10-Yard Sprint', '3 x 10 yd', 'Explode out — full recovery', YT.sprint10),
+            spd('Broad Jump', '3 x 3', 'Max horizontal power — stick the landing', YT.broadJump),
+          ],
+          exercises: [
+            ex('Pin Squat', '3', '2 @ 85–90%', 9, 'Move the bar fast', ''),
+            ex('Split Squat', '3', '3 @ 85%', 8, '', ''),
+            ex('Cable Rotation', '2', '5 each side', 7, '', YT.cableRot),
+            ex('Cossack Squat', '2', '5 each side', 6, '', ''),
+            ex('Hamstring Bridge ISO', '2', '20 sec', 6, '', ''),
+          ]},
+        { label: 'Day 2 — Upper + Top Speed',
+          speed: [
+            spd('Curved Sprint', '3 reps', 'Lean into the curve — full recovery', ''),
+          ],
+          exercises: [
+            ex('Push Press', '3', '2 @ 85–90%', 9, 'Leg drive, fast hands', YT.pushPress),
+            ex('Bench Press', '4', '3 @ 85%', 8, '', YT.bbBench),
+            ex('ITY', '2', '8', 6, 'Shoulder health — light and clean', ''),
+            ex('Bear Crawl', '2', '20 yards', 6, '', ''),
+            ex('Deep-Range Pullover', '2', '8', 6, '', ''),
+          ]},
+      ],
+    },
+  ];
+  const buildTemplateJsonV3 = (t) => JSON.stringify({ days: t.days, notes: t.notes || [] });
+  {
+    const done = db.prepare("SELECT value FROM settings WHERE key = 'lifting_rebuild_v3'").get();
+    if (!done) {
+      const now = new Date().toISOString();
+      // Remove the generic v2 templates — but ONLY if Bobby never touched
+      // them (byte-identical to what v2 generated). His customizations stay.
+      let removed = 0;
+      for (const old of LIFTING_TEMPLATES_V2) {
+        const row = db.prepare('SELECT * FROM lifting_programs WHERE name = ? AND is_template = 1').get(old.name);
+        if (!row) continue;
+        let days = null;
+        try { days = JSON.parse(row.program_json || '{}').days; } catch (e) {}
+        if (days && JSON.stringify(days) === JSON.stringify(old.days)) {
+          db.prepare('DELETE FROM lifting_programs WHERE id = ?').run(row.id);
+          removed++;
+        }
+      }
+      // Insert the method templates (skip any name Bobby already has).
+      let added = 0;
+      for (const t of LIFTING_TEMPLATES_V3) {
+        const exists = db.prepare('SELECT id FROM lifting_programs WHERE name = ? AND is_template = 1').get(t.name);
+        if (!exists) {
+          db.prepare('INSERT INTO lifting_programs (name, is_template, program_json, updated_at) VALUES (?, 1, ?, ?)')
+            .run(t.name, buildTemplateJsonV3(t), now);
+          added++;
+        }
+      }
+      db.prepare("INSERT INTO settings (key, value) VALUES ('lifting_rebuild_v3', '1')").run();
+      console.log(`Lifting rebuild v3: removed ${removed} generic template(s), added ${added} method template(s).`);
     }
   }
 }
