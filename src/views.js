@@ -3845,7 +3845,7 @@ function videosPage(user, cats, activeCat, videos) {
 
 function videoWatchPage(user, v) {
   const fileId = encodeURIComponent(v.drive_file_id);
-  const direct = `https://drive.google.com/uc?export=download&id=${fileId}`;
+  const preview = `https://drive.google.com/file/d/${fileId}/preview`;
   const disp = (v.custom_name && v.custom_name.trim()) || v.name;
   return layout({
     title: disp,
@@ -3854,9 +3854,7 @@ function videoWatchPage(user, v) {
     body: `<p><a href="/videos?cat=${encodeURIComponent(v.category)}">\u2190 ${esc(cleanCat(v.category))}</a></p>
     <h1 class="page-title">${esc(disp)}</h1>
     <div class="video-player">
-      <video controls playsinline preload="metadata" src="${direct}" style="width:100%;max-height:72vh;background:#000">
-        Your browser can't play this video. <a href="${direct}">Download it here</a>.
-      </video>
+      <iframe src="${preview}" title="${esc(disp)}" allow="autoplay; fullscreen" allowfullscreen style="width:100%;aspect-ratio:16/9;border:0;background:#000"></iframe>
     </div>
     <p class="hint">Use the fullscreen button on the player for the biggest view. <a href="https://drive.google.com/file/d/${fileId}/view" target="_blank" rel="noopener">Open in Drive</a> if it won't play.</p>`,
   });
