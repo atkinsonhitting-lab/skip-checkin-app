@@ -5202,7 +5202,7 @@ app.get('/notebook', requireLogin, (req, res) => {
   const players = db
     .prepare('SELECT * FROM study_players WHERE user_id = ? ORDER BY created_at DESC')
     .all(req.user.id);
-  res.send(views.notebookPage(req.user, checkins, notes, players, req.query.saved === '1', { kinds, kind }));
+  res.send(views.notebookPage(req.user, checkins, notes, players, req.query.saved === '1', { kinds, kind }, { streak: streakData(req.user.id) }));
 });
 
 // Skip's read — pattern notes at the top of the Notebook (Sep 23 2026).

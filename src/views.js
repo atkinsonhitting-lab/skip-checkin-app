@@ -458,78 +458,7 @@ function privacyPage() {
   ]);
 }
 
-function userHome(user, extras) {
-  const { whatWorks = {}, avgScore = null, checkinCount = 0, recent = [], streak = null, pushOn = false, pushEnabled = false, precheckin = null, showBiblePopup = false } = extras || {};
-  // Unread coach messages + no push: point them at the inbox (the Messages
-  // page itself carries the turn-on-notifications nudge).
-  const msgBanner =
-    user.unreadMessages > 0 && !pushOn
-      ? `<div class="card push-card"><p style="margin:0 0 10px"><strong>You have messages from Coach.</strong> <span class="hint">Turn on notifications so you never miss one.</span></p><p style="margin:0"><a href="/messages" class="btn-primary">Read messages</a></p></div>`
-      : '';
-  let streakCard = '';
-  if (streak) {
-    const n = streak.streak || 0;
-    if (n >= 1) {
-      const line =
-        n >= 30 ? '30 days. You\u2019re a different player.' :
-        n >= 7 ? 'A full week \u2014 that\u2019s how habits are built.' :
-        n >= 2 ? 'Keep it rolling.' :
-        'Check in tomorrow to build it.';
-      streakCard = `<div class="card streak-card"><div class="streak-num">${n}</div><div><div class="streak-label">day streak</div><div class="hint">${line}</div></div></div>`;
-    } else if (streak.daysSince != null && streak.daysSince >= 1) {
-      streakCard = `<div class="card"><p style="margin:0">Streak reset \u2014 last check-in ${streak.daysSince} day${streak.daysSince === 1 ? '' : 's'} ago. Today starts a new one.</p></div>`;
-    }
-  }
-  const pushCard = (pushEnabled && !pushOn)
-    ? `<div class="card push-card">
-        <p style="margin:0 0 10px"><strong>Never miss a day.</strong> <span class="hint">Turn on reminders \u2014 get a nudge on days you haven\u2019t checked in.</span></p>
-        <p style="margin:0"><button type="button" class="btn-primary" id="push-enable-btn" style="margin-top:0">Turn on reminders</button></p>
-      </div>`
-    : '';
-  const head = avgScore !== null
-    ? `<div class="level-head"><p class="hint">Your read across ${checkinCount} session${checkinCount === 1 ? '' : 's'}:</p>${levelLine(avgScore)}</div>`
-    : `<p class="hint">No check-ins yet. Log your first session and the app starts learning your game.</p>`;
-  const preCard = precheckin
-    ? `<div class="card"><p style="margin:0 0 6px"><strong>Today's intent</strong> <span class="hint-inline">${precheckin.kind === 'game' ? 'Pregame / Live ABs' : 'Cage'}</span></p>
-        ${precheckin.focus ? `<p style="margin:0 0 4px">&ldquo;${esc(precheckin.focus)}&rdquo;</p>` : ''}
-        ${precheckin.plan ? `<p class="hint" style="margin:0 0 4px">Plan: ${esc(precheckin.plan)}</p>` : ''}
-        ${precheckin.flush ? `<p class="hint" style="margin:0">Flushing: ${esc(precheckin.flush)}</p>` : ''}
-        <p class="hint" style="margin:8px 0 0"><a href="/precheckin?kind=${precheckin.kind === 'game' ? 'game' : 'cage'}">Update it →</a></p></div>`
-    : `<div class="card"><p style="margin:0"><strong>Before you hit?</strong> <span class="hint">Set your intent in two minutes — what you're working on and how. Optional.</span> <a href="/precheckin">Pre-hit check-in →</a></p></div>`;
-  // Bible study opt-in popup (Sep 23 2026, Bobby): appears on app open until
-  // the athlete answers. Yes/No posts once; the popup never shows again.
-  const biblePopup = showBiblePopup ? `
-    <div id="bible-popup-overlay" class="modal-overlay">
-      <div class="card modal-card" role="dialog" aria-modal="true" aria-labelledby="bible-popup-title">
-        <h2 id="bible-popup-title" style="margin-top:0">New: Daily Bible Study</h2>
-        <p>We&apos;re adding an optional daily Bible study &mdash; a verse plus a short breakdown in the Lock In tab. Only for guys who want it.</p>
-        <div class="modal-actions">
-          <button type="button" class="btn-primary" id="bible-yes">Yes, count me in</button>
-          <button type="button" class="btn-secondary" id="bible-no">No thanks</button>
-        </div>
-      </div>
-    </div>
-    ` : '';
-  return layout({
-    title: 'Home',
-    user,
-    tabs: userTabs('home', user),
-    body: `<h1 class="page-title">What's up, ${esc(user.displayName)}</h1>
-    ${biblePopup}
-    ${msgBanner}
-    <div class="card cta-card">
-      <p class="skip-intro">Check in daily. Every session gets a read, and the app learns what your best days look like.</p>
-      <a href="/checkin" class="btn-primary">Check in today's session</a>
-    </div>
-    ${user.viewAsRestricted ? '' : preCard}
-    ${head}
-    ${pushOn ? '' : streakCard}
-    ${pushCard}
-    ${user.viewAsRestricted ? '' : whatWorksSection(whatWorks)}
-    ${recent.length ? `<h2 class="section-head">Recent</h2>${recent.map((c) => checkinCard(c, { restricted: user.viewAsRestricted })).join('')}<p><a href="/notebook">See your notebook →</a></p>` : ''}
-    ${pushOn ? streakCard : ''}`,
-  });
-}
+
 
 // Skip's read on this hitter's check-ins: which cues to use, which to trash,
 // whether routine days beat other days, and routine suggestions built from
@@ -1018,7 +947,24 @@ function routinePage(user, drills, error, drillNames, stations) {
 
 const LEARN_CATEGORIES = ['Mechanics', 'Mental', 'Approach', 'Drills', 'Other'];
 
-function notebookPage(user, checkins, notes, players, justSubmitted, filter) {
+function notebookPage(user, checkins, notes, players, justSubmitted, filter, extras) {
+  const streak = (extras && extras.streak) || null;
+  // Streak card (absorbed from the old Home tab — Bobby, Sep 23 2026: Home is
+  // redundant, Notebook is the daily loop home).
+  let streakCard = '';
+  if (streak) {
+    const n = streak.streak || 0;
+    if (n >= 1) {
+      const line =
+        n >= 30 ? '30 days. You\u2019re a different player.' :
+        n >= 7 ? 'A full week \u2014 that\u2019s how habits are built.' :
+        n >= 2 ? 'Keep it rolling.' :
+        'Check in tomorrow to build it.';
+      streakCard = `<div class="card streak-card"><div class="streak-num">${n}</div><div><div class="streak-label">day streak</div><div class="hint">${line}</div></div></div>`;
+    } else if (streak.daysSince != null && streak.daysSince >= 1) {
+      streakCard = `<div class="card"><p style="margin:0">Streak reset \u2014 last check-in ${streak.daysSince} day${streak.daysSince === 1 ? '' : 's'} ago. Today starts a new one.</p></div>`;
+    }
+  }
   const kindLabels = { hitting: 'Hitting', pitching: 'Throwing', combined: 'Both' };
   const f = filter || {};
   const activeKind = f.kind || 'all';
@@ -1077,6 +1023,7 @@ function notebookPage(user, checkins, notes, players, justSubmitted, filter) {
     body: `<h1 class="page-title">Notebook</h1>
     <div class="subnav"><a href="#checkins">Check-ins</a><a href="#notes">Notes</a></div>
     ${justSubmitted ? `<div class="success">Check-in saved. Good work.</div>` : ''}
+    ${streakCard}
     <div id="skips-read" class="skips-read" hidden>
       <div class="skips-read-head"><span class="skips-read-title">👀 Skip's read</span><span class="hint-inline">patterns from your check-ins</span></div>
       <div id="skips-read-body"><p class="hint">Reading your check-ins…</p></div>
@@ -4445,7 +4392,6 @@ module.exports = {
   parentConsentResendPage,
   termsPage,
   privacyPage,
-  userHome,
   checkinForm,
   pitchingCheckinForm,
   combinedCheckinForm,
