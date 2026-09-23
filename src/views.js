@@ -1842,8 +1842,13 @@ function coachOrganizationsPage(user, organizations, error, addedId) {
 // Remote program first, then in-person hitters, then latest check-ins.
 // Nothing else lives on this page — analytics, orgs, and applications
 // sit behind links. Org coaches keep the existing dashboard below.
-function coachHomeManage(user, quiet, latest, pending, pushOn, leads, myGuys) {
+function coachHomeManage(user, quiet, latest, pending, pushOn, leads, myGuys, bibleOptIns) {
   const g = myGuys || { remote: [], inPerson: [] };
+  const bibleRows = (bibleOptIns || []).map((b) =>
+    `<a class="ppl-row" href="/coach/user/${encodeURIComponent(b.email)}">
+      <span class="ppl-main"><strong>${esc(b.name || b.email)}</strong>
+      <span class="hint-inline">daily verse opt-in</span></span>
+      <span class="org-chev" aria-hidden="true">›</span></a>`).join('');
   const lastTxt = (p) => {
     if (p.checkedToday) return 'checked in today';
     if (!p.last) return 'no check-ins yet';
@@ -1912,6 +1917,8 @@ function coachHomeManage(user, quiet, latest, pending, pushOn, leads, myGuys) {
     ${attention}
     ${guySection('Remote program', g.remote)}
     ${guySection('In-person hitters', g.inPerson)}
+    ${bibleRows ? `<div class="dash-sec-head"><h2 class="section-head" style="margin:0">📖 Bible Study</h2></div>
+      <div class="card ppl-list">${bibleRows}</div>` : ''}
     ${checkRows ? `<h2 class="section-head">Latest check-ins</h2><div class="card ppl-list">${checkRows}</div>` : ''}
     <h2 class="section-head">More</h2>
     <div class="card ppl-list">
@@ -1928,10 +1935,10 @@ function coachHomeManage(user, quiet, latest, pending, pushOn, leads, myGuys) {
   });
 }
 
-function coachHomePage(user, quiet, latest, pending, pushOn, analytics, leads, myGuys) {
+function coachHomePage(user, quiet, latest, pending, pushOn, analytics, leads, myGuys, bibleOptIns) {
   // Bobby's manage-first dashboard (Sep 23 2026): short page, his programs
   // only. Org coaches keep the full dashboard below.
-  if (myGuys && !user.organizationId) return coachHomeManage(user, quiet, latest, pending, pushOn, leads, myGuys);
+  if (myGuys && !user.organizationId) return coachHomeManage(user, quiet, latest, pending, pushOn, leads, myGuys, bibleOptIns);
   const canEdit = user.role === 'coach' && user.canEdit !== false;
   // Organization coaches see which program (and team) they're scoped to.
   const orgBanner = user.role === 'coach' && user.organizationName
