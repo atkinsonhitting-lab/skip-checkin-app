@@ -731,3 +731,77 @@
     if (!cb.checked) input.value = '';
   });
 })();
+
+// Talk it out (Sep 23 2026): dictate the whole check-in, Skip parses it into
+// the 12 fields. Uses Web Speech API for transcription.
+(function () {
+  const btn = document.getElementById('talk-it-out');
+  if (!btn) return;
+  const status = document.getElementById('talk-status');
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    btn.style.display = 'none';
+    return;
+  }
+  const rec = new SR();
+  rec.continuous = true;
+  rec.interimResults = true;
+  rec.lang = 'en-US';
+  let transcript = '';
+  let listening = false;
+  const setStatus = (t) => { if (status) { status.style.display = t ? 'block' : 'none'; status.textContent = t; } };
+  rec.onresult = (ev) => {
+    transcript = Array.from(ev.results).map((r) => r[0].transcript).join(' ');
+    setStatus('Listening… "' + transcript.slice(-60) + '" — tap again to stop');
+  };
+  rec.onerror = () => { listening = false; btn.textContent = '🎙 Talk it out'; setStatus(''); };
+  rec.onend = () => {
+    if (!listening) return;
+    listening = false;
+    btn.textContent = '🎙 Talk it out';
+    if (!transcript.trim()) { setStatus(''); return; }
+    setStatus('Skip is sorting that out…');
+    fetch('/api/checkin/parse', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ transcript: transcript.trim() }),
+    })
+      .then((r) => r.json())
+      .then((d) => {
+        if (!d.ok || !d.fields) { setStatus('Couldn\u2019t parse that — just fill it in.'); return; }
+        const f = d.fields;
+        const setRadio = (name, val) => {
+          if (!val) return;
+          const el = document.querySelector(`input[name="${name}"][value="${val}"]`);
+          if (el) el.checked = true;
+        };
+        const setText = (name, val) => {
+          if (!val) return;
+          const el = document.querySelector(`[name="${name}"]`);
+          if (el) el.value = val;
+        };
+        setRadio('session_type', f.session_type);
+        setRadio('routine_followed', f.routine_followed);
+        setRadio('swing_feel', f.swing_feel);
+        setRadio('timing', f.timing);
+        setRadio('contact_quality', f.contact_quality);
+        setRadio('approach_score', f.approach_score);
+        setText('main_focus', f.main_focus);
+        setText('felt_good', f.felt_good);
+        setText('biggest_struggle', f.biggest_struggle);
+        setText('adjustment_helped', f.adjustment_helped);
+        setText('learned', f.learned);
+        setText('whats_next', f.whats_next);
+        setStatus('Done — check it over and hit submit.');
+      })
+      .catch(() => setStatus('Something went wrong — just fill it in.'));
+  };
+  btn.addEventListener('click', () => {
+    if (listening) { listening = false; rec.stop(); return; }
+    transcript = '';
+    listening = true;
+    btn.textContent = '⏹ Stop talking';
+    setStatus('Listening… talk through your session');
+    try { rec.start(); } catch (e) { listening = false; }
+  });
+})();

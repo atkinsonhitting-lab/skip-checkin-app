@@ -1062,9 +1062,18 @@ CREATE INDEX IF NOT EXISTS idx_precheckins_user_time ON pre_checkins(user_id, cr
   add('no_throw_note', "TEXT NOT NULL DEFAULT ''");
   add('felt_good', "TEXT NOT NULL DEFAULT ''");
   add('what_was_working', "TEXT NOT NULL DEFAULT ''");
-  add('biggest_struggle', "TEXT NOT NULL DEFAULT ''");
   add('hitting_score', 'REAL');
   add('pitching_score', 'REAL');
+  // Bobby's 12-question check-in (Sep 23 2026)
+  add('session_type', "TEXT NOT NULL DEFAULT ''");
+  add('routine_followed', "TEXT NOT NULL DEFAULT ''");
+  add('swing_feel', 'INTEGER');
+  add('timing', "TEXT NOT NULL DEFAULT ''");
+  add('contact_quality', 'INTEGER');
+  add('approach_score', 'INTEGER');
+  add('main_focus', "TEXT NOT NULL DEFAULT ''");
+  add('adjustment_helped', "TEXT NOT NULL DEFAULT ''");
+  add('learned', "TEXT NOT NULL DEFAULT ''");
   const pcols = db.prepare('PRAGMA table_info(pre_checkins)').all().map((c) => c.name);
   if (!pcols.includes('throw_intent')) {
     db.exec("ALTER TABLE pre_checkins ADD COLUMN throw_intent TEXT NOT NULL DEFAULT '';");

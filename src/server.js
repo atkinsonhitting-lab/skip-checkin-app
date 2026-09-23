@@ -2275,6 +2275,35 @@ app.post('/api/bible-study-choice', requireLogin, (req, res) => {
   db.prepare('UPDATE users SET bible_study = ? WHERE id = ?').run(c, req.user.id);
   res.json({ ok: true });
 });
+// Talk it out (Sep 23 2026): hitter dictates their session, Gemini parses the
+// transcript into the 12 check-in fields. Returns JSON the client uses to
+// fill the form for confirmation.
+app.post('/api/checkin/parse', requireLogin, async (req, res) => {
+  if (req.user.role !== 'athlete') return res.status(403).json({ error: 'athletes only' });
+  const transcript = String((req.body || {}).transcript || '').trim().slice(0, 4000);
+  if (!transcript) return res.status(400).json({ error: 'no transcript' });
+  const system = `You parse a hitter's spoken check-in into structured fields. Reply with ONLY a JSON object, no other text. Fields:
+session_type: one of "game", "cage", "live_abs", "team_practice" (guess from context, "" if unclear)
+routine_followed: one of "yes", "mostly", "no" ("" if not mentioned)
+swing_feel: 1-5 integer (how the swing felt, "" if not mentioned)
+timing: one of "early", "on_time", "late", "inconsistent" ("" if not mentioned)
+contact_quality: 1-5 integer ("" if not mentioned)
+approach_score: 1-5 integer (approach and decision-making, "" if not mentioned)
+main_focus: string (what they focused on, "" if not mentioned)
+felt_good: string (what felt good, "" if not mentioned)
+biggest_struggle: string (what they struggled with, "" if not mentioned)
+adjustment_helped: string (what adjustment or feel helped, "" if not mentioned)
+learned: string (what they learned about themselves, "" if not mentioned)
+whats_next: string (their one focus for next time, "" if not mentioned)
+Infer ratings from their words (e.g. "felt great" = 5, "terrible" = 1, "pretty good" = 4). Keep text fields to one or two sentences, in their voice.`;
+  try {
+    const raw = await geminiText(system, transcript, 800);
+    const json = JSON.parse(raw.replace(/^```json\s*|\s*```$/g, '').trim());
+    res.json({ ok: true, fields: json });
+  } catch (e) {
+    res.status(500).json({ error: 'parse_failed' });
+  }
+});
 app.post('/api/push/subscribe', requireLogin, (req, res) => {
   const sub = req.body && req.body.subscription;
   if (!sub || !sub.endpoint || !sub.keys) return res.status(400).json({ error: 'bad subscription' });
@@ -4267,55 +4296,50 @@ app.post('/checkin', requireLogin, (req, res) => {
   // The hitting form is for hitters; pitchers and two-ways have their own.
   if ((req.user.playerType || 'hitter') !== 'hitter') return res.redirect('/checkin');
   const b = req.body;
-  const fail = (msg) => res.send(views.checkinForm(req.user, msg, checkinValues(b), data.drillNames(), getRoutine(req.user.id), recentDrillGroups(req.user.id)));
-  if (!ENVIRONMENTS.includes(b.environment)) {
-    return fail('Pick the environment you were in.');
+  const fail = (msg) => res.send(views.checkinForm(req.user, msg, b, data.drillNames(), getRoutine(req.user.id), recentDrillGroups(req.user.id)));
+  // Bobby's 12-question form (Sep 23 2026)
+  const sessionTypes = ['game', 'cage', 'live_abs', 'team_practice'];
+  const routineOpts = ['yes', 'mostly', 'no'];
+  const timingOpts = ['early', 'on_time', 'late', 'inconsistent'];
+  if (!sessionTypes.includes(b.session_type)) {
+    return fail('Pick what you did today — game, cage, live ABs, or team practice.');
   }
-  const feel = parseRating(b.feel);
-  const confidence = parseRating(b.confidence);
-  const focus = parseRating(b.focus);
-  const difficulty = parseRating(b.difficulty);
-  if (feel === null || confidence === null || focus === null || difficulty === null) {
-    return fail('Rate feel, confidence, focus, and difficulty from 1 to 10.');
+  const star = (v) => { const n = parseInt(v, 10); return n >= 1 && n <= 5 ? n : null; };
+  const swingFeel = star(b.swing_feel);
+  const contactQuality = star(b.contact_quality);
+  const approachScore = star(b.approach_score);
+  if (swingFeel === null || contactQuality === null || approachScore === null) {
+    return fail('Rate your swing, contact, and approach from 1 to 5 stars.');
   }
-  // Session notes are required (Bobby, Sep 17 2026) — Skip coaches from them.
-  if (!(b.session_notes || '').trim()) {
-    return fail('Write a few session notes — what you felt, what you saw, what was off.');
-  }
-  // Drills are optional (Bobby, Sep 17 2026): "What did you do today?" with
-  // blank fine — no Yes/No gate anymore. The 7 section inputs are parsed
-  // into one drills_done array (section order); explicit (tag)s are kept.
-  const drills = parseSectionDrills(b);
-  const sessionScore = scoreBreakdown(
-    feel,
-    confidence,
-    focus,
-    difficulty,
-    `${b.session_notes || ''} ${b.what_worked || ''}`
-  ).total;
+  // Session score: avg of the three 1-5 stars, scaled to 1-10.
+  const sessionScore = Math.round(((swingFeel + contactQuality + approachScore) / 3) * 2 * 10) / 10;
   const tier = scoreTier(sessionScore);
   const info = db
     .prepare(
       `INSERT INTO checkins
-       (user_id, athlete_name, created_at, environment, drills_done, feel, confidence, focus,
-        difficulty, session_score, score_tier, session_notes, what_worked, whats_next)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       (user_id, athlete_name, created_at, session_type, routine_followed, swing_feel, timing,
+        contact_quality, approach_score, main_focus, felt_good, biggest_struggle,
+        adjustment_helped, learned, whats_next, session_score, score_tier)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       req.user.id,
       req.user.athleteName,
       new Date().toISOString(),
-      b.environment,
-      JSON.stringify(drills),
-      feel,
-      confidence,
-      focus,
-      difficulty,
+      b.session_type,
+      routineOpts.includes(b.routine_followed) ? b.routine_followed : '',
+      swingFeel,
+      timingOpts.includes(b.timing) ? b.timing : '',
+      contactQuality,
+      approachScore,
+      (b.main_focus || '').trim().slice(0, 300),
+      (b.felt_good || '').trim().slice(0, 300),
+      (b.biggest_struggle || '').trim().slice(0, 300),
+      (b.adjustment_helped || '').trim().slice(0, 300),
+      (b.learned || '').trim().slice(0, 300),
+      (b.whats_next || '').trim().slice(0, 300),
       sessionScore,
-      tier,
-      (b.session_notes || '').trim(),
-      (b.what_worked || '').trim(),
-      (b.whats_next || '').trim()
+      tier
     );
   notifyMyPlayerCheckin(req.user.id, req.user.displayName, '/coach/user/' + encodeURIComponent(req.user.email)).catch((e) => console.warn('checkin push failed:', e.message));
   res.redirect(`/checkin/score/${info.lastInsertRowid}`);

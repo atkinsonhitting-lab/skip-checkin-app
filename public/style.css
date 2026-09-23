@@ -927,3 +927,12 @@ a.stat-card { padding: 14px 8px; }
 .sliders-grid .hint-inline { display: none; }
 .sliders-grid .slider-ends { display: none; }
 @media (max-width: 380px) { .sliders-grid { grid-template-columns: 1fr 1fr; gap: 2px 12px; } }
+
+/* Star ratings for check-in (Sep 23 2026) */
+.stars { display: flex; gap: 8px; margin: 6px 0 12px; }
+.star { cursor: pointer; }
+.star input { display: none; }
+.star span { font-size: 32px; color: #ddd; transition: color 0.15s; }
+.star input:checked + span { color: #fbbf24; }
+/* Talk it out button */
+#talk-it-out { font-size: 17px; padding: 12px; }

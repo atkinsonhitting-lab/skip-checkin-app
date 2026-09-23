@@ -737,51 +737,45 @@ function checkinForm(user, error, values, drillNames, routine, recentGroups, act
       return `<input type="hidden" id="${s.field}" name="${s.field}" value="${esc(secVal)}">`;
     })
     .join('');
+  // Bobby's 12-question check-in (Sep 23 2026)
+  const pill = (name, options, val) => `
+    <div class="pills">${options.map(([optVal, label]) =>
+      `<label class="pill"><input type="radio" name="${name}" value="${optVal}"${val === optVal ? ' checked' : ''}><span>${label}</span></label>`
+    ).join('')}</div>`;
+  const stars = (name, val) => `
+    <div class="stars">${[1, 2, 3, 4, 5].map((n) =>
+      `<label class="star"><input type="radio" name="${name}" value="${n}"${String(val) === String(n) ? ' checked' : ''}><span>★</span></label>`
+    ).join('')}</div>`;
+  const short = (name, label, val, placeholder) => `
+    <label>${esc(label)}<span class="talk-wrap"><input type="text" id="${name}" name="${name}" value="${esc(val || '')}" placeholder="${esc(placeholder || '')}" maxlength="300"><button type="button" class="mic-btn" data-target="${name}" aria-label="Dictate instead of typing">🎙</button></span></label>`;
   return layout({
     title: 'Check In',
     user,
     tabs: userTabs('checkin', user),
     body: `<h1 class="page-title">${isEdit ? 'Edit check-in' : 'Check In'}</h1>
-    <div class="card"><p class="hint skip-intro">${isEdit ? 'Fix anything that wasn’t right. Saving updates your entry — the session date stays the same.' : 'Log your session. Give as much detail as you can — the more detail, the better the reads get.'}</p>
-    <form method="post" action="${isEdit ? esc(action) : '/checkin'}" class="form" data-validate="hitting">
+    <div class="card">
+    <button type="button" id="talk-it-out" class="btn btn-primary" style="width:100%;margin-bottom:12px">🎙 Talk it out</button>
+    <p class="hint" id="talk-status" style="display:none"></p>
+    <form method="post" action="${isEdit ? esc(action) : '/checkin'}" class="form" data-validate="hitting12">
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
-      <div class="field-label">Where were you?</div>
-      <div class="pills">${envPills}</div>
-      <div class="field-label">What did you do today?</div>
-      <p class="hint">Tap what you did, then list the drills for each.</p>
-      <div class="activity-checklist">
-        ${DRILL_SECTIONS.filter(s => s.key !== 'other').map((s) => {
-          const secVal = v[s.field] || (v.sections && v.sections[s.key]) || '';
-          const checked = secVal.trim() ? ' checked' : '';
-          return `<div class="activity-item">
-            <label class="activity-check">
-              <input type="checkbox" data-section="${s.key}"${checked}>
-              <span>${s.label}</span>
-            </label>
-            <input type="text" name="${s.field}" value="${esc(secVal)}" placeholder="What drills?" class="activity-drills"${checked ? '' : ' hidden'}>
-          </div>`;
-        }).join('')}
-        ${(() => {
-          const secVal = v['sec_other'] || (v.sections && v.sections['other']) || '';
-          const checked = secVal.trim() ? ' checked' : '';
-          return `<div class="activity-item">
-            <label class="activity-check">
-              <input type="checkbox" data-section="other"${checked}>
-              <span>Other</span>
-            </label>
-            <input type="text" name="sec_other" value="${esc(secVal)}" placeholder="What did you do?" class="activity-drills"${checked ? '' : ' hidden'}>
-          </div>`;
-        })()}
-      </div>
-      <div class="sliders-grid">
-      ${sliderField('feel', 'Feel', 'How good did you feel?', v.feel)}
-      ${sliderField('confidence', 'Confidence', 'How confident did you feel?', v.confidence)}
-      ${sliderField('focus', 'Focus', 'How locked in was your focus?', v.focus)}
-      ${sliderField('difficulty', 'Difficulty', 'How hard was the training?', v.difficulty, ['Easy', 'Brutal'], true)}
-      </div>
-      <script src="/checkin.js"></script>
-      <label>Session notes <span class="req" aria-hidden="true">*</span> <span class="hint-inline">(don't hold back — what you felt, what you saw, what was off)</span><span class="talk-wrap"><textarea id="session_notes" name="session_notes" rows="4" placeholder="How did it go? What did you feel?">${esc(v.session_notes || '')}</textarea><button type="button" class="mic-btn" data-target="session_notes" aria-label="Dictate instead of typing">🎙</button></span></label>
-      <label>What worked <span class="hint-inline">(be specific — the exact drill, cue, or feel)</span><span class="talk-wrap"><textarea id="what_worked" name="what_worked" rows="2" placeholder="What clicked today?">${esc(v.what_worked || '')}</textarea><button type="button" class="mic-btn" data-target="what_worked" aria-label="Dictate instead of typing">🎙</button></span></label>
+      <div class="field-label">1. What did you do today?</div>
+      ${pill('session_type', [['game', 'Game'], ['cage', 'Cage'], ['live_abs', 'Live ABs'], ['team_practice', 'Team Practice']], v.session_type)}
+      <div class="field-label">2. Did you follow your hitting routine? <a href="/routine" class="hint-inline">add/edit routine</a></div>
+      ${pill('routine_followed', [['yes', 'Yes'], ['mostly', 'Mostly'], ['no', 'No']], v.routine_followed)}
+      <div class="field-label">3. How did your swing feel today?</div>
+      ${stars('swing_feel', v.swing_feel)}
+      <div class="field-label">4. How was your timing?</div>
+      ${pill('timing', [['early', 'Early'], ['on_time', 'On Time'], ['late', 'Late'], ['inconsistent', 'Inconsistent']], v.timing)}
+      <div class="field-label">5. How was your contact quality?</div>
+      ${stars('contact_quality', v.contact_quality)}
+      <div class="field-label">6. How was your approach & decision-making?</div>
+      ${stars('approach_score', v.approach_score)}
+      ${short('main_focus', '7. What was your main focus today?', v.main_focus, 'One thing you locked in on')}
+      ${short('felt_good', '8. What felt good today?', v.felt_good, 'What clicked?')}
+      ${short('biggest_struggle', '9. What did you struggle with?', v.biggest_struggle, 'Be honest')}
+      ${short('adjustment_helped', '10. What adjustment or feel helped the most?', v.adjustment_helped, 'The thing that fixed it')}
+      ${short('learned', '11. What did you learn about yourself as a hitter today?', v.learned, '')}
+      ${short('whats_next', '12. What is your ONE focus for your next session/game?', v.whats_next, 'Just one')}
       <button type="submit" class="btn-primary">${isEdit ? 'Save changes' : 'Submit check-in'}</button>
     </form></div>`,
   });
@@ -1365,7 +1359,7 @@ function checkinCard(c, opts) {
   try { pitchesThrown = JSON.parse(c.pitches_thrown || '[]'); } catch (e) {}
   const score = `${c.session_score != null ? `<div class="checkin-score">
       ${levelLine(c.session_score, c.score_tier)}
-      ${restricted ? '' : `<span class="hint-inline">Feel ${esc(c.feel)} · Conf ${esc(c.confidence)} · Focus ${esc(c.focus)}${c.difficulty != null ? ` · Difficulty ${esc(c.difficulty)}` : ''}${c.command != null ? ` · Command ${esc(c.command)}` : ''}</span>`}
+      ${restricted ? '' : `<span class="hint-inline">${c.session_type ? esc(c.session_type.replace('_', ' ')) + ' · ' : ''}${c.swing_feel ? `Swing ${esc(c.swing_feel)}/5` : ''}${c.timing ? ` · Timing ${esc(c.timing.replace('_', ' '))}` : ''}${c.contact_quality ? ` · Contact ${esc(c.contact_quality)}/5` : ''}${c.approach_score ? ` · Approach ${esc(c.approach_score)}/5` : ''}${c.routine_followed ? ` · Routine: ${esc(c.routine_followed)}` : ''}</span>`}
       ${throwBits.length ? `<div class="hint-inline">${throwBits.join(' · ')}</div>` : ''}
       ${pitchesThrown.length ? `<div class="drill-chips">${pitchesThrown.map((p) => `<span class="chip">${esc(p)}</span>`).join('')}</div>` : ''}
     </div>` : ''}`;
@@ -1373,9 +1367,13 @@ function checkinCard(c, opts) {
   const read = `${skipReadBlock(c)}`;
   const notes = `${c.session_notes ? `<p>${esc(c.session_notes)}</p>` : ''}`;
   const reflections = [
+    c.main_focus ? `<div><span class="label">Main focus</span>${esc(c.main_focus)}</div>` : '',
     c.felt_good ? `<div><span class="label">What felt good</span>${esc(c.felt_good)}</div>` : '',
     c.what_was_working ? `<div><span class="label">What was working</span>${esc(c.what_was_working)}</div>` : '',
-    c.biggest_struggle ? `<div><span class="label">Biggest struggle</span>${esc(c.biggest_struggle)}</div>` : '',
+    c.biggest_struggle ? `<div><span class="label">Struggled with</span>${esc(c.biggest_struggle)}</div>` : '',
+    c.adjustment_helped ? `<div><span class="label">Adjustment that helped</span>${esc(c.adjustment_helped)}</div>` : '',
+    c.learned ? `<div><span class="label">Learned</span>${esc(c.learned)}</div>` : '',
+    c.whats_next ? `<div><span class="label">One focus for next time</span>${esc(c.whats_next)}</div>` : '',
     c.recovery_notes ? `<div><span class="label">Recovery work</span>${esc(c.recovery_notes)}</div>` : '',
     c.no_throw_note ? `<div><span class="label">Got better by</span>${esc(c.no_throw_note)}</div>` : '',
     c.what_worked ? `<div><span class="label">What worked</span>${esc(c.what_worked)}</div>` : '',
