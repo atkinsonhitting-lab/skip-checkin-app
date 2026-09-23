@@ -103,7 +103,7 @@ const TABBAR_HREFS = ['/mental-game', '/checkin', '/notebook', '/chat'];
 // in the bottom tab bar too.
 // Bottom tab bar for Bobby's remote hitters only (mobile). Program comes
 // before Check In — the program is the point of the app for these guys.
-const REMOTE_TABBAR_HREFS = ['/program', '/mental-game', '/checkin', '/notebook', '/chat'];
+const REMOTE_TABBAR_HREFS = ['/program', '/videos', '/mental-game', '/checkin', '/notebook', '/chat'];
 // Coach tab bar (Sep 2026, Bobby: Messages in the tab bar instead of Train
 // Skip): Bobby's coaching loop — Home (attention), My Players, Approvals
 // (badge), Messages (badge). Train Skip, Programs, Videos, Finances, and
@@ -226,6 +226,7 @@ function userTabs(active, user) {
   const isRemote = !!(user && user.remoteProgramId);
   const tabs = [];
   if (isRemote) tabs.push({ href: '/program', label: 'Program', active: active === 'program' });
+  if (isRemote) tabs.push({ href: '/videos', label: 'Videos', active: active === 'videos' });
   tabs.push(
     { href: '/mental-game', label: 'Lock In', active: active === 'mental' },
     { href: '/checkin', label: 'Check In', active: active === 'checkin' },
@@ -3745,8 +3746,13 @@ function programEditPage(user, p, profileEmail, hasLifting, progression, opts) {
   const grades = prog.grades && typeof prog.grades === 'object' ? prog.grades : {};
   const gradeFields = ['Load', 'Path', 'Connection', 'Timing', 'Power Production']
     .map(
-      (g) =>
-        `<label class="fld fld-inline">Grade — ${esc(g)}<input type="text" name="grade_${g.replace(/ /g, '_')}" value="${esc(grades[g] || '')}" maxlength="4" placeholder="B+"></label>`
+      (g) => {
+        const key = g.replace(/ /g, '_');
+        return `<div class="grade-edit-block">
+          <label class="fld fld-inline">Grade — ${esc(g)}<input type="text" name="grade_${key}" value="${esc(grades[g] || '')}" maxlength="4" placeholder="B+"></label>
+          <label class="fld">Why this grade?<input type="text" name="grade_why_${key}" value="${esc((prog.grade_whys || {})[g] || '')}" maxlength="200" placeholder="e.g. Late load, rushes forward..."></label>
+        </div>`;
+      }
     )
     .join('');
   const routine = Array.isArray(prog.routine) ? prog.routine : [];
@@ -5063,12 +5069,32 @@ function hittingPlanPage(user, p) {
   const plan = prog.hitting_plan || {};
   const athleteName = (p && p.athlete_name) || prog.athlete || 'Hitter';
 
-  // Grading sheet — the athlete's grades (Load, Path, Connection, Timing, Power)
+  // Grading sheet — the athlete's grades with why explanations
   const grades = prog.grades && typeof prog.grades === 'object' ? prog.grades : {};
+  const gradeWhys = prog.grade_whys && typeof prog.grade_whys === 'object' ? prog.grade_whys : {};
   const gradeEntries = Object.entries(grades).filter(([k, v]) => v && String(v).trim());
   const gradesHtml = gradeEntries.length
-    ? `<table class="doc-table grades-table"><tbody><tr>${gradeEntries.map(([k, v]) => `<th>${esc(k)}</th>`).join('')}</tr><tr>${gradeEntries.map(([k, v]) => `<td class="grade-val">${esc(String(v))}</td>`).join('')}</tr></tbody></table>`
+    ? `<table class="doc-table grades-table">
+        <thead><tr><th>Category</th><th>Grade</th><th>Why</th></tr></thead>
+        <tbody>${gradeEntries.map(([k, v]) => `<tr>
+          <td><strong>${esc(k)}</strong></td>
+          <td class="grade-val">${esc(String(v))}</td>
+          <td>${esc(gradeWhys[k] || '')}</td>
+        </tr>`).join('')}</tbody>
+      </table>`
     : '';
+
+  // Program details — strengths, adjustment, cues, mental framework
+  const strengths = Array.isArray(prog.strengths) ? prog.strengths.filter(Boolean) : [];
+  const strengthsHtml = strengths.length
+    ? `<ul class="doc-list">${strengths.map((s) => `<li>${esc(s)}</li>`).join('')}</ul>` : '';
+  const cues = prog.cues && typeof prog.cues === 'object' ? prog.cues : {};
+  const cueEntries = Object.entries(cues).filter(([k, v]) => v && String(v).trim());
+  const cuesHtml = cueEntries.length
+    ? `<ul class="doc-list">${cueEntries.map(([k, v]) => `<li><strong>${esc(k)}:</strong> ${esc(String(v))}</li>`).join('')}</ul>` : '';
+  const adjustmentHtml = prog.adjustment ? `<p>${esc(prog.adjustment)}</p>` : '';
+  const mentalHtml = prog.mental_framework ? `<p><strong>${esc(prog.mental_framework)}</strong></p>` : '';
+  const phaseHtml = prog.phase_emphasis ? `<p>${esc(prog.phase_emphasis)}</p>` : '';
 
   // Weekly schedule/calendar
   const schedule = Array.isArray(prog.schedule) ? prog.schedule : [];
@@ -5164,7 +5190,12 @@ function hittingPlanPage(user, p) {
       <h1 class="doc-title">Hitting Program</h1>
       <p class="doc-athlete">${esc(athleteName)}</p>
       <hr class="doc-rule">
-      ${gradesHtml ? `<section class="doc-section"><h2>Grades</h2>${gradesHtml}</section>` : ''}
+      ${gradesHtml ? `<section class="doc-section"><h2>Grades — Where You're At</h2>${gradesHtml}</section>` : ''}
+      ${phaseHtml ? `<section class="doc-section"><h2>Phase Focus</h2>${phaseHtml}</section>` : ''}
+      ${adjustmentHtml ? `<section class="doc-section"><h2>The Adjustment</h2>${adjustmentHtml}</section>` : ''}
+      ${strengthsHtml ? `<section class="doc-section"><h2>Strengths</h2>${strengthsHtml}</section>` : ''}
+      ${cuesHtml ? `<section class="doc-section"><h2>Your Cues</h2>${cuesHtml}</section>` : ''}
+      ${mentalHtml ? `<section class="doc-section"><h2>Mental Framework</h2>${mentalHtml}</section>` : ''}
       ${scheduleHtml ? `<section class="doc-section"><h2>Weekly Schedule</h2>${scheduleHtml}</section>` : ''}
       <section class="doc-section">
         <h2>Training Environments</h2>
