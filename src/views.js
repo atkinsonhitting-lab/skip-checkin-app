@@ -2839,9 +2839,11 @@ function programPage(user, p, opts) {
       content = `${weekStripTop}<div class="card"><p style="margin:0">${restCopy}</p></div>${YT_TOGGLE_SCRIPT}`;
     } else {
       // Bobby (Sep 23 2026): Start Lift goes at the very top of the lifting tab.
-      const topDay = days[effLday] || { exercises: [] };
-      const topTotal = realExercises(topDay.exercises).length;
-      const topStartBtn = topTotal > 0 ? startLiftButton(effLday, 0, topTotal) : '';
+      // Always show when there's a lifting day (not rest day).
+      const topStartBtn = `<a class="start-workout" href="/program/workout?lday=${effLday}">
+        <span class="start-workout-play">▶</span>
+        <span class="start-workout-text"><strong>Start Lift</strong>
+        <span>Walk through it — video + logging as you go</span></span></a>`;
       content = `${topStartBtn}${phaseBanner}${liftPrimer}${sessionOrder === 'hitting_first' ? `<p class=\"hint\">Hit first, then lift — you're warm, go straight to speed work. Ramp-up sets on main lifts still apply. Lifting-only day? Full Mobility tab first.</p>` : ''}${speedHtml}${medHtml}${liftSubTab(user, lifting, days, effLday, sub, checkoffs, today, o.liftData || {}, o.subs || {}, secBase, o.todayLdayIdx, o.sched, o.weekday)}${YT_TOGGLE_SCRIPT}`;
     }
   } else {
