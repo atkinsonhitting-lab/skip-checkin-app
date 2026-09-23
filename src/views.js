@@ -5120,9 +5120,9 @@ function hittingPlanPage(user, p) {
     const name = d.name || '';
     const cues = d.cues || '';
     const why = d.why || '';
-    const vol = d.volume || d.detail || '';
+    // Bobby (Sep 23 2026): no per-drill volume column — it's repetitive. One instruction covers it.
     const left = `<strong>${esc(name)}</strong>${cues ? ` -&gt; ${esc(cues)}` : ''}${why ? `<br><span class="why">Why? ${esc(why)}</span>` : ''}`;
-    return `<tr><td>${left}</td><td class="vol">${esc(vol)}</td></tr>`;
+    return `<tr><td>${left}</td></tr>`;
   };
 
   const tableRows = [];
@@ -5136,11 +5136,8 @@ function hittingPlanPage(user, p) {
   }
 
   const drillTableHtml = tableRows.length
-    ? `<table class="drill-table">
-        <thead><tr>
-          <th>Do these vs all progression types &mdash; tee, toss, and BP (or machine)</th>
-          <th>${schedule.length ? `Repeat ${schedule.length}x per week` : 'Volume'}</th>
-        </tr></thead>
+    ? `<p class="go-thru"><strong>Go through these drills 3-5x per week</strong> vs all progression types &mdash; tee, toss, and BP (or machine).</p>
+      <table class="drill-table">
         <tbody>${tableRows.join('')}</tbody>
       </table>
       <p class="why-note">Why? Most hitters struggle to blend their drills into their game swing once the ball starts coming in harder. By applying the same drills, feels, and cues during moving ball work, you train your body to execute under speed and pressure &mdash; not just in controlled settings.</p>
@@ -5212,6 +5209,7 @@ function hittingPlanPage(user, p) {
       .grade-list, .std-list { margin: 6px 0 12px 20px; padding: 0; font-size: 14px; }
       .grade-list li, .std-list li { margin: 4px 0; color: #222; }
       .need { font-size: 15px; background: #f5f5f5; padding: 10px 12px; border-radius: 4px; margin: 12px 0; }
+      .go-thru { background: #f0f0f0; padding: 10px 12px; border-radius: 4px; font-size: 15px; margin: 12px 0; text-align: center; }
       .drill-table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14px; }
       .drill-table th { background: #f0f0f0; border: 1px solid #999; padding: 8px 10px; text-align: left; font-size: 13px; }
       .drill-table td { border: 1px solid #999; padding: 8px 10px; vertical-align: top; }
