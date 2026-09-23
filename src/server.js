@@ -6189,7 +6189,7 @@ WHEN HE WANTS TO SKIP A QUESTION: if he asks to skip a question, just skip it �
 
 SUPPORT, NOT THERAPY: You're a coach, not a therapist or mental health professional — never diagnose mental health conditions (depression, anxiety disorders, eating disorders, anything like them) and never try to provide therapy. Struggling is normal — a lot of players feel this way, and it's fine to say so. Point him toward a real human: a parent, a coach, a counselor. If he talks about self-harm, hurting himself, or suicide: respond with care, don't try to counsel him through it — tell him to talk to a trusted adult right now, and give him the 988 Suicide and Crisis Lifeline: call or text 988, any time. This is a hard boundary — it overrides every playbook entry below, alongside rule 8.
 
-SAVING TO HIS MENTAL GAME TAB: if he shares a cue, mindset shift, routine piece, breathing tool, or reset he wants to keep, tell him: say 'add this to my mental game' followed by the thing, and you'll put it on his Mental Game tab for him.`;
+SAVING TO HIS MENTAL GAME TAB: if he shares a cue, mindset shift, routine piece, breathing tool, or reset he wants to keep, tell him: say 'add this to my lock in' followed by the thing, and you'll put it on his Lock In tab for him.`;
 
 // Phase 1 pitcher mode: Skip is a MIRROR, not a pitching mechanic. He coaches
 // from the pitcher's history and exact words — mental before physical — and
@@ -6214,7 +6214,7 @@ WHEN HE WANTS TO SKIP A QUESTION: if he asks to skip a question, just skip it �
 
 SUPPORT, NOT THERAPY: You're a coach, not a therapist or mental health professional — never diagnose mental health conditions (depression, anxiety disorders, eating disorders, anything like them) and never try to provide therapy. Struggling is normal — a lot of players feel this way, and it's fine to say so. Point him toward a real human: a parent, a coach, a counselor. If he talks about self-harm, hurting himself, or suicide: respond with care, don't try to counsel him through it — tell him to talk to a trusted adult right now, and give him the 988 Suicide and Crisis Lifeline: call or text 988, any time. This is a hard boundary — it overrides everything below, alongside the never-invent-a-cause rule.
 
-SAVING TO HIS MENTAL GAME TAB: if he shares a cue, mindset shift, routine piece, breathing tool, or reset he wants to keep, tell him: say 'add this to my mental game' followed by the thing, and you'll put it on his Mental Game tab for him.`;
+SAVING TO HIS MENTAL GAME TAB: if he shares a cue, mindset shift, routine piece, breathing tool, or reset he wants to keep, tell him: say 'add this to my lock in' followed by the thing, and you'll put it on his Lock In tab for him.`;
 
 // Two-way athletes get the hitting core, but hitting knowledge must NEVER be
 // applied to a throwing problem. This guard rides along with SKIP_CORE.
@@ -6595,11 +6595,11 @@ app.get('/chat', requireLogin, (req, res) => {
 });
 
 // "Add this to my mental game" — the hitter asks Coach Skip to save something
-// to their Mental Game tab from the chat. Returns the extracted content, or
+// to their Lock In tab from the chat. Returns the extracted content, or
 // null when the message isn't a save request.
 function extractMentalKey(message) {
   const triggers = [
-    'add this to my mental game',
+    'add this to my lock in',
     'save this to my mental game',
     'put this in my mental game',
     'add to my mental game',
@@ -6630,9 +6630,9 @@ app.post('/api/chat', requireLogin, async (req, res) => {
     if (keyContent.length > 3) {
       db.prepare('INSERT INTO mental_keys (user_id, content, created_at) VALUES (?, ?, ?)')
         .run(req.user.id, keyContent, now);
-      saveNote = `The hitter just asked you to save this to their Mental Game tab, and it's already saved there: "${keyContent}". Confirm briefly in your reply (one line) that it's on their Mental Game tab now.`;
+      saveNote = `The hitter just asked you to save this to their Lock In tab, and it's already saved there: "${keyContent}". Confirm briefly in your reply (one line) that it's on their Lock In tab now.`;
     } else {
-      saveNote = `The hitter said something like "add this to my mental game" but didn't include what to save. Ask them what they want on their Mental Game tab.`;
+      saveNote = `The hitter said something like "add this to my lock in" but didn't include what to save. Ask them what they want on their Lock In tab.`;
     }
   }
   db.prepare('INSERT INTO chat_messages (user_id, role, content, created_at) VALUES (?, ?, ?, ?)')

@@ -140,7 +140,7 @@ function userTabs(active, user) {
   // Mental Game is the landing tab (Sep 23 2026) — Home is gone. Athletes
   // open the app to today's exercise, the verse, and check-in.
   const tabs = [
-    { href: '/mental-game', label: 'Mental Game', active: active === 'mental' },
+    { href: '/mental-game', label: 'Lock In', active: active === 'mental' },
   ];
   // Program-first for athletes with an assigned remote/hybrid program:
   // Programs comes before Check In; everyone else keeps the old layout.
@@ -502,7 +502,7 @@ function userHome(user, extras) {
     <div id="bible-popup-overlay" class="modal-overlay">
       <div class="card modal-card" role="dialog" aria-modal="true" aria-labelledby="bible-popup-title">
         <h2 id="bible-popup-title" style="margin-top:0">New: Daily Bible Study</h2>
-        <p>We&apos;re adding an optional daily Bible study &mdash; a verse plus a short breakdown in the Mental Game tab. Only for guys who want it.</p>
+        <p>We&apos;re adding an optional daily Bible study &mdash; a verse plus a short breakdown in the Lock In tab. Only for guys who want it.</p>
         <div class="modal-actions">
           <button type="button" class="btn-primary" id="bible-yes">Yes, count me in</button>
           <button type="button" class="btn-secondary" id="bible-no">No thanks</button>
@@ -2909,7 +2909,7 @@ function biblePopupHtml() {
     <div id="bible-popup-overlay" class="modal-overlay">
       <div class="card modal-card" role="dialog" aria-modal="true" aria-labelledby="bible-popup-title">
         <h2 id="bible-popup-title" style="margin-top:0">New: Daily Bible Study</h2>
-        <p>We&apos;re adding an optional daily Bible study &mdash; a verse plus a short breakdown in the Mental Game tab. Only for guys who want it.</p>
+        <p>We&apos;re adding an optional daily Bible study &mdash; a verse plus a short breakdown in the Lock In tab. Only for guys who want it.</p>
         <div class="modal-actions">
           <button type="button" class="btn-primary" id="bible-yes">Yes, count me in</button>
           <button type="button" class="btn-secondary" id="bible-no">No thanks</button>
@@ -2969,10 +2969,10 @@ function mentalGamePage(user, data) {
       <a href="/checkin" class="btn btn-primary">Check in today's session</a>
     </div>` : '';
   return layout({
-    title: 'Mental Game',
+    title: 'Lock In',
     user,
     tabs: userTabs('mental', user),
-    body: `<h1 class="page-title">Mental Game</h1>
+    body: `<h1 class="page-title">Lock In</h1>
     ${showBiblePopup ? biblePopupHtml() : ''}
     ${checkinHtml}
     ${exerciseHtml}
