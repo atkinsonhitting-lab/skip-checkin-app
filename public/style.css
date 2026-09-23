@@ -901,24 +901,25 @@ a.stat-card { padding: 14px 8px; }
 .order-toggle { display: flex; align-items: center; gap: 8px; margin: 10px 0 4px; flex-wrap: wrap; }
 
 /* Lock In compact cards (Sep 23 2026) — tappable boxes, no long scroll */
-.lockin-card { border: 1px solid #e2e2e2; border-radius: 12px; margin: 10px 0; overflow: hidden; background: #fff; color: #1a1a1a; }
-.lockin-card.done { border-color: #22c55e; background: #f0fdf4; }
-.lockin-card-head { width: 100%; display: flex; align-items: center; gap: 12px; padding: 14px; background: none; border: none; cursor: pointer; text-align: left; font-size: 16px; }
-.lockin-check { font-size: 20px; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 50%; border: 2px solid #666; flex-shrink: 0; color: #666; background: #fff; }
-.lockin-card.done .lockin-check { background: #22c55e; border-color: #16a34a; color: #fff; }
+.lockin-card { border: 1px solid var(--line); border-radius: var(--radius); margin: 10px 0; overflow: hidden; background: var(--card); color: var(--text); }
+.lockin-card.done { border-color: var(--ok); background: #12241a; }
+.lockin-card-head { width: 100%; display: flex; align-items: center; gap: 12px; padding: 14px; background: none; border: none; cursor: pointer; text-align: left; font-size: 16px; color: var(--text); }
+.lockin-check { font-size: 20px; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 50%; border: 2px solid var(--muted); flex-shrink: 0; color: var(--muted); background: transparent; }
+.lockin-card.done .lockin-check { background: var(--ok); border-color: var(--ok); color: #fff; }
 .lockin-title { flex: 1; font-weight: 600; }
-.lockin-chevron { font-size: 20px; color: #999; transition: transform 0.2s; }
+.lockin-chevron { font-size: 20px; color: var(--muted); transition: transform 0.2s; }
 .lockin-card.open .lockin-chevron { transform: rotate(90deg); }
-.lockin-card-body { padding: 0 14px 14px; border-top: 1px solid #f0f0f0; }
-.section-title { font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px; color: #666; margin: 16px 0 8px; }
+.lockin-card-body { padding: 0 14px 14px; border-top: 1px solid var(--line); color: var(--text); }
+.lockin-card-body .hint { color: var(--muted); }
+.section-title { font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin: 16px 0 8px; }
 .routine-list { list-style: none; margin: 0 0 8px; padding: 0; }
-.routine-list li { padding: 8px 0; border-bottom: 1px solid #f0f0f0; }
+.routine-list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
 .routine-list label { display: flex; align-items: center; gap: 10px; cursor: pointer; }
 
 /* Game Day / Practice Day toggle (Sep 23 2026) */
 .gp-toggle { display: flex; gap: 8px; margin: 12px 0; }
-.gp-btn { flex: 1; padding: 10px; border: 2px solid #e2e2e2; border-radius: 10px; background: #fff; font-weight: 600; cursor: pointer; font-size: 15px; }
-.gp-btn.active { border-color: var(--accent); background: #f0f7ff; }
+.gp-btn { flex: 1; padding: 10px; border: 2px solid var(--line); border-radius: 10px; background: var(--bg2); color: var(--text); font-weight: 600; cursor: pointer; font-size: 15px; }
+.gp-btn.active { border-color: var(--red); background: #2a1210; }
 
 /* Check-in: compact 2x2 slider grid (Sep 23 2026) — Bobby: form too long */
 .sliders-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; margin: 8px 0; }

@@ -2330,6 +2330,13 @@ app.get('/mental-game', requireLogin, (req, res) => {
   const bibleOptIn = bsRow && bsRow.bible_study === 1;
   const checkedInToday = !!db.prepare("SELECT 1 FROM checkins WHERE user_id = ? AND date(created_at, 'unixepoch', 'localtime') = date('now', 'localtime')").get(req.user.id);
   // Routine data (Sep 23 2026)
+  const DEFAULT_MORNING = [
+    '10 slow breaths — feet on the ground, start calm',
+    'Say your keyword out loud',
+    'See 3 good at-bats in your head — feel them',
+    'Read your one focus for today',
+    'Move — stretch, walk, get the blood going',
+  ];
   const DEFAULT_PREGAME = [
     '3 slow breaths — feet on the ground, leave the day behind',
     'Say your keyword out loud',
@@ -2345,8 +2352,8 @@ app.get('/mental-game', requireLogin, (req, res) => {
   ];
   let routineRow = db.prepare('SELECT morning_json, pregame_json, prepractice_json FROM mental_routines WHERE user_id = ?').get(req.user.id);
   if (!routineRow) {
-    db.prepare(`INSERT INTO mental_routines (user_id, morning_json, pregame_json, prepractice_json, updated_at) VALUES (?, '[]', ?, ?, ?)`)
-      .run(req.user.id, JSON.stringify(DEFAULT_PREGAME.map(t => ({ text: t, done: false }))), JSON.stringify(DEFAULT_PRACTICE.map(t => ({ text: t, done: false }))), new Date().toISOString());
+    db.prepare(`INSERT INTO mental_routines (user_id, morning_json, pregame_json, prepractice_json, updated_at) VALUES (?, ?, ?, ?, ?)`)
+      .run(req.user.id, JSON.stringify(DEFAULT_MORNING.map(t => ({ text: t, done: false }))), JSON.stringify(DEFAULT_PREGAME.map(t => ({ text: t, done: false }))), JSON.stringify(DEFAULT_PRACTICE.map(t => ({ text: t, done: false }))), new Date().toISOString());
     routineRow = db.prepare('SELECT morning_json, pregame_json, prepractice_json FROM mental_routines WHERE user_id = ?').get(req.user.id);
   }
   const routineItems = JSON.parse(routineRow.morning_json || '[]');
