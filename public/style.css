@@ -223,6 +223,24 @@ body.drawer-open #drawer { transform: none; }
   padding: 16px; font-size: 17px; font-weight: 800; cursor: pointer;
 }
 .btn-primary:active { background: var(--red-dark); }
+.btn-secondary {
+  display: block; width: 100%; margin-top: 10px;
+  background: transparent; color: var(--ink); border: 2px solid #d8d8d8; border-radius: 10px;
+  padding: 14px; font-size: 16px; font-weight: 700; cursor: pointer;
+}
+.btn-secondary:active { background: #f0f0f0; }
+
+/* Bible study opt-in popup (Sep 23 2026): full-screen modal on app open. */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(0,0,0,.55);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+.modal-card { max-width: 420px; width: 100%; margin: 0; }
+.modal-card h2 { font-size: 20px; }
+.modal-actions { margin-top: 6px; }
+.modal-actions .btn-primary { margin-top: 12px; }
 
 .error { background: rgba(243,18,96,.12); border: 1px solid var(--bad); color: #ff8fab; padding: 12px; border-radius: 8px; margin-bottom: 12px; font-size: 14px; }
 .success { background: rgba(47,191,113,.12); border: 1px solid var(--ok); color: #7ee2a8; padding: 12px; border-radius: 8px; margin-bottom: 12px; font-size: 14px; }
@@ -748,6 +766,13 @@ a.stat-card { padding: 14px 8px; }
 .daypick { margin: 0; }
 .daypick select { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg2); color: var(--text); font-weight: 700; font-size: 14px; }
 .prog-h3 { font-size: 16px; font-weight: 800; margin: 16px 0 8px; }
+/* Numbered session-flow headers (Sep 2026): 1. Speed → 2. Power → 3. Lifts */
+.flow-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--accent, #d92323); color: #fff;
+  font-size: 13px; font-weight: 800; margin-right: 6px; vertical-align: 1px;
+}
 .checkrow { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); margin: 0; }
 .checkrow:last-child { border-bottom: none; }
 .checkrow.done .routine-name { text-decoration: line-through; opacity: 0.55; }
@@ -772,6 +797,33 @@ a.stat-card { padding: 14px 8px; }
 .hist-list { list-style: none; margin: 6px 0 0; padding: 0; }
 .hist-list li { padding: 3px 0; border-bottom: 1px dashed var(--line); font-size: 13px; }
 .hist-list li:last-child { border-bottom: none; }
+
+/* ---- Hevy-style set table (Sep 2026) ---- */
+.lift-name-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.set-progress { font-weight: 800; white-space: nowrap; }
+.lift-suggest { font-size: 13px; color: var(--muted); margin: 2px 0; }
+.set-table { width: 100%; border-collapse: collapse; margin: 8px 0 4px; font-size: 14px; }
+.set-table th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--muted); text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+.set-table th:last-child, .set-table td:last-child { text-align: center; }
+.set-table td { padding: 4px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.set-row.done .set-num { color: var(--green, #2e9e5b); font-weight: 800; }
+.set-num { font-weight: 800; width: 34px; }
+.set-prev { color: var(--muted); font-size: 13px; white-space: nowrap; }
+.set-form { display: flex; gap: 6px; align-items: center; }
+.set-form input { width: 64px; padding: 8px 6px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg2); color: var(--text); font-size: 14px; }
+.set-row.done .set-form input { opacity: 0.55; }
+.set-check { background: none; border: none; font-size: 24px; line-height: 1; cursor: pointer; padding: 4px; color: var(--muted); }
+.set-check.on { color: var(--green, #2e9e5b); }
+.set-check-form { margin: 0; display: inline; }
+.set-val { display: inline-block; min-width: 40px; }
+.set-actions { display: flex; gap: 8px; align-items: center; margin: 6px 0; flex-wrap: wrap; }
+.set-add { margin: 0; }
+.lift-rpe { display: flex; gap: 6px; align-items: center; margin: 0; }
+.lift-rpe select { padding: 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg2); color: var(--text); font-size: 14px; }
+@media (max-width: 420px) {
+  .set-form input { width: 56px; padding: 7px 4px; font-size: 13px; }
+  .set-prev { font-size: 12px; }
+}
 
 /* ---- Coach lifting pages ---- */
 .lift-tpl { margin-bottom: 10px; }
