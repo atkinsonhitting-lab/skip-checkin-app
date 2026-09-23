@@ -3210,7 +3210,6 @@ function mentalGamePage(user, data) {
           <span class="routine-hero-go">›</span>
         </button>
       </div>
-      <p style="text-align:center;margin:10px 0 0"><a href="/mental-game/routines/edit" class="btn btn-secondary btn-sm">Edit your routines</a></p>
     </div>
     ${exercise ? heroCard('exercise', '🧠', 'Daily Exercise',
       [
@@ -3219,6 +3218,7 @@ function mentalGamePage(user, data) {
         { text: 'Do this', detail: exercise.action, kind: 'step' },
       ],
       exerciseDone, '5 min') : ''}
+    <p style="text-align:center;margin:10px 0 0"><a href="/mental-game/routines/edit" class="btn btn-secondary btn-sm">Edit your routines</a></p>
     <div class="routine-player" id="routine-player" hidden>
       <div class="rp-top">
         <button type="button" class="rp-close" id="rp-close" aria-label="Close">✕</button>
