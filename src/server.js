@@ -1795,63 +1795,112 @@ function getProgram(id) {
   return { id: row.id, athlete_name: row.athlete_name, updated_at: row.updated_at, prog, session_order: row.session_order || 'hitting_first', component_order: row.component_order || '' };
 }
 // Hitting plan version — bump when buildHittingPlan logic changes to force regen of stale stored plans.
-const HITTING_PLAN_VERSION = 4;
-// Build a hitting-plan document from a program's routine blocks (Sep 23 2026).
-// Warmup = prep/mobility/daily-routine blocks (Bobby's prep work). Drills =
-// hitting blocks (tee/toss/BP/machine/game). Videos are NOT embedded — the
-// document points athletes to the Remote library.
+const HITTING_PLAN_VERSION = 5;
+// Build a hitting-plan document from Bobby's template (Sep 23 2026):
+// Eval (Key Strengths, Grades, Overall Grade, Need) + Plan (2-4 core drills
+// with Why? + sets/reps, frequency line, training environments at the bottom).
+// Template: ~/workspace/user/files/Atkinson_Hitting_Remote_Template.docx
+// Bobby: no Weekly Check-In Notes (the app does that), no mobility (lives in
+// lifting), no prep section — just Eval + Plan. Grades/strengths/adjustment
+// come straight from his sheets; the docs regenerate when the sheets change.
 function buildHittingPlan(prog) {
   const routine = Array.isArray(prog.routine) ? prog.routine : [];
-  const warmup = [];
-  const drills = [];
-  const medball = [];
-  // Bobby (Sep 23 2026): warmup is Prep Work ONLY — not Daily Routine, not generic warm, not mobility.
-  const isWarmupCat = (c) => /prep/i.test(c || '') && !/mobility/i.test(c || '');
-  const isMedballCat = (c) => /med\s*ball/i.test(c || '');
-  // Bobby (Sep 23 2026): mobility exercises NEVER go in the hitting doc — they live in lifting.
-  // Filter by name even if they're sitting inside a Prep Work block.
-  const isMobilityDrill = (name) => /90\/90|hip\s*switch|open\s*book|thoracic|cat-?cow|thread\s*the\s*needle|wall\s*slide|band\s*pull|knee-?to-?wall|ankle\s*circle|hip\s*circle|leg\s*swing|spiderman|lizard|pigeon|frog|t-spine|shoulder\s*car|hip\s*car/i.test(name || '');
-  // Map category → training environment for the drill progression
-  const envOf = (c) => {
-    const s = String(c || '').toLowerCase();
-    if (/front toss/i.test(c || '')) return 'Front Toss';
-    if (/side|toss|flip/i.test(c || '')) return 'Toss';
-    if (/tee/i.test(c || '')) return 'Tee';
-    if (/machine/i.test(c || '')) return 'Machine';
-    if (/\bbp\b|batting/i.test(c || '')) return 'BP';
-    if (/game/i.test(c || '')) return 'Game';
-    return 'Tee';
+  const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const athleteKey = norm(prog.athlete);
+
+  // Core drills per hitter (Bobby: 2-4 drills, never the full 33-53 sheet
+  // lists). Each "why" is written from the hitter's own adjustment + cues
+  // in the sheet data. Volumes/notes are pulled from the sheet below.
+  const CORE_DRILLS = {
+    'dylan kakuda': [
+      { name: 'Tracer Drill', why: 'Trains the launch position — bat tall with space from the body, no sway.' },
+      { name: 'Open 45 w/ stride', why: 'Loads around the hip (no sway) while working the barrel open-side.' },
+      { name: 'Kick Through', why: 'Drives the lower half through so the hips lead instead of swaying off the ball.' },
+      { name: 'Med Ball Drill', why: 'Feels the hip load and separation behind the barrel.' },
+    ],
+    'liam stoffel': [
+      { name: 'No Stride Launch', why: 'Pure coil and early barrel turn — no stride to cheat the load.' },
+      { name: 'Open 45 w Stride', why: 'Loads around the back hip while getting the barrel out front.' },
+      { name: 'Ball Drop Drill', why: 'Forces the barrel to get going fast early on a reaction.' },
+    ],
+    'ryan seddon': [
+      { name: 'Deep Tee Drill', why: 'Keeps the barrel in the zone deep instead of cutting across it.' },
+      { name: 'Hand Pump Drill', why: 'Connects the back hip and barrel so they move as one.' },
+      { name: 'Knob to Knee', why: 'Keeps the barrel behind the ball at launch.' },
+      { name: 'Banded Turns', why: 'Builds the connected turn — back hip and barrel working together.' },
+    ],
+    'sam chapman': [
+      { name: 'Punching Bag / Tire', why: 'Swings the barrel with the body, not the hands — deep and connected.' },
+      { name: 'Med Ball Drill', why: 'Feels the chest-over-the-plate posture driving the barrel.' },
+      { name: 'Kick Through Drill', why: 'Turns it deep — heel up, all one move.' },
+      { name: 'Ball Drop Drill', why: 'Trains waiting for it, then swinging the barrel late and deep.' },
+    ],
   };
-  const isHittingCat = (c) => /tee|toss|flip|bp\b|batting|machine|game|hit/i.test(c || '');
-  // Bobby (Sep 23 2026): these are TRAINING ENVIRONMENTS (conditions), not drills.
-  // They go at the bottom of the doc, not in the drill table.
-  const isEnvVariation = (name) => /open\s*angle|breaking\s*ball|velo|fastball|curve|slider|changeup|machine\s*work|game\s*swings?/i.test(name || '');
-  const envVariations = [];
+  const wanted = CORE_DRILLS[athleteKey] || [];
+
+  // First sheet occurrence of each drill -> volume + coach note.
+  const sheetInfo = {};
   for (const block of routine) {
-    const cat = block.category || '';
     const items = Array.isArray(block.items) ? block.items : [];
-    if (isMedballCat(cat)) {
-      for (const it of items) {
-        if (it.drill) medball.push({ name: it.drill, volume: it.volume || '', cues: '', why: '' });
-      }
-    } else if (isWarmupCat(cat)) {
-      for (const it of items) {
-        if (it.drill && !isMobilityDrill(it.drill)) warmup.push({ name: it.drill, detail: it.volume || '' });
-      }
-    } else if (isHittingCat(cat)) {
-      const env = envOf(cat);
-      for (const it of items) {
-        if (!it.drill || isMobilityDrill(it.drill)) continue;
-        // Environment variations go to the bottom, not the drill table
-        if (isEnvVariation(it.drill)) {
-          envVariations.push(it.drill);
-        } else {
-          drills.push({ name: it.drill, volume: it.volume || '', cues: '', why: '', env });
-        }
+    for (const it of items) {
+      const key = norm(it && it.drill);
+      if (!key) continue;
+      const vol = (it && it.volume) || '';
+      // Prefer the first occurrence that carries a volume (early blocks like
+      // Daily Routine list drill names with no volume).
+      if (!sheetInfo[key] || (!sheetInfo[key].volume && vol)) {
+        sheetInfo[key] = { volume: vol, note: (it && it.note) || '' };
       }
     }
   }
-  return { _v: HITTING_PLAN_VERSION, environments_note: '', env_variations: envVariations.join(', '), warmup, drills, medball, footer: '' };
+
+  const drills = wanted.map((w) => {
+    const info = sheetInfo[norm(w.name)] || {};
+    return {
+      name: w.name,
+      progression: info.note || '',
+      why: w.why,
+      setsReps: info.volume || '',
+    };
+  });
+
+  // Training environments (conditions, NOT drills) — collected from the sheet,
+  // deduplicated, in first-seen order. They render at the bottom of the doc.
+  const isEnvVariation = (name) => /open\s*angle|breaking\s*ball|velo|fastball|curve|slider|changeup|machine\s*work|game\s*swings?/i.test(name || '');
+  const environments = [];
+  const seenEnv = new Set();
+  for (const block of routine) {
+    const items = Array.isArray(block.items) ? block.items : [];
+    for (const it of items) {
+      const nm = it && it.drill;
+      if (nm && isEnvVariation(nm) && !seenEnv.has(norm(nm))) {
+        seenEnv.add(norm(nm));
+        environments.push(nm);
+      }
+    }
+  }
+
+  // Program "Why?" — why this program exists and what the hitter should feel.
+  const cues = prog.cues && typeof prog.cues === 'object' ? prog.cues : {};
+  const whyParts = [];
+  if (prog.phase_emphasis) whyParts.push('Built around ' + prog.phase_emphasis + '.');
+  if (prog.adjustment) whyParts.push('Focus: ' + prog.adjustment);
+  if (cues.movement) whyParts.push('Feel: ' + cues.movement);
+  const whyText = whyParts.join(' ');
+
+  return {
+    _v: HITTING_PLAN_VERSION,
+    strengths: Array.isArray(prog.strengths) ? prog.strengths.filter(Boolean) : [],
+    grades: prog.grades && typeof prog.grades === 'object' ? prog.grades : {},
+    grade_whys: prog.grade_whys && typeof prog.grade_whys === 'object' ? prog.grade_whys : {},
+    overall_grade: '',
+    need: prog.adjustment || '',
+    why_text: whyText,
+    reminder: cues.game || '',
+    drills,
+    environments,
+    frequency: 'Complete this 3–5x per week. Keep the focus to 1–2 cues per swing.',
+  };
 }
 // ---- Programs tab: lifting + check-offs (Sep 2026) ----
 // Chicago date string (YYYY-MM-DD) used as the check-off day key.
@@ -2238,7 +2287,8 @@ function syncProgramsFromSheets() {
           category: d.category || '',
           items: (d.items || []).map(it => ({
             drill: it.drill || '',
-            volume: it.volume || ''
+            volume: it.volume || '',
+            note: it.note || ''
           }))
         }));
       }
@@ -2267,8 +2317,15 @@ try { syncProgramsFromSheets(); } catch (e) { console.error('Sheet sync on boot 
 app.get('/program', requireLogin, requireWaiver, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
   if (!req.user.remoteProgramId) return res.redirect('/');
-  // Bobby (Sep 23 2026): the hitting plan document IS the program — open straight to it.
-  return res.redirect('/program/hitting-plan');
+  const sub = String(req.query.sub || 'hitting');
+  // Bobby (Sep 23 2026): hitting = the document, lifting = interactive program.
+  // Default to hitting document; ?sub=lifting shows the lifting program.
+  if (sub === 'lifting') {
+    // Let the lifting sub-tab handler below take it (don't redirect)
+    // Fall through to the original program tab logic
+  } else {
+    return res.redirect('/program/hitting-plan');
+  }
 });
 
 // Hitting plan document (Sep 23 2026): one-page document per remote hitter —
@@ -2287,6 +2344,42 @@ app.get('/program/hitting-plan', requireLogin, requireWaiver, (req, res) => {
       .run(JSON.stringify(p.prog), new Date().toISOString(), p.id);
   }
   res.send(views.hittingPlanPage(req.user, p));
+});
+
+// Lifting program (Sep 23 2026): interactive lifting, accessible from Program tab.
+// Bobby: hitting = document, lifting = interactive. Both under Program.
+app.get('/program/lifting', requireLogin, requireWaiver, (req, res) => {
+  if (req.user.role === 'coach') return res.redirect('/coach');
+  if (!req.user.remoteProgramId) return res.redirect('/');
+  const p = getProgram(req.user.remoteProgramId);
+  if (!p) return res.redirect('/');
+  const liftingId = db.prepare('SELECT lifting_program_id FROM remote_programs WHERE id = ?').get(p.id);
+  const lifting = getLifting(liftingId && liftingId.lifting_program_id);
+  if (!lifting) return res.send(views.hittingPlanPage(req.user, p)); // No lifting? Show hitting doc
+  // Render the lifting sub-tab using the existing programPage view
+  const tabs = [{ id: 'hitting', label: 'Hitting' }, { id: 'lifting', label: 'Lifting' }];
+  const today = chiToday();
+  const checkoffs = getCheckoffs(req.user.id, today);
+  const liftDays = Array.isArray(lifting.days) ? lifting.days.filter((d) =>
+    (Array.isArray(d.exercises) ? d.exercises : []).some((ex) => String((ex && ex.name) || '').trim())
+  ) : [];
+  const ldayIdx = pickLiftingDayIdx(req, p, liftDays.length);
+  const liftData = {};
+  if (liftDays[ldayIdx]) {
+    for (const ex of liftDays[ldayIdx].exercises || []) {
+      const key = 'lift::' + String((liftDays[ldayIdx].label || '')) + '::' + String(ex.name || '');
+      liftData[key] = { last: lastLiftLog(req.user.id, key, today), history: liftHistory(req.user.id, key, 8) };
+    }
+  }
+  res.send(views.programPage(req.user, p, {
+    tabs, sub: 'lifting', day: '', autoDay: '', labels: [], today, checkoffs, lifting,
+    sched: [], weekday: '', isToday: true,
+    ldayIdx, todayLdayIdx: ldayIdx, liftData,
+    videoLib: videoLibMap(),
+    subs: todaySubs(req.user.id),
+    sessionOrder: 'hitting_first',
+    programTab: 'lifting', // Flag for the view to show Hitting/Lifting switcher
+  }));
 });
 
 // Workout mode (Sep 23 2026): guided lifting session — one exercise at a
@@ -5680,42 +5773,9 @@ app.post('/api/library/entries', (req, res) => {
   res.json({ ok: true, results });
 });
 
-app.get('/videos', requireLogin, requireRemote, (req, res) => {
-  // Categories join category_meta for Bobby's display titles, sort order,
-  // and visibility. Hidden categories never reach athletes.
-  const cats = db
-    .prepare(
-      `SELECT vl.category AS category, COUNT(*) AS n,
-              COALESCE(NULLIF(cm.title, ''), REPLACE(vl.category, 'Apporach', 'Approach')) AS title,
-              COALESCE(cm.emoji, '') AS emoji,
-              COALESCE(cm.sort_order, 999) AS so
-       FROM video_library vl LEFT JOIN category_meta cm ON cm.category = vl.category
-       WHERE vl.hidden = 0 AND COALESCE(cm.hidden, 0) = 0
-       GROUP BY vl.category ORDER BY so, title`
-    )
-    .all();
-  const q = String(req.query.q || '').trim().slice(0, 60);
-  const active = req.query.cat || (cats[0] ? cats[0].category : '');
-  // Global search (Sep 2026): ?q= searches every category, not just the
-  // active pill. Per-category browsing stays the default.
-  const videos = q
-    ? db
-        .prepare(
-          `SELECT vl.*, COALESCE(NULLIF(cm.title, ''), REPLACE(vl.category, 'Apporach', 'Approach')) AS cat_title
-           FROM video_library vl LEFT JOIN category_meta cm ON cm.category = vl.category
-           WHERE vl.hidden = 0 AND COALESCE(cm.hidden, 0) = 0
-             AND (COALESCE(NULLIF(vl.custom_name, ''), vl.name) LIKE '%' || ? || '%')
-           ORDER BY cat_title, COALESCE(NULLIF(vl.custom_name, ''), vl.name) LIMIT 60`
-        )
-        .all(q)
-    : active
-      ? db
-          .prepare(
-            "SELECT * FROM video_library WHERE category = ? AND hidden = 0 ORDER BY COALESCE(NULLIF(custom_name, ''), name)"
-          )
-          .all(active)
-      : [];
-  res.send(views.videosPage(req.user, cats, active, videos, q));
+app.get('/videos', requireLogin, (req, res) => {
+  // Remote Library removed Sep 23 2026 — redirect to Bobby's Drive
+  return res.redirect('https://drive.google.com/drive/folders/1exkky5BSQjiXoMF2J25sgW87OeYtwG8i');
 });
 
 app.get('/videos/watch/:id', requireLogin, requireRemote, (req, res) => {
