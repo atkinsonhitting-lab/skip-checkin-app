@@ -1081,3 +1081,31 @@ a.stat-card { padding: 14px 8px; }
 .edit-step { display: flex; gap: 8px; align-items: flex-start; margin: 8px 0; padding: 8px; background: #141416; border-radius: 10px; }
 .edit-step .form { display: flex; flex-direction: column; gap: 6px; }
 .edit-step input[type="text"] { margin: 0; }
+
+/* Seamless + top tier (Bobby, Sep 23 2026) */
+@keyframes pageIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+main.wrap { animation: pageIn 0.18s ease-out; }
+.btn, .btn-primary, .btn-secondary, button {
+  transition: transform 0.08s ease, opacity 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.btn:active, .btn-primary:active, .btn-secondary:active, button:active { transform: scale(0.97); }
+.pill span { transition: transform 0.08s ease, background 0.15s ease; }
+.pill:active span { transform: scale(0.95); }
+#submit-loading {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(0,0,0,0.55); backdrop-filter: blur(2px);
+  display: flex; align-items: center; justify-content: center;
+}
+#submit-loading[hidden] { display: none; }
+.submit-loading-card {
+  background: #1a1a1e; border: 1px solid var(--line); border-radius: 16px;
+  padding: 28px 36px; text-align: center; color: var(--text);
+}
+.submit-loading-card p { margin: 12px 0 0; font-weight: 600; }
+.spinner {
+  width: 36px; height: 36px; margin: 0 auto;
+  border: 3px solid #333; border-top-color: var(--red); border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }

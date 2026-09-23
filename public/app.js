@@ -1070,3 +1070,68 @@ document.querySelectorAll('.feel-slider input[type="range"]').forEach((el) => {
     })
     .catch(() => {});
 })();
+
+// Seamless + top tier (Bobby, Sep 23 2026):
+// 1. Autosave check-in drafts — never lose their words.
+// 2. Submit loading state — Skip's parsing takes ~10s, show it.
+// 3. Tap haptics + press states — feels like a real app.
+(function () {
+  // Haptics: tiny buzz on taps (Android; iOS Safari ignores harmlessly).
+  document.addEventListener('touchstart', (ev) => {
+    const t = ev.target.closest && ev.target.closest('button, .pill, a.btn');
+    if (t && navigator.vibrate) { try { navigator.vibrate(8); } catch (e) {} }
+  }, { passive: true });
+
+  // Check-in draft autosave.
+  const form = document.querySelector('form[data-validate="hitting12"], form[action="/checkin"]');
+  if (!form) return;
+  const KEY = 'dd-checkin-draft';
+  const ta = form.querySelector('#talk-text');
+  // Restore (only if the server didn't render a value already).
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (raw) {
+      const d = JSON.parse(raw);
+      if (ta && !ta.value && d.talk) ta.value = d.talk;
+      const slider = form.querySelector('input[type="range"][name="swing_feel"]');
+      if (slider && d.feel && !slider.dataset.touched) {
+        slider.value = d.feel;
+        slider.dispatchEvent(new Event('input', { bubbles: true }));
+        if (slider.hasAttribute('oninput')) slider.oninput && slider.oninput();
+        const out = document.getElementById('slider-swing_feel-val');
+        if (out) out.textContent = d.feel;
+      }
+      for (const [name, val] of Object.entries(d.pills || {})) {
+        const el = form.querySelector(`input[name="${name}"][value="${val}"]`);
+        if (el && !form.querySelector(`input[name="${name}"]:checked`)) el.checked = true;
+      }
+    }
+  } catch (e) {}
+  // Save on every change.
+  const save = () => {
+    try {
+      const d = { talk: ta ? ta.value : '', pills: {} };
+      const slider = form.querySelector('input[type="range"][name="swing_feel"]');
+      if (slider) d.feel = slider.value;
+      form.querySelectorAll('.pills input[type="radio"]:checked').forEach((r) => { d.pills[r.name] = r.value; });
+      localStorage.setItem(KEY, JSON.stringify(d));
+    } catch (e) {}
+  };
+  form.addEventListener('input', save);
+  form.addEventListener('change', save);
+
+  // Submit: loading state, clear draft.
+  form.addEventListener('submit', () => {
+    try { localStorage.removeItem(KEY); } catch (e) {}
+    const btn = form.querySelector('button[type="submit"]');
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+    let ov = document.getElementById('submit-loading');
+    if (!ov) {
+      ov = document.createElement('div');
+      ov.id = 'submit-loading';
+      ov.innerHTML = '<div class="submit-loading-card"><div class="spinner"></div><p>Skip&rsquo;s sorting it out…</p></div>';
+      document.body.appendChild(ov);
+    }
+    ov.hidden = false;
+  });
+})();

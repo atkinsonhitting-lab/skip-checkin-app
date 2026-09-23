@@ -1,5 +1,17 @@
 // Skip — server-rendered HTML views. Black/red, mobile-first, no build step.
 
+// Asset cache-busting (Bobby, Sep 23 2026): hash CSS/JS at boot so phones
+// pick up new versions immediately — no stale-cache roulette.
+const ASSET_V = (() => {
+  try {
+    const crypto = require('crypto');
+    const fs = require('fs');
+    const path = require('path');
+    const h = (f) => crypto.createHash('md5').update(fs.readFileSync(path.join(__dirname, '..', 'public', f))).digest('hex').slice(0, 8);
+    return h('app.js') + h('style.css');
+  } catch (e) { return 'dev'; }
+})();
+
 function esc(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;')
@@ -108,7 +120,7 @@ function layout({ title, user, tabs, body }) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <title>${esc(title)} · Diamond Daily</title>
-<link rel="stylesheet" href="/style.css?v=2">
+<link rel="stylesheet" href="/style.css?v=${ASSET_V}">
 ${brandCss}
 <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-180.png?v=2">
 <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152.png?v=2">
@@ -131,7 +143,7 @@ ${tabbarHtml}
 ${user && user.viewAs ? `<div class="viewas-banner">Previewing as <strong>${esc(user.viewAsName)}</strong> — actions are disabled. <form method="post" action="/coach/view-as/exit" style="display:inline;margin:0"><button type="submit" class="viewas-exit">Exit preview</button></form></div>` : ''}
 ${user && user.role === 'coach' && user.canEdit === false ? '<div class="viewonly-banner">View-only coach — you can look at everything, but changes are disabled.</div>' : ''}
 <main class="wrap">${body}</main>
-<script src="/app.js"></script>
+<script src="/app.js?v=${ASSET_V}"></script>
 </body>
 </html>`;
 }
