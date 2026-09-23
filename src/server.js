@@ -7490,7 +7490,13 @@ app.get('/coach/user/:email', requireCoachAny, (req, res) => {
         .all(user.id)
         .reverse();
   const pt = user.player_type || 'hitter';
-  res.send(views.coachUser(realUser(req), name, rows, restricted ? null : whatWorksData(name, user.id), thread, user.email, brain.listMemory(db, user.id), getRoutine(user.id), pt, pt === 'hitter' ? null : throwingSummary(user.id), isRemotePlayer(user.id) ? user.id : null, { restricted, viewAsId: user.id }));
+  // Bobby (Sep 23 2026): pass remote program ID so the player page can link to Edit Hitting Program.
+  let remoteProgramId = null;
+  try {
+    const rp = db.prepare('SELECT id FROM remote_programs WHERE LOWER(user_email) = LOWER(?)').get(em);
+    if (rp) remoteProgramId = rp.id;
+  } catch (e) { /* ignore */ }
+  res.send(views.coachUser(realUser(req), name, rows, restricted ? null : whatWorksData(name, user.id), thread, user.email, brain.listMemory(db, user.id), getRoutine(user.id), pt, pt === 'hitter' ? null : throwingSummary(user.id), isRemotePlayer(user.id) ? user.id : null, { restricted, viewAsId: user.id, remoteProgramId }));
 });
 
 // Throwing summary for a pitcher's or two-way player's coach view: session

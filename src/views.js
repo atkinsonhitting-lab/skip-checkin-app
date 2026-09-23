@@ -4201,12 +4201,15 @@ function coachUser(user, name, checkins, whatWorks, thread, email, memories, rou
       <input type="hidden" name="id" value="${opts.viewAsId}">
       <button class="btn-small btn-quiet" type="submit" style="margin-left:4px">View as player</button>
     </form>` : '';
+  const editProgramLink = opts && opts.remoteProgramId && canEdit
+    ? ` <a href="/coach/program/${opts.remoteProgramId}/hitting-plan" class="btn btn-sm" style="text-decoration:none;margin-left:8px">📄 Edit Hitting Program</a>`
+    : '';
   return layout({
     title: name,
     user,
     tabs: coachTabs('hitters', user.approvalCount, user),
     body: `<h1 class="page-title">${esc(name)} ${rolePill(pt)}</h1>
-    <p><a href="/coach/hitters">← Back to players</a>${viewAsBtn}</p>
+    <p><a href="/coach/hitters">← Back to players</a>${viewAsBtn}${editProgramLink}</p>
     ${pt === 'pitcher' ? '' : routineReadonly(routine)}
     ${pt !== 'hitter' ? throwingSummarySection(throwSum) : ''}
     ${memorySection(email, memories, canEdit)}
