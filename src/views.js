@@ -508,25 +508,7 @@ function userHome(user, extras) {
         </div>
       </div>
     </div>
-    <script>
-    (function () {
-      function choose(v) {
-        var yes = document.getElementById('bible-yes');
-        var no = document.getElementById('bible-no');
-        yes.disabled = true; no.disabled = true;
-        fetch('/api/bible-study-choice', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ choice: v })
-        }).then(function (r) {
-          if (!r.ok) throw 0;
-          document.getElementById('bible-popup-overlay').remove();
-        }).catch(function () { yes.disabled = false; no.disabled = false; });
-      }
-      document.getElementById('bible-yes').addEventListener('click', function () { choose(1); });
-      document.getElementById('bible-no').addEventListener('click', function () { choose(0); });
-    })();
-    </script>` : '';
+    ` : '';
   return layout({
     title: 'Home',
     user,
