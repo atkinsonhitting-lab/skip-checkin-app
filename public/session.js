@@ -165,7 +165,7 @@
       el.addEventListener('click', function () {
         var yt = el.getAttribute('data-yt');
         if (yt) {
-          el.innerHTML = '<iframe src="https://www.youtube-nocookie.com/embed/' + yt +
+          el.innerHTML = '<iframe src="https://www.youtube.com/embed/' + yt +
             '?autoplay=1&rel=0" allow="autoplay; encrypted-media" allowfullscreen ' +
             'style="width:100%;aspect-ratio:16/9;border:0;border-radius:10px"></iframe>';
           return;

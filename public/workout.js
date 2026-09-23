@@ -229,7 +229,7 @@
     body.querySelectorAll('.wo-video').forEach(function (el) {
       el.addEventListener('click', function () {
         var id = el.getAttribute('data-yt');
-        el.innerHTML = '<iframe src="https://www.youtube-nocookie.com/embed/' + id +
+        el.innerHTML = '<iframe src="https://www.youtube.com/embed/' + id +
           '?autoplay=1&rel=0" allow="autoplay; encrypted-media" allowfullscreen ' +
           'style="width:100%;aspect-ratio:16/9;border:0;border-radius:10px"></iframe>';
       });
