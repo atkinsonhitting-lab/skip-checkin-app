@@ -4204,12 +4204,18 @@ function coachUser(user, name, checkins, whatWorks, thread, email, memories, rou
   const editProgramLink = opts && opts.remoteProgramId && canEdit
     ? ` <a href="/coach/program/${opts.remoteProgramId}/hitting-plan" class="btn btn-sm" style="text-decoration:none;margin-left:8px">📄 Edit Hitting Program</a>`
     : '';
+  // Bobby (Sep 23 2026): edit/assign lifting from the hitter's page too.
+  const liftingLink = opts && opts.remoteProgramId && canEdit
+    ? (opts.hasLifting
+        ? ` <a href="/coach/lifting" class="btn btn-sm" style="text-decoration:none;margin-left:8px">🏋 Edit Lifting</a>`
+        : ` <a href="/coach/lifting" class="btn btn-sm" style="text-decoration:none;margin-left:8px">+ Add Lifting</a>`)
+    : '';
   return layout({
     title: name,
     user,
     tabs: coachTabs('hitters', user.approvalCount, user),
     body: `<h1 class="page-title">${esc(name)} ${rolePill(pt)}</h1>
-    <p><a href="/coach/hitters">← Back to players</a>${viewAsBtn}${editProgramLink}</p>
+    <p><a href="/coach/hitters">← Back to players</a>${viewAsBtn}${editProgramLink}${liftingLink}</p>
     ${pt === 'pitcher' ? '' : routineReadonly(routine)}
     ${pt !== 'hitter' ? throwingSummarySection(throwSum) : ''}
     ${memorySection(email, memories, canEdit)}
