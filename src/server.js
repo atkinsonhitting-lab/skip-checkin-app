@@ -1794,6 +1794,31 @@ function getProgram(id) {
   if (!prog || typeof prog !== 'object') prog = {};
   return { id: row.id, athlete_name: row.athlete_name, updated_at: row.updated_at, prog, session_order: row.session_order || 'hitting_first', component_order: row.component_order || '' };
 }
+// Build a hitting-plan document from a program's routine blocks (Sep 23 2026).
+// Warmup = prep/mobility/daily-routine blocks (Bobby's prep work). Drills =
+// hitting blocks (tee/toss/BP/machine/game). Videos are NOT embedded — the
+// document points athletes to the Remote library.
+function buildHittingPlan(prog) {
+  const routine = Array.isArray(prog.routine) ? prog.routine : [];
+  const warmup = [];
+  const drills = [];
+  const isWarmupCat = (c) => /prep|mobility|daily|warm/i.test(c || '');
+  const isHittingCat = (c) => /tee|toss|flip|bp\b|batting|machine|game|hit/i.test(c || '');
+  for (const block of routine) {
+    const cat = block.category || '';
+    const items = Array.isArray(block.items) ? block.items : [];
+    if (isWarmupCat(cat)) {
+      for (const it of items) {
+        if (it.drill) warmup.push({ name: it.drill, detail: it.volume || '' });
+      }
+    } else if (isHittingCat(cat)) {
+      for (const it of items) {
+        if (it.drill) drills.push({ name: it.drill, volume: it.volume || '', cues: '', why: '' });
+      }
+    }
+  }
+  return { environments_note: '', warmup, drills, footer: '' };
+}
 // ---- Programs tab: lifting + check-offs (Sep 2026) ----
 // Chicago date string (YYYY-MM-DD) used as the check-off day key.
 function chiToday() {
@@ -2188,6 +2213,23 @@ app.get('/program', requireLogin, requireWaiver, (req, res) => {
     subs: todaySubs(req.user.id),
     sessionOrder: p.session_order || 'hitting_first',
   }));
+});
+
+// Hitting plan document (Sep 23 2026): one-page document per remote hitter —
+// training environments, warmup (Bobby's prep work), drills. Videos live in
+// the Remote library; the document just points there.
+app.get('/program/hitting-plan', requireLogin, requireWaiver, (req, res) => {
+  if (req.user.role === 'coach') return res.redirect('/coach');
+  if (!req.user.remoteProgramId) return res.redirect('/');
+  const p = getProgram(req.user.remoteProgramId);
+  if (!p) return res.redirect('/');
+  // Lazy-backfill: if no hitting_plan yet, derive it from the routine blocks.
+  if (!p.prog.hitting_plan) {
+    p.prog.hitting_plan = buildHittingPlan(p.prog);
+    db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?')
+      .run(JSON.stringify(p.prog), new Date().toISOString(), p.id);
+  }
+  res.send(views.hittingPlanPage(req.user, p));
 });
 
 // Workout mode (Sep 23 2026): guided lifting session — one exercise at a
@@ -3729,6 +3771,50 @@ app.post('/coach/remote/add', requireCoach, (req, res) => {
     }
   }
   res.redirect('/coach/programs');
+});
+
+// Hitting plan editor (Sep 23 2026): Bobby edits each hitter's one-page
+// hitting plan document — training environments note, warmup (prep work),
+// drills (name/volume/cues/why), footer.
+app.get('/coach/program/:id/hitting-plan', requireCoach, (req, res) => {
+  setApprovalCount(req);
+  const p = getProgram(req.params.id);
+  if (!p) return res.redirect('/coach/programs');
+  if (!p.prog.hitting_plan) p.prog.hitting_plan = buildHittingPlan(p.prog);
+  res.send(views.hittingPlanEditPage(req.user, p));
+});
+
+app.post('/coach/program/:id/hitting-plan', requireCoach, (req, res) => {
+  const p = getProgram(req.params.id);
+  if (!p) return res.redirect('/coach/programs');
+  const b = req.body || {};
+  const plan = {
+    environments_note: String(b.environments_note || '').trim(),
+    warmup: [],
+    drills: [],
+    footer: String(b.footer || '').trim(),
+  };
+  // Warmup items: w_name_0, w_detail_0, ...
+  for (let i = 0; i < 50; i++) {
+    const name = String(b[`w_name_${i}`] || '').trim();
+    if (!name) continue;
+    plan.warmup.push({ name, detail: String(b[`w_detail_${i}`] || '').trim() });
+  }
+  // Drills: d_name_0, d_volume_0, d_cues_0, d_why_0, ...
+  for (let i = 0; i < 100; i++) {
+    const name = String(b[`d_name_${i}`] || '').trim();
+    if (!name) continue;
+    plan.drills.push({
+      name,
+      volume: String(b[`d_volume_${i}`] || '').trim(),
+      cues: String(b[`d_cues_${i}`] || '').trim(),
+      why: String(b[`d_why_${i}`] || '').trim(),
+    });
+  }
+  p.prog.hitting_plan = plan;
+  db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?')
+    .run(JSON.stringify(p.prog), new Date().toISOString(), p.id);
+  res.redirect(`/coach/program/${p.id}/hitting-plan?saved=1`);
 });
 
 app.post('/coach/remote/remove', requireCoach, (req, res) => {

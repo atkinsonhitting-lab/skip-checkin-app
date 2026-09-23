@@ -2918,6 +2918,7 @@ function programPage(user, p, opts) {
     user,
     tabs: userTabs('program', user),
     body: `<h1 class="page-title">Your Program</h1>
+    <p><a href="/program/hitting-plan" class="btn" style="display:inline-block;text-decoration:none">📄 Hitting Plan</a></p>
     ${meta ? `<p class="lede">${meta}</p>` : ''}
     ${tabHtml}
     ${weekStrip()}
@@ -4184,6 +4185,7 @@ function programEditPage(user, p, profileEmail, hasLifting, progression, opts) {
     user,
     tabs: coachTabs('organizations', user.approvalCount, user),
     body: `<h1 class="page-title">Program — ${esc(p.athlete_name)}</h1>
+    <p><a href="/coach/program/${p.id}/hitting-plan" class="btn" style="display:inline-block;text-decoration:none">📄 Edit Hitting Plan</a></p>
     ${draftBanner}
     ${progCard}
     ${blockCard}
@@ -5339,6 +5341,194 @@ function substitutePage(user, o) {
 }
 
 
+function hittingPlanPage(user, p) {
+  const prog = (p && p.prog) || {};
+  const plan = prog.hitting_plan || {};
+  const athleteName = (p && p.athlete_name) || prog.athlete || 'Hitter';
+
+  // Training environments — Bobby's standard explainer (coach-editable via plan.environments_note)
+  const defaultEnvironments = `<p><strong>Training environments</strong> — do your work across all of them. Each one trains something different:</p>
+<ul>
+<li><strong>Tee</strong> — most controlled. Feel the move, own your positions. This is where the pattern gets built.</li>
+<li><strong>Toss</strong> (side flips, front toss) — the ball's moving now, short distance. Blend what you felt off the tee into timing.</li>
+<li><strong>BP</strong> — full distance, moderate speed. Timing, direction, and barrel accuracy.</li>
+<li><strong>Machine</strong> — full speed. Execute under pressure. This is where it has to show up.</li>
+</ul>
+<p>Don't count a rep unless it's flush. It doesn't need to be hard — it needs to be right.</p>`;
+  const environmentsHtml = plan.environments_note || defaultEnvironments;
+
+  // Warmup — Bobby's prep work
+  const warmup = Array.isArray(plan.warmup) ? plan.warmup : [];
+  const warmupHtml = warmup.length
+    ? `<ul>${warmup.map((w) => `<li><strong>${esc(w.name || '')}</strong>${w.detail ? ` — ${esc(w.detail)}` : ''}</li>`).join('')}</ul>
+       <p class="hint-inline">Demos for all prep work are in the Remote library (Videos tab).</p>`
+    : '<p class="hint-inline">Your coach will add your prep work here.</p>';
+
+  // Drills table
+  const drills = Array.isArray(plan.drills) ? plan.drills : [];
+  const drillsHtml = drills.length
+    ? `<table class="plan-table">
+        <thead><tr><th>Drill</th><th>Volume</th><th>Cues</th><th>Why?</th></tr></thead>
+        <tbody>${drills.map((d) => `<tr>
+          <td><strong>${esc(d.name || '')}</strong></td>
+          <td>${esc(d.volume || '')}</td>
+          <td>${esc(d.cues || '')}</td>
+          <td>${esc(d.why || '')}</td>
+        </tr>`).join('')}</tbody>
+      </table>
+      <p class="hint-inline">Drill demos are all in the Remote library (Videos tab).</p>`
+    : '<p class="hint-inline">Your coach will add your drills here.</p>';
+
+  const footer = plan.footer ? `<div class="plan-footer">${plan.footer}</div>` : '';
+
+  return layout({
+    title: 'Hitting Plan',
+    user,
+    tabs: userTabs('program', user),
+    body: `<h1 class="page-title">Hitting Program</h1>
+    <p class="athlete-name">${esc(athleteName)}</p>
+    <div class="hitting-plan-doc">
+      <section class="plan-section">
+        <h2>Training Environments</h2>
+        ${environmentsHtml}
+      </section>
+      <section class="plan-section">
+        <h2>Warmup — Prep Work</h2>
+        ${warmupHtml}
+      </section>
+      <section class="plan-section">
+        <h2>The Work</h2>
+        ${drillsHtml}
+      </section>
+      ${footer}
+    </div>
+    <p style="margin-top:16px"><a href="/program" class="hint-inline">‹ Back to program</a></p>
+    <style>
+      .hitting-plan-doc { max-width: 720px; margin: 0 auto; }
+      .athlete-name { font-size: 1.2em; color: #666; margin-top: -10px; }
+      .plan-section { margin: 24px 0; padding: 16px; background: #f9f9f9; border-radius: 8px; }
+      .plan-section h2 { margin-top: 0; font-size: 1.1em; }
+      .plan-table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+      .plan-table th, .plan-table td { padding: 10px 8px; text-align: left; border-bottom: 1px solid #ddd; font-size: 0.9em; }
+      .plan-table th { background: #f0f0f0; font-weight: 600; }
+      .plan-footer { margin-top: 20px; padding: 12px; background: #fffbe6; border-radius: 8px; font-style: italic; }
+      @media print { .plan-section { break-inside: avoid; } }
+    </style>`,
+  });
+}
+
+function hittingPlanEditPage(user, p) {
+  const prog = (p && p.prog) || {};
+  const plan = prog.hitting_plan || {};
+  const athleteName = (p && p.athlete_name) || prog.athlete || 'Hitter';
+  const saved = typeof window !== 'undefined' ? false : false; // handled via query in server
+
+  const warmup = Array.isArray(plan.warmup) ? plan.warmup : [];
+  const drills = Array.isArray(plan.drills) ? plan.drills : [];
+
+  const warmupRows = warmup.map((w, i) => `
+    <div class="plan-row">
+      <input type="text" name="w_name_${i}" value="${esc(w.name || '')}" placeholder="Prep movement" maxlength="100">
+      <input type="text" name="w_detail_${i}" value="${esc(w.detail || '')}" placeholder="Detail (optional)" maxlength="200">
+    </div>`).join('');
+  // Blank rows for adding
+  const warmupBlanks = [0, 1, 2].map((k) => {
+    const i = warmup.length + k;
+    return `<div class="plan-row">
+      <input type="text" name="w_name_${i}" value="" placeholder="Prep movement" maxlength="100">
+      <input type="text" name="w_detail_${i}" value="" placeholder="Detail (optional)" maxlength="200">
+    </div>`;
+  }).join('');
+
+  const drillRows = drills.map((d, i) => `
+    <div class="plan-drill">
+      <input type="text" name="d_name_${i}" value="${esc(d.name || '')}" placeholder="Drill name" maxlength="100" class="drill-name">
+      <input type="text" name="d_volume_${i}" value="${esc(d.volume || '')}" placeholder="Volume (e.g. 2x5)" maxlength="100">
+      <input type="text" name="d_cues_${i}" value="${esc(d.cues || '')}" placeholder="Cues" maxlength="200">
+      <input type="text" name="d_why_${i}" value="${esc(d.why || '')}" placeholder="Why? (what it trains)" maxlength="300">
+    </div>`).join('');
+  const drillBlanks = [0, 1, 2, 3].map((k) => {
+    const i = drills.length + k;
+    return `<div class="plan-drill">
+      <input type="text" name="d_name_${i}" value="" placeholder="Drill name" maxlength="100" class="drill-name">
+      <input type="text" name="d_volume_${i}" value="" placeholder="Volume (e.g. 2x5)" maxlength="100">
+      <input type="text" name="d_cues_${i}" value="" placeholder="Cues" maxlength="200">
+      <input type="text" name="d_why_${i}" value="" placeholder="Why? (what it trains)" maxlength="300">
+    </div>`;
+  }).join('');
+
+  return layout({
+    title: 'Edit Hitting Plan',
+    user,
+    tabs: coachTabs('programs', 0, user),
+    body: `<h1 class="page-title">Hitting Plan — ${esc(athleteName)}</h1>
+    <p><a href="/coach/program/${p.id}/edit" class="hint-inline">‹ Back to program editor</a></p>
+    <form method="post" action="/coach/program/${p.id}/hitting-plan" class="form">
+      <label class="fld">Training environments note (leave blank for the standard explainer)
+        <textarea name="environments_note" rows="6" placeholder="Custom note, or blank for default...">${esc(plan.environments_note || '')}</textarea>
+      </label>
+      <h3>Warmup — Prep Work</h3>
+      <p class="hint-inline">Bobby's prep work for them. Demos live in the Remote library.</p>
+      ${warmupRows}${warmupBlanks}
+      <h3>The Work — Drills</h3>
+      <p class="hint-inline">Drill demos are all in the Remote library. Add the "why" for each.</p>
+      ${drillRows}${drillBlanks}
+      <label class="fld">Footer note (optional)
+        <textarea name="footer" rows="3" placeholder="e.g. Don't count a rep unless it's flush...">${esc(plan.footer || '')}</textarea>
+      </label>
+      <button type="submit" class="btn btn-primary">Save Hitting Plan</button>
+    </form>
+    <style>
+      .plan-row { display: flex; gap: 8px; margin: 6px 0; }
+      .plan-row input { flex: 1; padding: 8px; }
+      .plan-drill { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; padding: 10px; background: #f9f9f9; border-radius: 6px; }
+      .plan-drill input { padding: 8px; }
+      .plan-drill .drill-name { grid-column: 1 / -1; font-weight: 600; }
+    </style>`,
+  });
+}
+
+
+// Routine edit page (Bobby, Sep 23 2026) — athletes edit their own routines.
+function routineEditPage(user, routines) {
+  const section = (which, r) => `
+    <div class="card">
+      <h2 class="routine-station" style="margin-top:0">${esc(r.title)}</h2>
+      ${(r.items || []).map((it, i) => `
+        <div class="edit-step">
+          <form method="post" action="/mental-game/routine/edit" class="form" style="flex:1">
+            <input type="hidden" name="which" value="${which}">
+            <input type="hidden" name="idx" value="${i}">
+            <input type="text" name="text" value="${esc(it.text || '')}" maxlength="200" required>
+            <input type="text" name="detail" value="${esc(it.detail || '')}" maxlength="500" placeholder="What to do (optional)">
+            <button type="submit" class="btn btn-sm">Save</button>
+          </form>
+          <form method="post" action="/mental-game/routine/delete" style="margin:0">
+            <input type="hidden" name="which" value="${which}">
+            <input type="hidden" name="idx" value="${i}">
+            <input type="hidden" name="back" value="edit">
+            <button type="submit" class="link-danger" aria-label="Delete step">✕</button>
+          </form>
+        </div>`).join('')}
+      <form method="post" action="/mental-game/routine/add" class="form" style="margin-top:10px">
+        <input type="hidden" name="which" value="${which}">
+        <input type="hidden" name="back" value="edit">
+        <input type="text" name="text" placeholder="New step..." maxlength="200" required>
+        <input type="text" name="detail" placeholder="What to do (optional)" maxlength="500">
+        <button type="submit" class="btn btn-sm">Add step</button>
+      </form>
+    </div>`;
+  return layout({
+    title: 'Edit Routines',
+    user,
+    tabs: userTabs('mental', user),
+    body: `<h1 class="page-title">Edit Routines</h1>
+    <p><a href="/mental-game" class="hint-inline">‹ Back to Lock In</a></p>
+    ${section('morning', routines.morning)}
+    ${section('pregame', routines.pregame)}
+    ${section('practice', routines.practice)}`,
+  });
+}
 module.exports = {
   layout,
   userTabs,
@@ -5406,45 +5596,7 @@ module.exports = {
   waiverPage,
   substitutePage,
   routineEditPage,
+  hittingPlanPage,
+  hittingPlanEditPage,
 };
 
-// Routine edit page (Bobby, Sep 23 2026) — athletes edit their own routines.
-function routineEditPage(user, routines) {
-  const section = (which, r) => `
-    <div class="card">
-      <h2 class="routine-station" style="margin-top:0">${esc(r.title)}</h2>
-      ${(r.items || []).map((it, i) => `
-        <div class="edit-step">
-          <form method="post" action="/mental-game/routine/edit" class="form" style="flex:1">
-            <input type="hidden" name="which" value="${which}">
-            <input type="hidden" name="idx" value="${i}">
-            <input type="text" name="text" value="${esc(it.text || '')}" maxlength="200" required>
-            <input type="text" name="detail" value="${esc(it.detail || '')}" maxlength="500" placeholder="What to do (optional)">
-            <button type="submit" class="btn btn-sm">Save</button>
-          </form>
-          <form method="post" action="/mental-game/routine/delete" style="margin:0">
-            <input type="hidden" name="which" value="${which}">
-            <input type="hidden" name="idx" value="${i}">
-            <input type="hidden" name="back" value="edit">
-            <button type="submit" class="link-danger" aria-label="Delete step">✕</button>
-          </form>
-        </div>`).join('')}
-      <form method="post" action="/mental-game/routine/add" class="form" style="margin-top:10px">
-        <input type="hidden" name="which" value="${which}">
-        <input type="hidden" name="back" value="edit">
-        <input type="text" name="text" placeholder="New step..." maxlength="200" required>
-        <input type="text" name="detail" placeholder="What to do (optional)" maxlength="500">
-        <button type="submit" class="btn btn-sm">Add step</button>
-      </form>
-    </div>`;
-  return layout({
-    title: 'Edit Routines',
-    user,
-    tabs: userTabs('mental', user),
-    body: `<h1 class="page-title">Edit Routines</h1>
-    <p><a href="/mental-game" class="hint-inline">‹ Back to Lock In</a></p>
-    ${section('morning', routines.morning)}
-    ${section('pregame', routines.pregame)}
-    ${section('practice', routines.practice)}`,
-  });
-}
