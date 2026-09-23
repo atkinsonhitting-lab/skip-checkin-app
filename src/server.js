@@ -4053,6 +4053,7 @@ app.post('/coach/program/:id/hitting-plan', requireCoach, (req, res) => {
   if (!p) return res.redirect('/coach/programs');
   const b = req.body || {};
   const plan = {
+    _custom: true, // Bobby (Sep 23 2026): coach edit — sheet sync must preserve this
     environments_note: String(b.environments_note || '').trim(),
     env_variations: String(b.env_variations || '').trim(),
     warmup: [],
