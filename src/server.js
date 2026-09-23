@@ -1803,6 +1803,17 @@ function buildHittingPlan(prog) {
   const warmup = [];
   const drills = [];
   const isWarmupCat = (c) => /prep|mobility|daily|warm/i.test(c || '');
+  // Map category → training environment for the drill progression
+  const envOf = (c) => {
+    const s = String(c || '').toLowerCase();
+    if (/front toss/i.test(c || '')) return 'Front Toss';
+    if (/side|toss|flip/i.test(c || '')) return 'Toss';
+    if (/tee/i.test(c || '')) return 'Tee';
+    if (/machine/i.test(c || '')) return 'Machine';
+    if (/\bbp\b|batting/i.test(c || '')) return 'BP';
+    if (/game/i.test(c || '')) return 'Game';
+    return 'Tee';
+  };
   const isHittingCat = (c) => /tee|toss|flip|bp\b|batting|machine|game|hit/i.test(c || '');
   for (const block of routine) {
     const cat = block.category || '';
@@ -1812,12 +1823,13 @@ function buildHittingPlan(prog) {
         if (it.drill) warmup.push({ name: it.drill, detail: it.volume || '' });
       }
     } else if (isHittingCat(cat)) {
+      const env = envOf(cat);
       for (const it of items) {
-        if (it.drill) drills.push({ name: it.drill, volume: it.volume || '', cues: '', why: '' });
+        if (it.drill) drills.push({ name: it.drill, volume: it.volume || '', cues: '', why: '', env });
       }
     }
   }
-  return { environments_note: '', warmup, drills, footer: '' };
+  return { environments_note: '', env_variations: '', warmup, drills, footer: '' };
 }
 // ---- Programs tab: lifting + check-offs (Sep 2026) ----
 // Chicago date string (YYYY-MM-DD) used as the check-off day key.
@@ -3778,6 +3790,7 @@ app.post('/coach/program/:id/hitting-plan', requireCoach, (req, res) => {
   const b = req.body || {};
   const plan = {
     environments_note: String(b.environments_note || '').trim(),
+    env_variations: String(b.env_variations || '').trim(),
     warmup: [],
     drills: [],
     footer: String(b.footer || '').trim(),
@@ -3788,12 +3801,13 @@ app.post('/coach/program/:id/hitting-plan', requireCoach, (req, res) => {
     if (!name) continue;
     plan.warmup.push({ name, detail: String(b[`w_detail_${i}`] || '').trim() });
   }
-  // Drills: d_name_0, d_volume_0, d_cues_0, d_why_0, ...
+  // Drills: d_name_0, d_env_0, d_volume_0, d_cues_0, d_why_0, ...
   for (let i = 0; i < 100; i++) {
     const name = String(b[`d_name_${i}`] || '').trim();
     if (!name) continue;
     plan.drills.push({
       name,
+      env: String(b[`d_env_${i}`] || 'Tee').trim() || 'Tee',
       volume: String(b[`d_volume_${i}`] || '').trim(),
       cues: String(b[`d_cues_${i}`] || '').trim(),
       why: String(b[`d_why_${i}`] || '').trim(),

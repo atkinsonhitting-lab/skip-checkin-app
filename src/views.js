@@ -5314,11 +5314,19 @@ function hittingPlanPage(user, p) {
   const plan = prog.hitting_plan || {};
   const athleteName = (p && p.athlete_name) || prog.athlete || 'Hitter';
 
-  // Training environments — Bobby's standard explainer (coach-editable via plan.environments_note)
+  // Grading sheet — the athlete's grades (Load, Path, Connection, Timing, Power)
+  const grades = prog.grades && typeof prog.grades === 'object' ? prog.grades : {};
+  const gradeEntries = Object.entries(grades).filter(([k, v]) => v && String(v).trim());
+  const gradesHtml = gradeEntries.length
+    ? `<table class="doc-table grades-table"><tbody><tr>${gradeEntries.map(([k, v]) => `<th>${esc(k)}</th>`).join('')}</tr><tr>${gradeEntries.map(([k, v]) => `<td class="grade-val">${esc(String(v))}</td>`).join('')}</tr></tbody></table>`
+    : '';
+
+  // Training environments explainer
   const defaultEnvironments = `<p>Do your work across all <strong>training environments</strong>. Each one trains something different:</p>
 <ul>
 <li><strong>Tee</strong> — most controlled. Feel the move, own your positions. This is where the pattern gets built.</li>
-<li><strong>Toss</strong> (side flips, front toss) — the ball's moving now, short distance. Blend what you felt off the tee into timing.</li>
+<li><strong>Toss</strong> (side flips) — the ball's moving now, short distance. Blend what you felt off the tee into timing.</li>
+<li><strong>Front Toss</strong> — coming at you now. Timing starts to matter.</li>
 <li><strong>BP</strong> — full distance, moderate speed. Timing, direction, and barrel accuracy.</li>
 <li><strong>Machine</strong> — full speed. Execute under pressure. This is where it has to show up.</li>
 </ul>
@@ -5332,20 +5340,38 @@ function hittingPlanPage(user, p) {
        <p class="doc-note">Demos for all prep work are in the Remote library (Videos tab).</p>`
     : '<p class="doc-note">Your coach will add your prep work here.</p>';
 
-  // Drills table
+  // Drills grouped by training environment in progression order
+  const ENV_ORDER = ['Tee', 'Toss', 'Front Toss', 'BP', 'Machine', 'Game'];
   const drills = Array.isArray(plan.drills) ? plan.drills : [];
+  const byEnv = {};
+  for (const d of drills) {
+    const env = d.env || 'Tee';
+    if (!byEnv[env]) byEnv[env] = [];
+    byEnv[env].push(d);
+  }
   const drillsHtml = drills.length
-    ? `<table class="doc-table">
+    ? ENV_ORDER.filter((env) => byEnv[env] && byEnv[env].length).map((env) => `
+      <h3 class="doc-env">${esc(env)}</h3>
+      <table class="doc-table">
         <thead><tr><th>Drill</th><th>Volume</th><th>Cues</th><th>Why?</th></tr></thead>
-        <tbody>${drills.map((d) => `<tr>
+        <tbody>${byEnv[env].map((d) => `<tr>
           <td><strong>${esc(d.name || '')}</strong></td>
           <td>${esc(d.volume || '')}</td>
           <td>${esc(d.cues || '')}</td>
           <td>${esc(d.why || '')}</td>
         </tr>`).join('')}</tbody>
-      </table>
-      <p class="doc-note">Drill demos are all in the Remote library (Videos tab).</p>`
+      </table>`).join('')
+      + `<p class="doc-note">Drill demos are all in the Remote library (Videos tab).</p>`
     : '<p class="doc-note">Your coach will add your drills here.</p>';
+
+  // Training environment variations (open angle, breaking balls, velo, etc.)
+  const defaultVariations = `<p>Mix these into your environments to make the work game-like:</p>
+<ul>
+<li><strong>Open angle</strong> — open up the front side, work the other way</li>
+<li><strong>Breaking balls</strong> — recognize spin, stay on the ball</li>
+<li><strong>Velo</strong> — turn the machine up, be on time for heat</li>
+</ul>`;
+  const variationsHtml = plan.env_variations || defaultVariations;
 
   const footer = plan.footer ? `<div class="doc-footer">${esc(plan.footer)}</div>` : '';
 
@@ -5364,6 +5390,7 @@ function hittingPlanPage(user, p) {
       <h1 class="doc-title">Hitting Program</h1>
       <p class="doc-athlete">${esc(athleteName)}</p>
       <hr class="doc-rule">
+      ${gradesHtml ? `<section class="doc-section"><h2>Grades</h2>${gradesHtml}</section>` : ''}
       <section class="doc-section">
         <h2>Training Environments</h2>
         ${environmentsHtml}
@@ -5373,8 +5400,12 @@ function hittingPlanPage(user, p) {
         ${warmupHtml}
       </section>
       <section class="doc-section">
-        <h2>The Work</h2>
+        <h2>The Work — Drill Progression</h2>
         ${drillsHtml}
+      </section>
+      <section class="doc-section">
+        <h2>Environment Variations</h2>
+        ${variationsHtml}
       </section>
       ${footer}
     </div>
@@ -5398,6 +5429,8 @@ function hittingPlanPage(user, p) {
       .doc-section h2 { font-size: 20px; color: #111; border-bottom: 1px solid #ddd;
         padding-bottom: 6px; margin: 0 0 12px; font-family: -apple-system, Helvetica, Arial, sans-serif; }
       .doc-section p, .doc-section li { color: #222; font-size: 16px; }
+      .doc-env { font-size: 17px; color: #111; margin: 20px 0 8px;
+        font-family: -apple-system, Helvetica, Arial, sans-serif; }
       .doc-list { padding-left: 22px; }
       .doc-list li { margin: 6px 0; }
       .doc-note { font-size: 14px; color: #666; font-style: italic;
@@ -5407,6 +5440,8 @@ function hittingPlanPage(user, p) {
       .doc-table th { background: #111; color: #fff; padding: 10px 12px; text-align: left; font-weight: 600; }
       .doc-table td { padding: 10px 12px; border-bottom: 1px solid #e0e0e0; color: #222; vertical-align: top; }
       .doc-table tr:nth-child(even) td { background: #f7f7f7; }
+      .grades-table th { background: #333; }
+      .grade-val { font-size: 22px; font-weight: 700; text-align: center; }
       .doc-footer { margin-top: 24px; padding: 14px 16px; background: #fffbe6;
         border-left: 4px solid #e6a800; font-style: italic; color: #333; font-size: 15px; }
       .doc-back { max-width: 760px; margin: 16px auto 0; }
@@ -5419,6 +5454,7 @@ function hittingPlanPage(user, p) {
     </style>`,
   });
 }
+
 
 
 function hittingPlanEditPage(user, p) {
@@ -5444,9 +5480,11 @@ function hittingPlanEditPage(user, p) {
     </div>`;
   }).join('');
 
+  const envOpts = (sel) => ['Tee','Toss','Front Toss','BP','Machine','Game'].map((e) => `<option value="${e}"${(sel||'Tee')===e?' selected':''}>${e}</option>`).join('');
   const drillRows = drills.map((d, i) => `
     <div class="plan-drill">
       <input type="text" name="d_name_${i}" value="${esc(d.name || '')}" placeholder="Drill name" maxlength="100" class="drill-name">
+      <select name="d_env_${i}">${envOpts(d.env)}</select>
       <input type="text" name="d_volume_${i}" value="${esc(d.volume || '')}" placeholder="Volume (e.g. 2x5)" maxlength="100">
       <input type="text" name="d_cues_${i}" value="${esc(d.cues || '')}" placeholder="Cues" maxlength="200">
       <input type="text" name="d_why_${i}" value="${esc(d.why || '')}" placeholder="Why? (what it trains)" maxlength="300">
@@ -5455,6 +5493,7 @@ function hittingPlanEditPage(user, p) {
     const i = drills.length + k;
     return `<div class="plan-drill">
       <input type="text" name="d_name_${i}" value="" placeholder="Drill name" maxlength="100" class="drill-name">
+      <select name="d_env_${i}">${envOpts('Tee')}</select>
       <input type="text" name="d_volume_${i}" value="" placeholder="Volume (e.g. 2x5)" maxlength="100">
       <input type="text" name="d_cues_${i}" value="" placeholder="Cues" maxlength="200">
       <input type="text" name="d_why_${i}" value="" placeholder="Why? (what it trains)" maxlength="300">
@@ -5477,6 +5516,9 @@ function hittingPlanEditPage(user, p) {
       <h3>The Work — Drills</h3>
       <p class="hint-inline">Drill demos are all in the Remote library. Add the "why" for each.</p>
       ${drillRows}${drillBlanks}
+      <label class="fld">Environment variations (open angle, breaking balls, velo, etc. — leave blank for defaults)
+        <textarea name="env_variations" rows="4" placeholder="Custom variations, or blank for default...">${esc(plan.env_variations || '')}</textarea>
+      </label>
       <label class="fld">Footer note (optional)
         <textarea name="footer" rows="3" placeholder="e.g. Don't count a rep unless it's flush...">${esc(plan.footer || '')}</textarea>
       </label>
