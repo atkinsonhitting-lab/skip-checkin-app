@@ -2394,8 +2394,60 @@ function coachProgramsPage(user, remotePrograms, intake) {
     user,
     tabs: coachTabs('programs', user.approvalCount, user),
     body: `<h1 class="page-title">Programs</h1>
+    <div class="card" style="margin-bottom:16px">
+      <p style="margin:0"><a href="/coach/sample-hitting"><strong>👁️ View sample personalized hitting program</strong></a> <span class="hint-inline">— see what a questionnaire-built hitting program looks like</span></p>
+    </div>
     ${intakeSection(intake || {}, canEdit)}
     ${remoteProgramsSection(remotePrograms || [], canEdit)}`,
+  });
+}
+
+// Sample personalized hitting program (Sep 23 2026) — for Bobby to see what
+// a questionnaire-driven hitting program looks like. Not real athlete data.
+function sampleHittingPage(user, sample) {
+  const prog = sample;
+  const q = prog.questionnaire_snapshot || {};
+  const notes = (prog.personalization_notes || []).map((n) => `<li>${esc(n)}</li>`).join('');
+  const qRows = [
+    ['Environments', (q.environments || []).join(', ')],
+    ['Missing', (q.missing || []).join(', ')],
+    ['Goals', (q.goals || []).join('; ')],
+    ['Current EV', q.current_ev || ''],
+    ['Bat speed', q.current_bat_speed || ''],
+  ].filter(([, v]) => v).map(([k, v]) => `<div><strong>${esc(k)}:</strong> ${esc(v)}</div>`).join('');
+  const blocks = (prog.routine || []).map((b) => {
+    const items = (b.items || []).map((it) =>
+      `<div class="routine-row"><span class="routine-name">${esc(it.drill || '')}</span>${it.volume ? `<span class="hint-inline">${esc(it.volume)}</span>` : ''}</div>`
+    ).join('');
+    return `<details class="card routine-group" open><summary class="routine-summary"><span class="routine-station">${esc(b.category)}</span></summary>${items}</details>`;
+  }).join('');
+  const cues = prog.cues || {};
+  const cueRows = [['Movement', cues.movement], ['Timing', cues.timing], ['Game', cues.game]]
+    .filter(([, v]) => String(v || '').trim())
+    .map(([k, v]) => `<li><strong>${esc(k)}:</strong> ${esc(String(v).trim())}</li>`).join('');
+  return layout({
+    title: 'Sample Hitting Program',
+    user,
+    tabs: coachTabs('programs', user.approvalCount, user),
+    body: `<p><a href="/coach/programs">← Back to Programs</a></p>
+    <h1 class="page-title">Sample: Personalized Hitting Program</h1>
+    <div class="card" style="background:#e8f5e9;border:1px solid #4caf50;margin-bottom:16px">
+      <p style="margin:0"><strong>✓ Built from questionnaire</strong> <span class="hint-inline">— source: personalized</span></p>
+      ${notes ? `<ul style="margin:8px 0 0;padding-left:20px">${notes}</ul>` : ''}
+    </div>
+    <div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">Questionnaire snapshot</h3>
+      ${qRows}
+      <p class="hint" style="margin-bottom:0">Athlete: ${esc(prog.athlete || '')} · ${esc(prog.date_range || '')}</p>
+    </div>
+    <h2 class="section-head">The program</h2>
+    <p class="hint"><strong>Phase:</strong> ${esc(prog.phase_emphasis || '')}</p>
+    ${prog.adjustment ? `<div class="card"><p style="margin:0"><strong>Focus:</strong> ${esc(prog.adjustment)}</p></div>` : ''}
+    ${blocks}
+    ${cueRows ? `<h2 class="section-head">Cues to work on</h2><div class="card"><ul class="works-list" style="margin:0">${cueRows}</ul></div>` : ''}
+    <div class="card" style="margin-top:16px;background:#fff8e1;border:1px solid #f0d060">
+      <p style="margin:0"><strong>This is a sample.</strong> It shows what a hitting program built from questionnaire answers looks like — sections matched to his environments, drills picked for his goals, missing equipment omitted. The real builder (questionnaire → drill pool → program) is not yet built.</p>
+    </div>`,
   });
 }
 
@@ -5189,6 +5241,7 @@ module.exports = {
   coachThreadPage,
   playerMessagesPage,
   coachProgramsPage,
+  sampleHittingPage,
   coachApprovalsPage,
   coachFinancesPage,
   coachOrganizationsPage,

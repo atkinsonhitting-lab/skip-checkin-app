@@ -7066,6 +7066,14 @@ app.get('/coach/programs', requireGlobalCoachAny, (req, res) => {
   res.send(views.coachProgramsPage(realUser(req), remoteProgramList(), { url: intakeLink(req), intakes }));
 });
 
+// Sample personalized hitting program (Sep 23 2026) — Bobby wanted to see
+// what a questionnaire-built hitting program looks like. Coach-only, sample data.
+app.get('/coach/sample-hitting', requireGlobalCoachAny, (req, res) => {
+  setApprovalCount(req);
+  const { SAMPLE_HITTING_PROGRAM } = require('./sample_hitting.js');
+  res.send(views.sampleHittingPage(realUser(req), SAMPLE_HITTING_PROGRAM));
+});
+
 // Flip a coach between full access and view-only. Full coaches only, never
 // yourself, and never the last full-access coach.
 app.post('/coach/coaches/toggle', requireCoach, (req, res) => {
