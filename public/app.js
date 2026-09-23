@@ -977,16 +977,10 @@ document.querySelectorAll('.feel-slider input[type="range"]').forEach((el) => {
     .then((r) => r.json())
     .then((d) => {
       if (!d.ok || d.empty || !d.read) return;
-      const r = d.read;
-      const sections = [
-        ['✅ What\u2019s been working', r.working],
-        ['⚠️ What you\u2019ve been struggling with', r.struggling],
-        ['🧠 What you\u2019re thinking in good sessions', r.good_sessions],
-        ['📉 What\u2019s been happening in bad sessions', r.bad_sessions],
-      ].filter(([, items]) => items && items.length);
+      const sections = (d.read.sections || []).filter((s) => s && s.title && s.items && s.items.length);
       if (!sections.length) return;
-      body.innerHTML = sections.map(([title, items]) =>
-        `<div class="skips-read-section"><h3>${title}</h3><ul>${items.map((t) =>
+      body.innerHTML = sections.map((s) =>
+        `<div class="skips-read-section"><h3>${String(s.title).replace(/&/g, '&amp;').replace(/</g, '&lt;')}</h3><ul>${s.items.map((t) =>
           `<li>${String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;')}</li>`).join('')}</ul></div>`
       ).join('');
       box.hidden = false;

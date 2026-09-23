@@ -5179,21 +5179,16 @@ app.get('/api/notebook/read', requireLogin, async (req, res) => {
     ].filter(Boolean);
     return '- ' + parts.join(' | ');
   }).join('\n');
-  const system = `You are Skip, a hitting coach's AI. You MIRROR the hitter — you never fix, never diagnose, never invent mechanical causes. Look at these recent check-ins and notice patterns. Reply with ONLY a JSON object, no other text, with exactly these keys (each an array of 1-3 short strings, plain words, in second person, using the hitter's own language where possible):
-working: what's been working for him (from his good sessions)
-struggling: what he's been struggling with (recurring themes)
-good_sessions: what he's been thinking/feeling during his good sessions (mindset, focus)
-bad_sessions: what's been happening during his bad sessions (patterns, not diagnoses)
-Rules: short bullets (one line each). No advice, no fixes, no "you should". If there's no clear pattern for a section, use an empty array. Never repeat the same bullet twice.`;
+  const system = `You are Skip, a hitting coach's AI. You MIRROR the hitter — you never fix, never diagnose, never invent mechanical causes. Look at these recent check-ins and notice what's worth noticing: patterns, trends, things that keep showing up. Examples of the kinds of things to surface: what's been working, what he's been struggling with, what he's thinking during good sessions, what's happening during bad sessions, how following his routine connects to his scores, timing patterns, approach trends — but don't limit yourself to these. Surface whatever is actually there, in his own words.
+Reply with ONLY a JSON object, no other text: {"sections": [{"title": "short section title", "items": ["bullet 1", "bullet 2"]}]}. 2 to 5 sections, 1 to 3 bullets each, one line per bullet. No advice, no "you should". Never repeat the same bullet twice. Skip a section entirely if there's no real pattern for it.`;
   try {
     const raw = await geminiText(system, `Recent check-ins (newest first):\n${lines}`, 1200);
     const read = JSON.parse(raw.replace(/^```json\s*|\s*```$/g, '').trim());
-    const content = JSON.stringify({
-      working: read.working || [],
-      struggling: read.struggling || [],
-      good_sessions: read.good_sessions || [],
-      bad_sessions: read.bad_sessions || [],
-    });
+    const sections = Array.isArray(read.sections) ? read.sections
+      .filter((s) => s && s.title && Array.isArray(s.items) && s.items.length)
+      .slice(0, 5)
+      .map((s) => ({ title: String(s.title).slice(0, 80), items: s.items.map((i) => String(i).slice(0, 200)).slice(0, 3) })) : [];
+    const content = JSON.stringify({ sections });
     db.prepare(`INSERT INTO notebook_reads (user_id, generated_at, checkin_count, content)
                 VALUES (?, ?, ?, ?)
                 ON CONFLICT(user_id) DO UPDATE SET generated_at = excluded.generated_at,
