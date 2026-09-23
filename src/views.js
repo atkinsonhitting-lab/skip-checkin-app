@@ -2942,8 +2942,10 @@ function mentalGamePage(user, data) {
   const exerciseHtml = exercise ? `
     <div class="card" style="border-left:4px solid var(--accent)">
       <h2 class="routine-station">Today's mental exercise</h2>
-      <p style="margin:0 0 4px"><strong>${esc(exercise.title)}</strong></p>
-      <p style="margin:0 0 8px">${esc(exercise.prompt)}</p>
+      <p style="margin:0 0 4px"><strong>${esc(exercise.title)}</strong> <span class="hint">— ${esc(exercise.book)}</span></p>
+      <p style="margin:0 0 8px">${esc(exercise.concept)}</p>
+      <p style="margin:0 0 8px"><strong>Baseball:</strong> ${esc(exercise.baseball)}</p>
+      <p style="margin:0 0 8px"><strong>Do this:</strong> ${esc(exercise.action)}</p>
       ${exerciseDone
         ? '<p class="hint" style="margin:0">✓ Done for today. See you tomorrow.</p>'
         : `<form method="post" action="/mental-game/exercise/done" style="margin:0">
@@ -2952,10 +2954,13 @@ function mentalGamePage(user, data) {
     </div>` : '';
   // Bible verse card (opt-ins only)
   const bibleHtml = (bibleOptIn && bibleVerse) ? `
-    <div class="card">
+    <div class="card" style="border-left:4px solid #8b5cf6">
       <h2 class="routine-station">Daily Bible study</h2>
       <p style="margin:0 0 4px"><strong>${esc(bibleVerse.ref)}</strong> <span class="hint">— ${esc(bibleVerse.theme)}</span></p>
-      <p style="margin:0;font-style:italic">“${esc(bibleVerse.text)}”</p>
+      <p style="margin:0 0 8px;font-style:italic">“${esc(bibleVerse.text)}”</p>
+      <p style="margin:0 0 8px">${esc(bibleVerse.explanation)}</p>
+      <p style="margin:0 0 8px"><strong>Baseball:</strong> ${esc(bibleVerse.baseball)}</p>
+      <p style="margin:0"><strong>Life:</strong> ${esc(bibleVerse.life)}</p>
     </div>` : '';
   // Check-in CTA (if not checked in today)
   const checkinHtml = !checkedInToday ? `
