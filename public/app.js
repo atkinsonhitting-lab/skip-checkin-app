@@ -18,22 +18,29 @@ window.SkipMic = (function () {
     rec.onstop = async () => {
       if (onStatus) onStatus('Transcribing…');
       const blob = new Blob(chunks, { type: mime });
+      // Skip tiny/empty recordings (tap-stop with no speech).
+      if (blob.size < 2000) { onDone(''); return; }
       const b64 = await new Promise((resolve) => {
         const r = new FileReader();
         r.onloadend = () => resolve(String(r.result).split(',')[1] || '');
         r.readAsDataURL(blob);
       });
-      try {
-        const resp = await fetch('/api/transcribe', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ audio: b64, mime }),
-        });
-        const d = await resp.json();
-        onDone(d.ok ? d.transcript || '' : '');
-      } catch (e) {
-        onDone('');
+      // Try transcription twice before giving up — don't make them re-record
+      // for a one-off server hiccup (Bobby, Sep 23 2026).
+      let transcript = '';
+      for (let attempt = 0; attempt < 2 && !transcript; attempt++) {
+        if (attempt > 0 && onStatus) onStatus('One more try…');
+        try {
+          const resp = await fetch('/api/transcribe', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ audio: b64, mime }),
+          });
+          const d = await resp.json();
+          if (d.ok && d.transcript) transcript = d.transcript;
+        } catch (e) { /* retry once */ }
       }
+      onDone(transcript);
     };
     rec.start();
     return () => { if (rec.state !== 'inactive') rec.stop(); };
@@ -840,7 +847,8 @@ window.SkipMic = (function () {
   });
 
   // Sort it out: parse the text into the 6 reflection fields.
-  sortBtn.addEventListener('click', () => {
+  if (sortBtn) {
+    sortBtn.addEventListener('click', () => {
     const text = ta.value.trim();
     if (!text) { setStatus('Talk or type something first.'); return; }
     setStatus('Skip is sorting that out…');
@@ -868,7 +876,8 @@ window.SkipMic = (function () {
         fields.scrollIntoView({ behavior: 'smooth', block: 'start' });
       })
       .catch(() => { setStatus('Something went wrong — just fill the fields in.'); fields.hidden = false; });
-  });
+    });
+  }
 })();
 
 // Lock In routine player (Sep 23 2026): immersive full-screen, one step at

@@ -4522,7 +4522,7 @@ app.post('/checkin', requireLogin, async (req, res) => {
   }
   const swingFeel = parseInt(b.swing_feel, 10);
   if (!Number.isFinite(swingFeel) || swingFeel < 1 || swingFeel > 10) {
-    return fail('Move the slider to rate how your swing felt.');
+    return fail('Move the slider to rate the session.');
   }
   const talkText = String(b.talk_text || '').trim().slice(0, 4000);
   // Skip sorts it out: parse the talk text into the structured fields.
@@ -4839,7 +4839,7 @@ app.post('/checkin/:id', requireLogin, async (req, res) => {
     if (!sessionTypes.includes(b.session_type)) return fail('Pick what you did today.');
     const swingFeel = parseInt(b.swing_feel, 10);
     if (!Number.isFinite(swingFeel) || swingFeel < 1 || swingFeel > 10) {
-      return fail('Move the slider to rate how your swing felt.');
+      return fail('Move the slider to rate the session.');
     }
     const talkText = String(b.talk_text || b.session_notes || '').trim().slice(0, 4000);
     let parsed = {};

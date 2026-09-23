@@ -756,7 +756,7 @@ function checkinForm(user, error, values, drillNames, routine, recentGroups, act
       <div class="field-label compact">Follow your hitting routine?</div>
       <a href="/routine" class="btn btn-secondary btn-sm" style="margin-bottom:8px">View / edit my routine</a>
       ${pill('routine_followed', [['yes', 'Yes'], ['mostly', 'Mostly'], ['no', 'No']], v.routine_followed)}
-      <div class="field-label compact">How did your swing feel?</div>
+      <div class="field-label compact">Rate the session as a whole</div>
       ${slider('swing_feel', v.swing_feel)}
       <hr style="margin:14px 0;border:none;border-top:1px solid var(--line)">
       <div style="text-align:center">
@@ -1363,7 +1363,7 @@ function checkinCard(c, opts) {
   try { pitchesThrown = JSON.parse(c.pitches_thrown || '[]'); } catch (e) {}
   const score = `${c.session_score != null ? `<div class="checkin-score">
       ${levelLine(c.session_score, c.score_tier)}
-      ${restricted ? '' : `<span class="hint-inline">${c.session_type ? esc(c.session_type.replace('_', ' ')) + ' · ' : ''}${c.swing_feel ? `Swing ${esc(c.swing_feel)}/5` : ''}${c.timing ? ` · Timing ${esc(c.timing.replace('_', ' '))}` : ''}${c.contact_quality ? ` · Contact ${esc(c.contact_quality)}/5` : ''}${c.approach_score ? ` · Approach ${esc(c.approach_score)}/5` : ''}${c.routine_followed ? ` · Routine: ${esc(c.routine_followed)}` : ''}</span>`}
+      ${restricted ? '' : `<span class="hint-inline">${c.session_type ? esc(c.session_type.replace('_', ' ')) + ' · ' : ''}${c.swing_feel ? `Session ${esc(c.swing_feel)}/10` : ''}${c.timing ? ` · Timing ${esc(c.timing.replace('_', ' '))}` : ''}${c.contact_quality ? ` · Contact ${esc(c.contact_quality)}/5` : ''}${c.approach_score ? ` · Approach ${esc(c.approach_score)}/5` : ''}${c.routine_followed ? ` · Routine: ${esc(c.routine_followed)}` : ''}</span>`}
       ${throwBits.length ? `<div class="hint-inline">${throwBits.join(' · ')}</div>` : ''}
       ${pitchesThrown.length ? `<div class="drill-chips">${pitchesThrown.map((p) => `<span class="chip">${esc(p)}</span>`).join('')}</div>` : ''}
     </div>` : ''}`;
