@@ -210,11 +210,11 @@ body.drawer-open #drawer { transform: none; }
 .routine-remove { margin: 0; }
 .chip-station { color: var(--muted); font-weight: 400; }
 .field-label { font-weight: 600; font-size: 14px; margin: 14px 0 6px; }
-.pills { display: flex; gap: 8px; flex-wrap: wrap; }
+.pills { display: flex; gap: 6px; flex-wrap: wrap; }
 .pill input { display: none; }
 .pill span {
-  display: inline-block; padding: 12px 18px; border-radius: 24px;
-  border: 1px solid var(--line); font-size: 15px; font-weight: 600; cursor: pointer;
+  display: inline-block; padding: 8px 13px; border-radius: 20px;
+  border: 1px solid var(--line); font-size: 14px; font-weight: 600; cursor: pointer;
 }
 .pill input:checked + span { background: var(--red); border-color: var(--red); color: #fff; }
 .btn-primary {

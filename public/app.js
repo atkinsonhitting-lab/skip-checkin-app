@@ -2,14 +2,52 @@
 // iOS remembers the mic permission, so it only asks once — unlike the
 // Web Speech API which prompts on every use. Audio goes to /api/transcribe.
 window.SkipMic = (function () {
+  // Prefer the phone's built-in speech recognition (Bobby, Sep 23 2026) —
+  // far more accurate for dictation than server transcription, and instant.
+  // Falls back to MediaRecorder + server transcribe where unsupported.
+  function webspeechRecord(onDone, onStatus) {
+    const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Rec) return null;
+    const rec = new Rec();
+    rec.lang = 'en-US';
+    rec.interimResults = true;
+    rec.continuous = true;
+    let finalText = '';
+    let stopped = false;
+    rec.onresult = (ev) => {
+      let interim = '';
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        const t = ev.results[i][0].transcript;
+        if (ev.results[i].isFinal) finalText += t + ' ';
+        else interim += t;
+      }
+      if (onStatus) onStatus('Heard: "' + (finalText + interim).trim().slice(0, 80) + '…"');
+    };
+    rec.onerror = (ev) => {
+      if (stopped) return;
+      stopped = true;
+      try { rec.stop(); } catch (e) {}
+      onDone(finalText.trim());
+    };
+    rec.onend = () => {
+      if (stopped) return;
+      stopped = true;
+      onDone(finalText.trim());
+    };
+    try { rec.start(); } catch (e) { return null; }
+    if (onStatus) onStatus('Listening… tap again to stop');
+    return () => { if (!stopped) { stopped = true; try { rec.stop(); } catch (e) {} } };
+  }
   let stream = null;
   async function getStream() {
     if (stream && stream.active) return stream;
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     return stream;
   }
-  // onDone(transcript), onStatus(text). Returns a stop function.
+  // onDone(transcript), onStatus(text). Returns a stop function (or promise of one).
   async function record(onDone, onStatus) {
+    const ws = webspeechRecord(onDone, onStatus);
+    if (ws) return ws;
     const s = await getStream();
     const mime = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
     const rec = new MediaRecorder(s, { mimeType: mime });
@@ -816,7 +854,8 @@ window.SkipMic = (function () {
   const sortBtn = document.getElementById('sort-it-out');
   const fields = document.getElementById('talk-fields');
   const setStatus = (t) => { if (status) { status.style.display = t ? 'block' : 'none'; status.textContent = t; } };
-  if (!window.SkipMic || !navigator.mediaDevices) { mic.style.display = 'none'; }
+  const micOk = window.SkipMic && (window.SpeechRecognition || window.webkitSpeechRecognition || navigator.mediaDevices);
+  if (!micOk) { mic.style.display = 'none'; }
 
   // Talking points: tap to append a starter to the text.
   document.querySelectorAll('.talk-point').forEach((chip) => {
