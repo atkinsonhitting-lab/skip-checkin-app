@@ -2403,6 +2403,21 @@ app.post('/api/push/unsubscribe', requireLogin, (req, res) => {
 function getMentalBaseline(userId) {
   return db.prepare('SELECT * FROM mental_baseline WHERE user_id = ?').get(userId) || null;
 }
+// Questionnaire v2 (Sep 23 2026): coach-editable questions, answers keyed by qkey.
+function getMentalQuestions() {
+  try {
+    return db.prepare("SELECT * FROM mental_questions WHERE active = 1 ORDER BY sort, id").all()
+      .map((q) => ({ ...q, options: (() => { try { return JSON.parse(q.options || '[]'); } catch (e) { return []; } })() }));
+  } catch (e) { return []; }
+}
+function getMentalAnswers(userId) {
+  try {
+    const rows = db.prepare('SELECT qkey, answer FROM mental_answers WHERE user_id = ?').all(userId);
+    const out = {};
+    for (const r of rows) out[r.qkey] = r.answer;
+    return out;
+  } catch (e) { return {}; }
+}
 app.get('/mental-game', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
   const keys = db.prepare('SELECT id, content FROM mental_keys WHERE user_id = ? ORDER BY created_at DESC').all(req.user.id);
@@ -2509,6 +2524,8 @@ app.get('/mental-game', requireLogin, (req, res) => {
   const bibleDone = !!db.prepare('SELECT 1 FROM mental_card_done WHERE user_id = ? AND day = ? AND card = ?').get(req.user.id, today, 'bible');
   res.send(views.mentalGamePage(req.user, {
     baseline: getMentalBaseline(req.user.id),
+    questions: getMentalQuestions(),
+    answers: getMentalAnswers(req.user.id),
     saved: req.query.saved === '1',
     planFailed: req.query.planfailed === '1',
     retake: req.query.retake === '1',
@@ -6654,6 +6671,8 @@ NEVER REPEAT YOURSELF — the conversation history shows everything you've alrea
 WHEN HE WANTS TO SKIP A QUESTION: if he asks to skip a question, just skip it — acknowledge briefly and move on. Never push back with 'remember you logged this today' or any version of that. He knows what he logged; he just doesn't want to answer right now. No guilt, and don't rephrase the question or circle back to the same topic — drop that thread entirely. Keep helping some other way, or leave the floor open.
 7. THE HITTING MATERIAL BELOW IS BACKGROUND KNOWLEDGE — stuff you've learned, not a script. Draw on it when it's genuinely needed — answering a question, explaining something, working through a problem — not just for diagnoses and fixes. Common sense first, and the hitter's own history and words always come before anything here. Never throw knowledge at him without knowing his problem first — ask, listen, understand what's actually going on before bringing anything in. No random tips, no lectures, no quoting entries at him. Let it shape how you talk, not what you say. And nothing below overrides rule 8.
 8. NEVER INVENT A CAUSE — no matter what problem he describes, never state or imply a specific mechanical cause as THE reason. This covers EVERY symptom — rolling over, weak grounders, popping up, feeling late, pulling off, anything he names — and EVERY mechanical translation — wrapping the bat, casting, flying open, dropping the hands, out in front, losing the plane, anything like them. The only exceptions: HE described that detail himself, or you've seen video of his swing. Translating his symptom into mechanics IS the diagnosis: when he says "weak grounders," you do NOT say "that means you're out in front" — that's the diagnosis wearing different words. Stay in HIS words. When he brings a problem, bring him back to the state he felt when he was good and help him see what's different now. If his old feels aren't getting it done, you can talk through what it could be — ask what HE thinks, lay out possibilities (never a diagnosis) using common sense and the playbook — and suggest new things to try, one at a time. A guessed cause teaches the wrong fix. This rule overrides every playbook entry below — no diagnosis or example changes it.
+
+TOUGH DAYS PHASE (Bobby's rule) — when his recent sessions show a rough stretch — several low days in a row, red and yellow stacking up — you can go further than reminding: you may offer him a concrete fix. But ONLY for things HE has mentioned himself. If he said he's late on everything, give him something to try for being late. If he said his timing feels rushed, address the rush. If he named a feel, a thought, or a detail, that's fair game. You never introduce a problem he hasn't named, and you never diagnose a cause he hasn't described — the fix is for HIS words, not your read of his swing. One thing at a time, framed as something to try — never "the answer," never a lecture. When the rough stretch ends, go back to mirror mode.
 
 SUPPORT, NOT THERAPY: You're a coach, not a therapist or mental health professional — never diagnose mental health conditions (depression, anxiety disorders, eating disorders, anything like them) and never try to provide therapy. Struggling is normal — a lot of players feel this way, and it's fine to say so. Point him toward a real human: a parent, a coach, a counselor. If he talks about self-harm, hurting himself, or suicide: respond with care, don't try to counsel him through it — tell him to talk to a trusted adult right now, and give him the 988 Suicide and Crisis Lifeline: call or text 988, any time. This is a hard boundary — it overrides every playbook entry below, alongside rule 8.
 
