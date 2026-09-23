@@ -2356,6 +2356,21 @@ app.get('/mental-game', requireLogin, (req, res) => {
       .run(req.user.id, JSON.stringify(DEFAULT_MORNING.map(t => ({ text: t, done: false }))), JSON.stringify(DEFAULT_PREGAME.map(t => ({ text: t, done: false }))), JSON.stringify(DEFAULT_PRACTICE.map(t => ({ text: t, done: false }))), new Date().toISOString());
     routineRow = db.prepare('SELECT morning_json, pregame_json, prepractice_json FROM mental_routines WHERE user_id = ?').get(req.user.id);
   }
+  // Backfill: existing rows may have empty morning/pregame/practice lists
+  // from before defaults existed (Sep 23 2026).
+  try {
+    const m = JSON.parse(routineRow.morning_json || '[]');
+    const g = JSON.parse(routineRow.pregame_json || '[]');
+    const p = JSON.parse(routineRow.prepractice_json || '[]');
+    let changed = false;
+    if (!m.length) { routineRow.morning_json = JSON.stringify(DEFAULT_MORNING.map(t => ({ text: t, done: false }))); changed = true; }
+    if (!g.length) { routineRow.pregame_json = JSON.stringify(DEFAULT_PREGAME.map(t => ({ text: t, done: false }))); changed = true; }
+    if (!p.length) { routineRow.prepractice_json = JSON.stringify(DEFAULT_PRACTICE.map(t => ({ text: t, done: false }))); changed = true; }
+    if (changed) {
+      db.prepare('UPDATE mental_routines SET morning_json = ?, pregame_json = ?, prepractice_json = ?, updated_at = ? WHERE user_id = ?')
+        .run(routineRow.morning_json, routineRow.pregame_json, routineRow.prepractice_json, new Date().toISOString(), req.user.id);
+    }
+  } catch (e) { /* keep whatever parsed */ }
   const routineItems = JSON.parse(routineRow.morning_json || '[]');
   const pregameItems = JSON.parse(routineRow.pregame_json || '[]');
   const practiceItems = JSON.parse(routineRow.prepractice_json || '[]');
