@@ -2303,6 +2303,7 @@ app.get('/mental-game', requireLogin, (req, res) => {
     baseline: getMentalBaseline(req.user.id),
     saved: req.query.saved === '1',
     planFailed: req.query.planfailed === '1',
+    retake: req.query.retake === '1',
     keys,
     exercise,
     exerciseDone,
@@ -2314,8 +2315,8 @@ app.get('/mental-game', requireLogin, (req, res) => {
 });
 
 app.get('/mental-game/questionnaire', requireLogin, (req, res) => {
-  if (req.user.role === 'coach') return res.redirect('/coach');
-  res.send(views.questionnairePage(req.user, getMentalBaseline(req.user.id), req.query.saved === '1', req.query.planfailed === '1'));
+  // Questionnaire now lives on the Lock In tab itself (Sep 23 2026) — redirect.
+  res.redirect('/mental-game?retake=1');
 });
 
 app.post('/mental-game/exercise/done', requireLogin, (req, res) => {
