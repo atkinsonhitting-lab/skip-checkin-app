@@ -5100,13 +5100,15 @@ function hittingPlanPage(user, p) {
 
   // === Weekly schedule (compact) ===
   const schedule = Array.isArray(prog.schedule) ? prog.schedule : [];
-  const scheduleHtml = schedule.length
-    ? `<p class="sched-line"><strong>Repeat ${esc(String(schedule.length))}x per week:</strong> ${schedule.map((s) => {
-        const day = s.day || s.label || '';
-        const work = s.work || s.blocks || s.type || '';
-        const workStr = Array.isArray(work) ? work.join(', ') : String(work);
-        return day ? `${esc(day)} — ${esc(workStr)}` : esc(workStr);
-      }).join(' · ')}</p>`
+  const schedItems = schedule.map((s) => {
+    const day = s.day || s.label || '';
+    const work = s.work || s.blocks || s.type || '';
+    const workStr = Array.isArray(work) ? work.join(', ') : String(work);
+    const txt = day ? `${day} — ${workStr}` : workStr;
+    return txt.trim();
+  }).filter(Boolean);
+  const scheduleHtml = schedItems.length
+    ? `<p class="sched-line"><strong>Repeat ${schedItems.length}x per week:</strong> ${schedItems.map(esc).join(' · ')}</p>`
     : '';
 
   // === DRILL TABLE (Trey style: two columns, drill+why left, volume right) ===

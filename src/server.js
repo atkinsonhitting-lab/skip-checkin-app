@@ -1806,6 +1806,9 @@ function buildHittingPlan(prog) {
   // Bobby (Sep 23 2026): warmup is Prep Work ONLY — not Daily Routine, not generic warm, not mobility.
   const isWarmupCat = (c) => /prep/i.test(c || '') && !/mobility/i.test(c || '');
   const isMedballCat = (c) => /med\s*ball/i.test(c || '');
+  // Bobby (Sep 23 2026): mobility exercises NEVER go in the hitting doc — they live in lifting.
+  // Filter by name even if they're sitting inside a Prep Work block.
+  const isMobilityDrill = (name) => /90\/90|hip\s*switch|open\s*book|thoracic|cat-?cow|thread\s*the\s*needle|wall\s*slide|band\s*pull|knee-?to-?wall|ankle\s*circle|hip\s*circle|leg\s*swing|spiderman|lizard|pigeon|frog|t-spine|shoulder\s*car|hip\s*car/i.test(name || '');
   // Map category → training environment for the drill progression
   const envOf = (c) => {
     const s = String(c || '').toLowerCase();
@@ -1831,12 +1834,12 @@ function buildHittingPlan(prog) {
       }
     } else if (isWarmupCat(cat)) {
       for (const it of items) {
-        if (it.drill) warmup.push({ name: it.drill, detail: it.volume || '' });
+        if (it.drill && !isMobilityDrill(it.drill)) warmup.push({ name: it.drill, detail: it.volume || '' });
       }
     } else if (isHittingCat(cat)) {
       const env = envOf(cat);
       for (const it of items) {
-        if (!it.drill) continue;
+        if (!it.drill || isMobilityDrill(it.drill)) continue;
         // Environment variations go to the bottom, not the drill table
         if (isEnvVariation(it.drill)) {
           envVariations.push(it.drill);
