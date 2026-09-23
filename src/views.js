@@ -3172,7 +3172,7 @@ function mentalGamePage(user, data) {
   })();
   const heroCard = (which, icon, title, items, done, timeEst) => `
     <button type="button" class="routine-hero${done ? ' done' : ''}" data-routine="${which}"
-      data-steps="${esc(JSON.stringify({ which, steps: which === 'morning' ? morningSteps : (items || []).map((it) => ({ title: it.text || '', detail: it.detail || '', kind: /breath/i.test(it.text || '') ? 'breath' : 'step' })) }))}">
+      data-steps="${esc(JSON.stringify({ which, steps: which === 'morning' ? morningSteps : (items || []).map((it) => ({ title: it.text || it.title || '', detail: it.detail || '', kind: it.kind || (/breath/i.test(it.text || it.title || '') ? 'breath' : 'step') })) }))}">
       <span class="routine-hero-icon">${done ? '✓' : icon}</span>
       <span class="routine-hero-body">
         <span class="routine-hero-title">${esc(title)}</span>
@@ -3186,7 +3186,13 @@ function mentalGamePage(user, data) {
     ${heroCard('morning', '🌅', 'Morning Routine', routineItems, routineDone, '3 min')}
     ${heroCard('pregame', '⚾', 'Game Day', pregameItems, pregame.done, '2 min')}
     ${heroCard('practice', '🔥', 'Practice Day', practiceItems, practice.done, '2 min')}
-    ${exercise ? heroCard('exercise', '🧠', 'Daily Exercise', [{ text: exercise.title, detail: exercise.action }], exerciseDone, '5 min') : ''}
+    ${exercise ? heroCard('exercise', '🧠', 'Daily Exercise',
+      [
+        { text: exercise.title, detail: exercise.concept, kind: 'step' },
+        { text: 'Baseball application', detail: exercise.baseball, kind: 'step' },
+        { text: 'Do this', detail: exercise.action, kind: 'step' },
+      ],
+      exerciseDone, '5 min') : ''}
     <div class="routine-player" id="routine-player" hidden>
       <div class="rp-top">
         <button type="button" class="rp-close" id="rp-close" aria-label="Close">✕</button>
@@ -3200,7 +3206,6 @@ function mentalGamePage(user, data) {
       </div>
     </div>
     <h2 class="section-title" style="margin-top:16px">Yours</h2>
-    ${planCard}
     ${card('keys', 'Your Keys', false, keysContent)}
   ` : '';
 

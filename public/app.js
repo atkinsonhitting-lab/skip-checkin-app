@@ -892,7 +892,11 @@ window.SkipMic = (function () {
     backBtn.style.visibility = idx === 0 ? 'hidden' : 'visible';
     nextBtn.textContent = idx === total - 1 ? 'Finish' : 'Next';
     let html = '';
-    if (s.kind === 'bible') {
+    if (s.kind === 'intro') {
+      html = `<div class="rp-kind">Why this matters</div>
+        <h2 class="rp-title">${escHtml(s.title)}</h2>
+        <p class="rp-detail">${escHtml(s.detail)}</p>`;
+    } else if (s.kind === 'bible') {
       html = `<div class="rp-kind">Daily verse</div>
         <p class="rp-verse">\u201c${escHtml(s.verse)}\u201d</p>
         <div class="rp-ref">${escHtml(s.ref)}${s.theme ? ' · ' + escHtml(s.theme) : ''}</div>
@@ -919,10 +923,30 @@ window.SkipMic = (function () {
     which = data.which;
     steps = data.steps || [];
     if (!steps.length) return;
+    // Intro screen explains the routine before the steps (Bobby, Sep 23 2026).
+    steps = [{ title: introFor(which).title, detail: introFor(which).detail, kind: 'intro' }, ...steps];
     idx = 0;
     player.hidden = false;
     document.body.style.overflow = 'hidden';
     render();
+  }
+  function introFor(w) {
+    if (w === 'morning') return {
+      title: 'Morning Routine',
+      detail: 'Your mind sets the day before your body does. Three quiet minutes every morning — breathe, lock your word, see it before it happens. Do this daily and you stop hoping you show up locked in. You decide it.',
+    };
+    if (w === 'pregame') return {
+      title: 'Game Day',
+      detail: 'Games are won by the mind that has already been there. This is your pregame lock-in — slow it down, trust your eyes, and walk to the plate already knowing who you are.',
+    };
+    if (w === 'practice') return {
+      title: 'Practice Day',
+      detail: 'Practice is where games are built. Lock in before you pick up a bat — one focus, full intent. No wasted reps. Every swing has a job.',
+    };
+    return {
+      title: 'Daily Exercise',
+      detail: 'One concept a day from the best minds in the mental game. Read it, feel it, carry it into today. Small daily edges stack into a different player.',
+    };
   }
   function close() {
     player.hidden = true;
@@ -941,9 +965,10 @@ window.SkipMic = (function () {
       // Mark the routine done server-side, then close.
       fetch('/mental-game/routine/done', {
         method: 'POST',
+        credentials: 'same-origin',
         headers: { 'content-type': 'application/x-www-form-urlencoded' },
         body: 'which=' + encodeURIComponent(which === 'morning' ? 'morning' : which),
-      }).finally(() => location.reload());
+      }).then(() => location.reload()).catch(() => location.reload());
     };
   }
   nextBtn.onclick = () => {

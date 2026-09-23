@@ -2534,9 +2534,11 @@ app.post('/mental-game/exercise/done', requireLogin, (req, res) => {
   res.redirect('/mental-game');
 });
 
-app.post('/mental-game/keys/delete', requireLogin, (req, res) => {
+app.post('/mental-game/keys/delete', requireLogin, async (req, res) => {
   const id = parseInt(req.body.id, 10);
   if (id) db.prepare('DELETE FROM mental_keys WHERE id = ? AND user_id = ?').run(id, req.user.id);
+  // Keys changed — the plan adjusts to what he wants (Bobby, Sep 23 2026).
+  refreshMentalPlan(req.user.id).catch(() => {});
   res.redirect('/mental-game');
 });
 // Lock In routine builder (Sep 23 2026) — morning / pregame / pre-practice checklists.
@@ -2824,7 +2826,7 @@ DAILY WORK
 
 Keep the whole thing 300-400 words. Every section must reference something HE actually said — never generic. If he didn't answer something, skip that section rather than guessing.`;
 
-async function buildMentalPlan(baseline) {
+async function buildMentalPlan(baseline, userId) {
   const bits = [];
   const routineWord = { yes: 'has a routine he trusts', sortof: 'sort of has a routine', no: 'has no routine' }[baseline.has_routine] || 'did not say';
   const headWord = { present: 'usually present', between: 'in between', worried: 'usually worried' }[baseline.head_state] || 'did not say';
@@ -2853,7 +2855,27 @@ async function buildMentalPlan(baseline) {
   const postWord = { replay: 'replays mistakes over and over', forget: 'tries to forget bad games', review: 'reviews then moves on', beat_up: 'beats himself up' }[baseline.post_game];
   if (postWord) bits.push(`After bad games: ${postWord}.`);
   if (baseline.focus_pull) bits.push(`What pulls his focus: "${baseline.focus_pull}"`);
+  // His keys adjust the plan (Bobby, Sep 23 2026) — what he wants, in his words.
+  if (userId) {
+    try {
+      const keys = db.prepare('SELECT content FROM mental_keys WHERE user_id = ? ORDER BY created_at DESC').all(userId);
+      if (keys.length) bits.push(`His personal keys (he chose these — build the plan around them):\n${keys.map((k) => `- "${k.content}"`).join('\n')}`);
+    } catch (e) {}
+  }
   return geminiText(MENTAL_PLAN_SYSTEM, `This hitter's mental-game baseline:\n${bits.join('\n')}`, 800);
+}
+
+// Regenerate the plan when keys change — the plan adjusts to what he wants.
+async function refreshMentalPlan(userId) {
+  const baseline = getMentalBaseline(userId);
+  if (!baseline || !baseline.plan) return;
+  try {
+    const plan = await buildMentalPlan(baseline, userId);
+    db.prepare('UPDATE mental_baseline SET plan = ?, updated_at = ? WHERE user_id = ?')
+      .run(plan, new Date().toISOString(), userId);
+  } catch (e) {
+    console.warn('plan refresh failed:', e.message);
+  }
 }
 
 app.post('/mental-game/save', requireLogin, async (req, res) => {
@@ -2885,7 +2907,7 @@ app.post('/mental-game/save', requireLogin, async (req, res) => {
   let plan = (getMentalBaseline(req.user.id) || {}).plan || '';
   let planFailed = false;
   try {
-    plan = await buildMentalPlan(row);
+    plan = await buildMentalPlan(row, req.user.id);
   } catch (e) {
     planFailed = true;
   }
@@ -7042,6 +7064,8 @@ app.post('/api/chat', requireLogin, async (req, res) => {
     if (keyContent.length > 3) {
       db.prepare('INSERT INTO mental_keys (user_id, content, created_at) VALUES (?, ?, ?)')
         .run(req.user.id, keyContent, now);
+      // Keys changed — the plan adjusts to what he wants (Bobby, Sep 23 2026).
+      refreshMentalPlan(req.user.id).catch(() => {});
       saveNote = `The hitter just asked you to save this to their Lock In tab, and it's already saved there: "${keyContent}". Confirm briefly in your reply (one line) that it's on their Lock In tab now.`;
     } else {
       saveNote = `The hitter said something like "add this to my lock in" but didn't include what to save. Ask them what they want on their Lock In tab.`;
