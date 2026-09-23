@@ -5,15 +5,22 @@ window.SkipMic = (function () {
   // Prefer the phone's built-in speech recognition (Bobby, Sep 23 2026) —
   // far more accurate for dictation than server transcription, and instant.
   // Falls back to MediaRecorder + server transcribe where unsupported.
-  function webspeechRecord(onDone, onStatus) {
+  // Like the iOS keyboard mic (Bobby, Sep 23 2026): words appear in the
+  // text box LIVE as they speak. `target` is the textarea to fill.
+  function webspeechRecord(onDone, onStatus, target) {
     const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!Rec) return null;
+    if (!Rec || !target) return null;
     const rec = new Rec();
     rec.lang = 'en-US';
     rec.interimResults = true;
     rec.continuous = true;
+    const base = target.value ? target.value.replace(/\s+$/, '') + ' ' : '';
     let finalText = '';
     let stopped = false;
+    const paint = (interim) => {
+      target.value = base + finalText + interim;
+      target.scrollTop = target.scrollHeight;
+    };
     rec.onresult = (ev) => {
       let interim = '';
       for (let i = ev.resultIndex; i < ev.results.length; i++) {
@@ -21,7 +28,8 @@ window.SkipMic = (function () {
         if (ev.results[i].isFinal) finalText += t + ' ';
         else interim += t;
       }
-      if (onStatus) onStatus('Heard: "' + (finalText + interim).trim().slice(0, 80) + '…"');
+      paint(interim);
+      if (onStatus) onStatus('Listening… tap again to stop');
     };
     rec.onerror = (ev) => {
       if (stopped) return;
@@ -45,8 +53,9 @@ window.SkipMic = (function () {
     return stream;
   }
   // onDone(transcript), onStatus(text). Returns a stop function (or promise of one).
-  async function record(onDone, onStatus) {
-    const ws = webspeechRecord(onDone, onStatus);
+  // Pass { target: textarea } for live keyboard-mic-style fill.
+  async function record(onDone, onStatus, opts) {
+    const ws = webspeechRecord(onDone, onStatus, opts && opts.target);
     if (ws) return ws;
     const s = await getStream();
     const mime = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
@@ -866,7 +875,7 @@ window.SkipMic = (function () {
     });
   });
 
-  // Big mic: record, transcribe into the textarea.
+  // Big mic: keyboard-mic style — words fill the box live as they speak.
   let stopFn = null;
   mic.addEventListener('click', () => {
     if (stopFn) { try { stopFn(); } catch (e) {} stopFn = null; return; }
@@ -875,13 +884,12 @@ window.SkipMic = (function () {
     window.SkipMic.record((transcript) => {
       mic.classList.remove('listening');
       stopFn = null;
-      if (transcript) {
+      // Web Speech path already painted live; fallback path appends here.
+      if (transcript && !ta.value.trim().endsWith(transcript.trim().slice(-20))) {
         ta.value = ta.value ? ta.value.replace(/\s+$/, '') + ' ' + transcript : transcript;
-        setStatus('Got it — hit "Sort it out" or keep talking.');
-      } else {
-        setStatus('Didn\u2019t catch that — try again.');
       }
-    }, setStatus).then((fn) => { stopFn = fn; })
+      setStatus(transcript || ta.value.trim() ? 'Got it — keep talking or hit submit.' : 'Didn\u2019t catch that — try again.');
+    }, setStatus, { target: ta }).then((fn) => { stopFn = fn; })
       .catch(() => { mic.classList.remove('listening'); setStatus('Microphone blocked — allow mic access in Settings.'); });
   });
 

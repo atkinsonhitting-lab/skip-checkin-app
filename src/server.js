@@ -4539,6 +4539,7 @@ biggest_struggle: string (what they struggled with, "" if not mentioned)
 adjustment_helped: string (what adjustment or feel helped, "" if not mentioned)
 learned: string (what they learned about themselves, "" if not mentioned)
 whats_next: string (their one focus for next time, "" if not mentioned)
+This was phone dictation, so expect misheard words — silently correct obvious ones from baseball context ("tee" not "tea", "cage" not "couch", "live ABs" not "libbies", "barrel" not "battle", "hands" not "hams"). Never mention the correction; just use the right word.
 Infer ratings from their words (e.g. "felt great" = 5, "terrible" = 1, "pretty good" = 4). Keep text fields to one or two sentences, in their voice.`;
       const raw = await geminiText(system, talkText, 800);
       parsed = JSON.parse(raw.replace(/^```json\s*|\s*```$/g, '').trim()) || {};
