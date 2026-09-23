@@ -1559,22 +1559,9 @@ function showBiblePopupFor(user, bibleStudy) {
 
 app.get('/', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
-  const { avgScore, checkinCount } = userScoreSummary(req.user.id);
-  const recent = db
-    .prepare('SELECT * FROM checkins WHERE user_id = ? ORDER BY created_at DESC LIMIT 3')
-    .all(req.user.id);
-  const bsRow = db.prepare('SELECT bible_study FROM users WHERE id = ?').get(req.user.id);
-  res.send(views.userHome(req.user, {
-    whatWorks: whatWorksData(req.user.athleteName, req.user.id),
-    avgScore,
-    checkinCount,
-    recent,
-    streak: streakData(req.user.id),
-    pushOn: userPushSubscriptions(req.user.id).length > 0,
-    pushEnabled,
-    precheckin: todayPreCheckin(req.user.id),
-    showBiblePopup: showBiblePopupFor(req.user, bsRow ? bsRow.bible_study : null),
-  }));
+  // Athletes land on Mental Game (Sep 23 2026) — it's the hub: today's
+  // exercise, the verse, check-in. Home tab is gone.
+  res.redirect('/mental-game');
 });
 
 // Remote-program players (Bobby's remote hitters) already have a plan, so
@@ -2306,7 +2293,32 @@ function getMentalBaseline(userId) {
 app.get('/mental-game', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
   const keys = db.prepare('SELECT id, content FROM mental_keys WHERE user_id = ? ORDER BY created_at DESC').all(req.user.id);
-  res.send(views.mentalGamePage(req.user, getMentalBaseline(req.user.id), req.query.saved === '1', req.query.planfailed === '1', keys));
+  const exercise = todayMentalExercise();
+  const today = todayChicagoDate();
+  const exerciseDone = !!db.prepare('SELECT 1 FROM mental_daily_done WHERE user_id = ? AND day = ?').get(req.user.id, today);
+  const bsRow = db.prepare('SELECT bible_study FROM users WHERE id = ?').get(req.user.id);
+  const bibleOptIn = bsRow && bsRow.bible_study === 1;
+  const checkedInToday = !!db.prepare("SELECT 1 FROM checkins WHERE user_id = ? AND date(created_at, 'unixepoch', 'localtime') = date('now', 'localtime')").get(req.user.id);
+  res.send(views.mentalGamePage(req.user, {
+    baseline: getMentalBaseline(req.user.id),
+    saved: req.query.saved === '1',
+    planFailed: req.query.planfailed === '1',
+    keys,
+    exercise,
+    exerciseDone,
+    bibleOptIn,
+    bibleVerse: bibleOptIn ? todayBibleVerse() : null,
+    checkedInToday,
+    showBiblePopup: showBiblePopupFor(req.user, bsRow ? bsRow.bible_study : null),
+  }));
+});
+
+app.post('/mental-game/exercise/done', requireLogin, (req, res) => {
+  const today = todayChicagoDate();
+  const exercise = todayMentalExercise();
+  db.prepare(`INSERT OR REPLACE INTO mental_daily_done (user_id, day, exercise_key, completed_at)
+    VALUES (?, ?, ?, datetime('now'))`).run(req.user.id, today, exercise.key);
+  res.redirect('/mental-game');
 });
 
 app.post('/mental-game/keys/delete', requireLogin, (req, res) => {
@@ -2314,6 +2326,86 @@ app.post('/mental-game/keys/delete', requireLogin, (req, res) => {
   if (id) db.prepare('DELETE FROM mental_keys WHERE id = ? AND user_id = ?').run(id, req.user.id);
   res.redirect('/mental-game');
 });
+// Daily mental exercises (Sep 23 2026) — one concrete exercise per day from
+// the 8-book frameworks. Rotates by Chicago weekday. Each takes 2-3 minutes.
+const MENTAL_EXERCISES = [
+  { // Sunday
+    key: 'aar',
+    title: 'After-Action Review',
+    book: 'Goggins',
+    prompt: 'Write 3 things that worked this week (keep doing), 2 that didn\'t (fix), and 1 specific adjustment you\'ll make in the cage this week.',
+  },
+  { // Monday
+    key: 'good-wolf',
+    title: 'Feed the Good Wolf',
+    book: 'Afremow',
+    prompt: 'Catch ONE negative thought today — the actual sentence. Write it, then write the replacement. Feed the good wolf on purpose.',
+  },
+  { // Tuesday
+    key: 'keys-review',
+    title: 'Your 3×5 Card',
+    book: 'Mack',
+    prompt: 'Read your keys below. Pick ONE and say it out loud. That\'s your card for today — carry it into everything.',
+  },
+  { // Wednesday
+    key: 'signal-light',
+    title: 'Signal Light Check',
+    book: 'Ravizza',
+    prompt: 'Right now: green, yellow, or red? If yellow or red — step out, one deep breath, pick your reset word. Practice getting back to green.',
+  },
+  { // Thursday
+    key: 'cookie-jar',
+    title: 'Cookie Jar',
+    book: 'Goggins',
+    prompt: 'Write down ONE past win in detail — the date, what happened, what it felt like. That\'s evidence. Reach for it when it gets hard.',
+  },
+  { // Friday
+    key: 'staircase',
+    title: 'One Staircase Step',
+    book: 'Mack',
+    prompt: 'Pick ONE concrete action for tomorrow that moves you up the staircase. Small enough to actually do. Write it down.',
+  },
+  { // Saturday
+    key: 'breath-reset',
+    title: 'Breath + Keyword Reset',
+    book: 'Mack',
+    prompt: 'Practice your between-pitch reset: step out, one breath, your keyword, step back in. Do it 3 times right now. Make it automatic.',
+  },
+];
+function todayMentalExercise() {
+  // Chicago weekday: 0=Sunday..6=Saturday
+  const chi = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+  return MENTAL_EXERCISES[chi.getDay()];
+}
+function todayChicagoDate() {
+  return new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' }))
+    .toISOString().slice(0, 10);
+}
+// Daily Bible study verses (Sep 23 2026) — curated for athletes: competition,
+// resilience, discipline, focus, trusting the work. Rotates by day-of-year.
+const BIBLE_VERSES = [
+  { ref: '1 Corinthians 9:24-25', text: 'Do you not know that in a race all the runners run, but only one gets the prize? Run in such a way as to get it. Everyone who competes in the games goes into strict training.', theme: 'Train with intent' },
+  { ref: 'Joshua 1:9', text: 'Be strong and courageous. Do not be afraid; do not be discouraged, for the Lord your God will be with you wherever you go.', theme: 'Courage' },
+  { ref: 'Philippians 4:13', text: 'I can do all this through him who gives me strength.', theme: 'Strength' },
+  { ref: '2 Timothy 1:7', text: 'For the Spirit God gave us does not make us timid, but gives us power, love and self-discipline.', theme: 'No fear' },
+  { ref: 'Proverbs 16:3', text: 'Commit to the Lord whatever you do, and he will establish your plans.', theme: 'Commitment' },
+  { ref: 'Isaiah 40:31', text: 'But those who hope in the Lord will renew their strength. They will soar on wings like eagles; they will run and not grow weary, they will walk and not be faint.', theme: 'Endurance' },
+  { ref: 'James 1:2-4', text: 'Consider it pure joy whenever you face trials of many kinds, because you know that the testing of your faith produces perseverance.', theme: 'Trials build you' },
+  { ref: 'Romans 5:3-4', text: 'Suffering produces perseverance; perseverance, character; and character, hope.', theme: 'The process' },
+  { ref: '1 Timothy 4:8', text: 'Physical training is of some value, but godliness has value for all things.', theme: 'Perspective' },
+  { ref: 'Colossians 3:23', text: 'Whatever you do, work at it with all your heart, as working for the Lord, not for human masters.', theme: 'Effort' },
+  { ref: 'Proverbs 27:17', text: 'As iron sharpens iron, so one person sharpens another.', theme: 'Teammates' },
+  { ref: 'Galatians 6:9', text: 'Let us not become weary in doing good, for at the proper time we will reap a harvest if we do not give up.', theme: "Don't quit" },
+  { ref: 'Psalm 18:32-34', text: 'It is God who arms me with strength and keeps my way secure. He makes my feet like the feet of a deer; he causes me to stand on the heights.', theme: 'Prepared' },
+  { ref: 'Hebrews 12:1', text: 'Let us run with perseverance the race marked out for us, fixing our eyes on Jesus.', theme: 'Focus' },
+  { ref: 'Deuteronomy 31:6', text: 'Be strong and courageous. Do not be afraid or terrified, for the Lord your God goes with you; he will never leave you nor forsake you.', theme: 'Not alone' },
+];
+function todayBibleVerse() {
+  const chi = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+  const start = new Date(chi.getFullYear(), 0, 0);
+  const dayOfYear = Math.floor((chi - start) / 86400000);
+  return BIBLE_VERSES[dayOfYear % BIBLE_VERSES.length];
+}
 const MENTAL_PLAN_SYSTEM = `You are Coach Skip, a direct no-fluff hitting coach writing a hitter's personal mental-game plan. You just gauged where his head is at. Write the plan TO him ("you").
 
 Format exactly like this — short, plain, no fluff:
@@ -2328,6 +2420,15 @@ async function buildMentalPlan(baseline) {
   const routineWord = { yes: 'has a routine he trusts', sortof: 'sort of has a routine', no: 'has no routine' }[baseline.has_routine] || 'did not say';
   const headWord = { present: 'usually present', between: 'in between', worried: 'usually worried' }[baseline.head_state] || 'did not say';
   bits.push(`Routine: ${routineWord}. Head in games: ${headWord}.`);
+  // Book-based diagnostic (Sep 23 2026)
+  const lightWord = { green: 'usually green (calm, focused)', yellow: 'usually yellow (tension creeping in)', red: 'usually red (emotional, rushed)' }[baseline.signal_light];
+  if (lightWord) bits.push(`Signal light: ${lightWord}.`);
+  if (baseline.worst_self_talk) bits.push(`Worst self-talk: "${baseline.worst_self_talk}"`);
+  const struggleWord = { expecting_results: 'expects results without the process', thinking_mechanics: 'thinks mechanics in the box', worried_watching: 'worried about who\'s watching', blank: 'goes blank under pressure' }[baseline.struggle_pattern];
+  if (struggleWord) bits.push(`When struggling: ${struggleWord}.`);
+  const modeWord = { attacking: 'attacks in big moments', hoping: 'hopes in big moments', depends: 'it depends in big moments' }[baseline.big_moment_mode];
+  if (modeWord) bits.push(`Big moments: ${modeWord}.`);
+  if (baseline.hard_voice) bits.push(`When it gets hard, the voice says: "${baseline.hard_voice}"`);
   if (baseline.pregame_routine) bits.push(`Pre-game routine: "${baseline.pregame_routine}"`);
   if (baseline.morning_routine) bits.push(`Morning routine: "${baseline.morning_routine}"`);
   if (baseline.breath_work) bits.push(`Breath work: "${baseline.breath_work}"`);
@@ -2346,6 +2447,12 @@ app.post('/mental-game/save', requireLogin, async (req, res) => {
     when_sped_up: clean(b.when_sped_up),
     has_routine: ['yes', 'sortof', 'no'].includes(b.has_routine) ? b.has_routine : '',
     head_state: ['present', 'between', 'worried'].includes(b.head_state) ? b.head_state : '',
+    // Book-based diagnostic (Sep 23 2026)
+    signal_light: ['green', 'yellow', 'red'].includes(b.signal_light) ? b.signal_light : '',
+    worst_self_talk: clean(b.worst_self_talk),
+    struggle_pattern: ['expecting_results', 'thinking_mechanics', 'worried_watching', 'blank'].includes(b.struggle_pattern) ? b.struggle_pattern : '',
+    big_moment_mode: ['attacking', 'hoping', 'depends'].includes(b.big_moment_mode) ? b.big_moment_mode : '',
+    hard_voice: clean(b.hard_voice),
   };
   let plan = (getMentalBaseline(req.user.id) || {}).plan || '';
   let planFailed = false;
@@ -2355,14 +2462,17 @@ app.post('/mental-game/save', requireLogin, async (req, res) => {
     planFailed = true;
   }
   db.prepare(
-    `INSERT INTO mental_baseline (user_id, pregame_routine, morning_routine, breath_work, when_sped_up, has_routine, head_state, plan, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO mental_baseline (user_id, pregame_routine, morning_routine, breath_work, when_sped_up, has_routine, head_state, signal_light, worst_self_talk, struggle_pattern, big_moment_mode, hard_voice, plan, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(user_id) DO UPDATE SET pregame_routine=excluded.pregame_routine, morning_routine=excluded.morning_routine,
        breath_work=excluded.breath_work, when_sped_up=excluded.when_sped_up, has_routine=excluded.has_routine,
-       head_state=excluded.head_state, plan=excluded.plan, updated_at=excluded.updated_at`
+       head_state=excluded.head_state, signal_light=excluded.signal_light, worst_self_talk=excluded.worst_self_talk,
+       struggle_pattern=excluded.struggle_pattern, big_moment_mode=excluded.big_moment_mode, hard_voice=excluded.hard_voice,
+       plan=excluded.plan, updated_at=excluded.updated_at`
   ).run(
     req.user.id, row.pregame_routine, row.morning_routine, row.breath_work, row.when_sped_up,
-    row.has_routine, row.head_state, plan, new Date().toISOString()
+    row.has_routine, row.head_state, row.signal_light, row.worst_self_talk, row.struggle_pattern,
+    row.big_moment_mode, row.hard_voice, plan, new Date().toISOString()
   );
   res.redirect(planFailed ? '/mental-game?planfailed=1' : '/mental-game?saved=1');
 });

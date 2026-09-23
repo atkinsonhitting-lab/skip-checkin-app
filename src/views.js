@@ -137,8 +137,10 @@ ${user && user.role === 'coach' && user.canEdit === false ? '<div class="viewonl
 
 function userTabs(active, user) {
   const isRemote = !!(user && user.remoteProgramId);
+  // Mental Game is the landing tab (Sep 23 2026) — Home is gone. Athletes
+  // open the app to today's exercise, the verse, and check-in.
   const tabs = [
-    { href: '/', label: 'Home', active: active === 'home' },
+    { href: '/mental-game', label: 'Mental Game', active: active === 'mental' },
   ];
   // Program-first for athletes with an assigned remote/hybrid program:
   // Programs comes before Check In; everyone else keeps the old layout.
@@ -159,7 +161,6 @@ function userTabs(active, user) {
   }
   tabs.push(
     { href: '/notebook', label: 'Notebook', active: active === 'notebook' },
-    { href: '/mental-game', label: 'Mental Game', active: active === 'mental' },
     { href: '/chat', label: 'Talk to Skip', sub: 'your personally trained coach', active: active === 'chat' },
     { href: '/settings', label: 'Settings', active: active === 'settings' },
   );
@@ -2901,7 +2902,25 @@ function programRoutinePage(user, p, videoLib) {
 
 // Hitter-facing: Mental Game — gauge questions + baseline, then Skip builds the
 // hitter a personal plan. All hitters.
-function mentalGamePage(user, baseline, saved, planFailed, keys) {
+// Bible study opt-in popup (Sep 23 2026, Bobby): appears on app open until
+// the athlete answers. Yes/No posts once; the popup never shows again.
+function biblePopupHtml() {
+  return `
+    <div id="bible-popup-overlay" class="modal-overlay">
+      <div class="card modal-card" role="dialog" aria-modal="true" aria-labelledby="bible-popup-title">
+        <h2 id="bible-popup-title" style="margin-top:0">New: Daily Bible Study</h2>
+        <p>We&apos;re adding an optional daily Bible study &mdash; a verse plus a short breakdown in the Mental Game tab. Only for guys who want it.</p>
+        <div class="modal-actions">
+          <button type="button" class="btn-primary" id="bible-yes">Yes, count me in</button>
+          <button type="button" class="btn-secondary" id="bible-no">No thanks</button>
+        </div>
+      </div>
+    </div>
+    `;
+}
+
+function mentalGamePage(user, data) {
+  const { baseline, saved, planFailed, keys, exercise, exerciseDone, bibleOptIn, bibleVerse, checkedInToday, showBiblePopup } = data || {};
   const b = baseline || {};
   const radio = (name, options) => `
     <div class="chip-row">${options
@@ -2919,12 +2938,40 @@ function mentalGamePage(user, baseline, saved, planFailed, keys) {
   const planHtml = b.plan
     ? `<div class="card"><h2 class="routine-station">Your mental game plan</h2><p style="white-space:pre-wrap;margin:0">${esc(b.plan)}</p></div>`
     : '';
+  // Today's exercise card
+  const exerciseHtml = exercise ? `
+    <div class="card" style="border-left:4px solid var(--accent)">
+      <h2 class="routine-station">Today's mental exercise</h2>
+      <p style="margin:0 0 4px"><strong>${esc(exercise.title)}</strong></p>
+      <p style="margin:0 0 8px">${esc(exercise.prompt)}</p>
+      ${exerciseDone
+        ? '<p class="hint" style="margin:0">✓ Done for today. See you tomorrow.</p>'
+        : `<form method="post" action="/mental-game/exercise/done" style="margin:0">
+            <button type="submit" class="btn btn-primary btn-sm">Mark done</button>
+          </form>`}
+    </div>` : '';
+  // Bible verse card (opt-ins only)
+  const bibleHtml = (bibleOptIn && bibleVerse) ? `
+    <div class="card">
+      <h2 class="routine-station">Daily Bible study</h2>
+      <p style="margin:0 0 4px"><strong>${esc(bibleVerse.ref)}</strong> <span class="hint">— ${esc(bibleVerse.theme)}</span></p>
+      <p style="margin:0;font-style:italic">“${esc(bibleVerse.text)}”</p>
+    </div>` : '';
+  // Check-in CTA (if not checked in today)
+  const checkinHtml = !checkedInToday ? `
+    <div class="card" style="text-align:center">
+      <p style="margin:0 0 8px">Haven't checked in today yet.</p>
+      <a href="/checkin" class="btn btn-primary">Check in today's session</a>
+    </div>` : '';
   return layout({
     title: 'Mental Game',
     user,
     tabs: userTabs('mental', user),
     body: `<h1 class="page-title">Mental Game</h1>
-    <p class="lede">Answer honestly — it gauges where your head's at and builds your plan from it.</p>
+    ${showBiblePopup ? biblePopupHtml() : ''}
+    ${checkinHtml}
+    ${exerciseHtml}
+    ${bibleHtml}
     ${saved ? '<div class="notice">Saved — your plan is below.</div>' : ''}
     ${planFailed ? '<div class="notice">Baseline saved, but the plan didn\u2019t come through — tap the button again.</div>' : ''}
     ${planHtml}
@@ -2941,14 +2988,20 @@ function mentalGamePage(user, baseline, saved, planFailed, keys) {
     </div>
     <form method="post" action="/mental-game/save" class="form">
       <div class="card">
+        <h2 class="routine-station">Where's your head at?</h2>
+        <p class="hint">Answer honestly — it builds your plan from this.</p>
+        <p class="field-label">In games, what color are you usually? (Ravizza's signal lights)</p>
+        ${radio('signal_light', [['green', 'Green — calm, focused'], ['yellow', 'Yellow — tension creeping in'], ['red', 'Red — emotional, rushed']])}
+        <p class="field-label">What's the worst thing you say to yourself when it's going bad? (write the actual sentence)</p>
+        ${fld('worst_self_talk', 'Worst self-talk', 'The exact sentence in your head.', b.worst_self_talk)}
+        <p class="field-label">When you struggle, what's usually going on in your head?</p>
+        ${radio('struggle_pattern', [['expecting_results', 'Expecting results'], ['thinking_mechanics', 'Thinking mechanics'], ['worried_watching', "Worried who's watching"], ['blank', 'I go blank']])}
+        <p class="field-label">In big moments — are you attacking or hoping?</p>
+        ${radio('big_moment_mode', [['attacking', 'Attacking'], ['hoping', 'Hoping'], ['depends', 'Depends']])}
+        <p class="field-label">When it gets hard, what does the voice say? (the governor)</p>
+        ${fld('hard_voice', 'The voice when it gets hard', 'What does it tell you?', b.hard_voice)}
         <p class="field-label">Do you have a routine you actually trust?</p>
         ${radio('has_routine', [['yes', 'Yes — it\u2019s automatic'], ['sortof', 'Sort of — sometimes'], ['no', 'No routine yet']])}
-        <p class="field-label">In games, where's your head usually?</p>
-        ${radio('head_state', [['present', 'Present — I\u2019m seeing it'], ['between', 'In between'], ['worried', 'Worried — thinking about results']])}
-        ${fld('pregame_routine', 'Pre-game routine', 'Do you have one? Walk through it.', b.pregame_routine)}
-        ${fld('morning_routine', 'Morning routine', 'Game day or every day — what does it look like?', b.morning_routine)}
-        ${fld('breath_work', 'Breath work', 'Do you do any? What kind?', b.breath_work)}
-        ${fld('when_sped_up', 'When you feel sped up', 'Rushed in a game — what do you do right now?', b.when_sped_up)}
       </div>
       <p><button type="submit" class="btn btn-primary">Save & build my plan</button></p>
     </form>

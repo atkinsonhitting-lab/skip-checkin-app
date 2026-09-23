@@ -955,7 +955,33 @@ CREATE TABLE IF NOT EXISTS mental_baseline (
   for (const c of ['has_routine', 'head_state', 'plan']) {
     if (!cols.includes(c)) db.exec(`ALTER TABLE mental_baseline ADD COLUMN ${c} TEXT NOT NULL DEFAULT '';`);
   }
+  // Book-based questionnaire rebuild (Sep 23 2026): new diagnostic columns.
+  // signal_light (Ravizza): green/yellow/red. worst_self_talk (Dorfman/Mack):
+  // the actual sentence. struggle_pattern (Dorfman): expecting_results /
+  // thinking_mechanics / worried_watching / blank. big_moment_mode (Grover):
+  // attacking / hoping / depends. hard_voice (Goggins): what the governor says.
+  for (const c of ['signal_light', 'worst_self_talk', 'struggle_pattern', 'big_moment_mode', 'hard_voice']) {
+    if (!cols.includes(c)) db.exec(`ALTER TABLE mental_baseline ADD COLUMN ${c} TEXT NOT NULL DEFAULT '';`);
+  }
 }
+// Daily mental exercise completions (Sep 23 2026): one concrete exercise per
+// day from the book frameworks. exercise_key like '2026-09-23:good-wolf'.
+db.exec(`CREATE TABLE IF NOT EXISTS mental_daily_done (
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  day TEXT NOT NULL,
+  exercise_key TEXT NOT NULL,
+  completed_at TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (user_id, day)
+);`);
+// Structured routines (Sep 23 2026): morning / pre-practice / pregame as JSON
+// step lists. Bible study auto-included in morning routine for opt-ins.
+db.exec(`CREATE TABLE IF NOT EXISTS mental_routines (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id),
+  morning_json TEXT NOT NULL DEFAULT '[]',
+  prepractice_json TEXT NOT NULL DEFAULT '[]',
+  pregame_json TEXT NOT NULL DEFAULT '[]',
+  updated_at TEXT NOT NULL DEFAULT ''
+);`);
 
 // Mental keys (Sep 15 2026): things a hitter asks Coach Skip to save to their
 // Mental Game tab from the chat ("add this to my mental game"). Shown on the
