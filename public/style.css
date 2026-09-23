@@ -1437,3 +1437,67 @@ main.wrap { animation: pageIn 0.18s ease-out; }
   background: #141416; color: var(--text); font-size: 14.5px; cursor: pointer; width: 100%;
 }
 .le-pick-play { color: var(--red); }
+
+/* ============ Coach message composer (Sep 23 2026) ============ */
+.cmp-card {
+  background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+  padding: 16px 14px; display: grid; gap: 14px;
+}
+.cmp-seg {
+  display: flex; background: #141416; border: 1px solid var(--line);
+  border-radius: 12px; padding: 4px; gap: 4px;
+}
+.cmp-seg-btn {
+  flex: 1; border: 0; background: transparent; color: var(--muted);
+  font-size: 14.5px; font-weight: 700; padding: 10px 6px; border-radius: 9px;
+  cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;
+}
+.cmp-seg-btn.on { background: #0a84ff; color: #fff; }
+.cmp-count {
+  background: rgba(255,255,255,.22); border-radius: 10px; padding: 1px 8px; font-size: 12.5px;
+}
+.cmp-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.cmp-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: #0a84ff; color: #fff; font-size: 13px; font-weight: 600;
+  border-radius: 16px; padding: 5px 6px 5px 12px;
+}
+.cmp-chip button {
+  border: 0; background: rgba(255,255,255,.25); color: #fff; border-radius: 50%;
+  width: 20px; height: 20px; font-size: 14px; line-height: 1; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.cmp-tools { display: flex; gap: 8px; align-items: center; }
+.cmp-search {
+  flex: 1; min-width: 0; margin: 0; border: 1px solid #3a3a3e; border-radius: 10px;
+  background: #141416; color: var(--text); font-size: 14.5px; padding: 10px 12px; outline: none;
+}
+.cmp-search:focus { border-color: #0a84ff; }
+.cmp-list {
+  max-height: 240px; overflow: auto; border: 1px solid var(--line);
+  border-radius: 12px; background: #101012; -webkit-overflow-scrolling: touch;
+}
+.cmp-row {
+  display: flex; align-items: center; gap: 11px; width: 100%;
+  background: transparent; border: 0; border-bottom: 1px solid var(--line);
+  padding: 10px 12px; color: var(--text); cursor: pointer; text-align: left;
+}
+.cmp-row:last-child { border-bottom: 0; }
+.cmp-row:active { background: #1c1c1f; }
+.cmp-ava { width: 34px; height: 34px; font-size: 12px; }
+.cmp-name { flex: 1; font-size: 15px; font-weight: 600; }
+.cmp-check {
+  width: 24px; height: 24px; border-radius: 50%; flex-shrink: 0;
+  border: 2px solid #3a3a3e; display: inline-flex; align-items: center;
+  justify-content: center; font-size: 14px; color: transparent;
+}
+.cmp-row.on .cmp-check { background: #0a84ff; border-color: #0a84ff; color: #fff; }
+.cmp-row.on .cmp-check::after { content: "✓"; }
+.cmp-label { font-size: 14px; font-weight: 700; color: var(--muted); display: flex; justify-content: space-between; align-items: baseline; }
+.cmp-textarea {
+  width: 100%; box-sizing: border-box; border: 1px solid #3a3a3e; border-radius: 14px;
+  background: #141416; color: var(--text); font-size: 16px; padding: 13px 14px;
+  outline: none; resize: vertical; min-height: 110px; font-family: inherit;
+}
+.cmp-textarea:focus { border-color: #0a84ff; }
+.cmp-send { margin-top: 2px; width: 100%; font-size: 16px; padding: 13px; }

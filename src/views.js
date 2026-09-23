@@ -2054,10 +2054,6 @@ function coachHittersPage(user, userStats, opts) {
             <input type="hidden" name="back" value="${esc(o.tab === 'my-players' ? '/coach/my-players' : '/coach/hitters')}">
             <button class="btn-small btn-quiet" type="submit" title="${a.notifyOn ? 'Log alerts ON — tap to mute' : 'Log alerts OFF — tap to unmute'}">${a.notifyOn ? '🔔 Alerts on' : '🔕 Alerts off'}</button>
           </form>` : ''}
-          <form method="post" action="/coach/view-as" style="margin:0">
-            <input type="hidden" name="id" value="${a.id}">
-            <button class="btn-small btn-quiet" type="submit">View as player</button>
-          </form>
         </div>
       </div>`
     )
@@ -2182,11 +2178,20 @@ function coachMessagesPage(user, threads, opts) {
   });
 }
 
+// New message composer (Sep 23 2026, Bobby: "make this look way better"):
+// iMessage-style dark card, segmented recipient control, tappable player
+// rows with avatar initials + check circles, selected-player chips, live
+// send label. Field names kept: to_mode + user_ids checkboxes.
 function coachComposePage(user, players, opts) {
   const o = opts || {};
+  const n = (players || []).length;
   const list = (players || [])
     .map(
-      (a) => `<label class="compose-row" data-name="${esc(a.name.toLowerCase())}" style="display:block;padding:5px 2px;cursor:pointer"><input type="checkbox" name="user_ids" value="${a.id}"> <span>${esc(a.name)}</span></label>`
+      (a) => `<button type="button" class="cmp-row" data-name="${esc(a.name.toLowerCase())}" data-id="${a.id}" data-label="${esc(a.name)}">
+        <span class="imsg-avatar cmp-ava">${esc(imsgInitials(a.name))}</span>
+        <span class="cmp-name">${esc(a.name)}</span>
+        <span class="cmp-check" aria-hidden="true"></span>
+      </button>`
     )
     .join('');
   return layout({
@@ -2196,51 +2201,113 @@ function coachComposePage(user, players, opts) {
     body: `<h1 class="page-title">New message</h1>
     <p class="hint"><a href="/coach/messages">← All messages</a></p>
     ${o.error ? `<p class="error">${esc(o.error)}</p>` : ''}
-    <form method="post" action="/coach/messages/new" class="card">
-      <div style="display:grid;gap:8px;margin-bottom:12px">
-        <label style="display:flex;align-items:center;gap:8px"><input type="radio" name="to_mode" value="all" checked> <strong>All my players</strong> <span class="hint-inline">(${(players || []).length})</span></label>
-        <label style="display:flex;align-items:center;gap:8px"><input type="radio" name="to_mode" value="choose"> <strong>Choose players</strong></label>
+    <form method="post" action="/coach/messages/new" class="cmp-card" id="cmp-form">
+      <div class="cmp-seg">
+        <button type="button" class="cmp-seg-btn on" data-mode="all">All my players <span class="cmp-count">${n}</span></button>
+        <button type="button" class="cmp-seg-btn" data-mode="choose">Choose players</button>
       </div>
+      <input type="hidden" name="to_mode" id="cmp-mode" value="all">
       <div id="choose-box" hidden>
-        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-          <input type="search" id="compose-search" class="searchbar" placeholder="Search players…" autocomplete="off" style="margin:0;flex:1">
+        <div id="cmp-chips" class="cmp-chips" hidden></div>
+        <div class="cmp-tools">
+          <input type="search" id="compose-search" class="cmp-search" placeholder="Search players…" autocomplete="off">
           <button type="button" class="btn-small btn-quiet" id="compose-all">All</button>
           <button type="button" class="btn-small btn-quiet" id="compose-clear">Clear</button>
         </div>
-        <div style="max-height:220px;overflow:auto;border:1px solid #e3e3e3;border-radius:8px;padding:6px 10px;margin-bottom:12px">
+        <div class="cmp-list" id="cmp-list">
           ${list || '<p class="hint">No players yet.</p>'}
         </div>
+        <div id="cmp-ids" aria-hidden="true"></div>
       </div>
-      <label>Message <span class="hint-inline">(<span id="char-count">0</span>/500)</span>
-        <textarea name="body" id="compose-body" maxlength="500" required rows="4" style="width:100%;box-sizing:border-box" placeholder="Write your message…"></textarea>
-      </label>
-      <button class="btn-primary" type="submit" style="margin-top:10px">Send message</button>
+      <label class="cmp-label">Message <span class="hint-inline"><span id="char-count">0</span>/500</span></label>
+      <textarea name="body" id="compose-body" maxlength="500" required rows="4" class="cmp-textarea" placeholder="Write your message…"></textarea>
+      <button class="btn-primary cmp-send" type="submit"><span id="cmp-send-label">Send to all ${n} player${n === 1 ? '' : 's'}</span></button>
     </form>
     <script>
     (function () {
-      var modes = document.querySelectorAll('input[name="to_mode"]');
+      var modeInput = document.getElementById('cmp-mode');
       var box = document.getElementById('choose-box');
+      var segBtns = Array.prototype.slice.call(document.querySelectorAll('.cmp-seg-btn'));
       var search = document.getElementById('compose-search');
-      var rows = Array.prototype.slice.call(document.querySelectorAll('.compose-row'));
-      function syncMode() {
-        var v = document.querySelector('input[name="to_mode"]:checked').value;
-        box.hidden = v !== 'choose';
+      var rows = Array.prototype.slice.call(document.querySelectorAll('.cmp-row'));
+      var chips = document.getElementById('cmp-chips');
+      var idsBox = document.getElementById('cmp-ids');
+      var sendLabel = document.getElementById('cmp-send-label');
+      var total = rows.length;
+      var selected = new Set();
+      function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+      function rowById(id) { return rows.filter(function (r) { return r.dataset.id === id; })[0]; }
+      function syncUI() {
+        rows.forEach(function (r) { r.classList.toggle('on', selected.has(r.dataset.id)); });
+        // hidden checkboxes the server reads
+        idsBox.innerHTML = '';
+        selected.forEach(function (id) {
+          var cb = document.createElement('input');
+          cb.type = 'checkbox'; cb.name = 'user_ids'; cb.value = id; cb.checked = true; cb.style.display = 'none';
+          idsBox.appendChild(cb);
+        });
+        // chips
+        var items = [];
+        selected.forEach(function (id) {
+          var r = rowById(id);
+          if (r) items.push({ id: id, label: r.dataset.label });
+        });
+        chips.hidden = !items.length;
+        chips.innerHTML = items.map(function (it) {
+          return '<span class="cmp-chip">' + esc(it.label) + '<button type="button" data-uncheck="' + esc(it.id) + '" aria-label="Remove">×</button></span>';
+        }).join('');
+        // send label
+        if (modeInput.value === 'all') {
+          sendLabel.textContent = 'Send to all ' + total + ' player' + (total === 1 ? '' : 's');
+        } else {
+          var c = selected.size;
+          sendLabel.textContent = c ? 'Send to ' + c + ' player' + (c === 1 ? '' : 's') : 'Choose players to send';
+        }
       }
-      modes.forEach(function (r) { r.addEventListener('change', syncMode); });
-      syncMode();
+      segBtns.forEach(function (b) {
+        b.addEventListener('click', function () {
+          segBtns.forEach(function (x) { x.classList.toggle('on', x === b); });
+          modeInput.value = b.dataset.mode;
+          box.hidden = b.dataset.mode !== 'choose';
+          syncUI();
+        });
+      });
+      rows.forEach(function (r) {
+        r.addEventListener('click', function () {
+          var id = r.dataset.id;
+          if (selected.has(id)) selected.delete(id); else selected.add(id);
+          syncUI();
+        });
+      });
+      chips.addEventListener('click', function (e) {
+        var b = e.target.closest('[data-uncheck]');
+        if (!b) return;
+        selected.delete(b.dataset.uncheck);
+        syncUI();
+      });
       search.addEventListener('input', function () {
         var q = search.value.toLowerCase();
         rows.forEach(function (r) { r.style.display = r.dataset.name.indexOf(q) === -1 ? 'none' : ''; });
       });
       document.getElementById('compose-all').addEventListener('click', function () {
-        rows.forEach(function (r) { if (r.style.display !== 'none') r.querySelector('input').checked = true; });
+        rows.forEach(function (r) { if (r.style.display !== 'none') selected.add(r.dataset.id); });
+        syncUI();
       });
       document.getElementById('compose-clear').addEventListener('click', function () {
-        rows.forEach(function (r) { r.querySelector('input').checked = false; });
+        selected.clear();
+        syncUI();
       });
       var body = document.getElementById('compose-body');
       var count = document.getElementById('char-count');
       body.addEventListener('input', function () { count.textContent = body.value.length; });
+      document.getElementById('cmp-form').addEventListener('submit', function (e) {
+        if (modeInput.value === 'choose' && !selected.size) {
+          e.preventDefault();
+          box.hidden = false;
+          search.focus();
+        }
+      });
+      syncUI();
     })();
     </script>`,
   });
@@ -3870,12 +3937,19 @@ function coachUser(user, name, checkins, whatWorks, thread, email, memories, rou
       )
       .join('')}</div>`
       : '';
+  // "View as player" lives here now (Sep 23 2026, Bobby): tap a player's
+  // name to open their page, then preview the app exactly as they see it.
+  const viewAsBtn = opts && opts.viewAsId
+    ? `<form method="post" action="/coach/view-as" style="display:inline;margin:0">
+      <input type="hidden" name="id" value="${opts.viewAsId}">
+      <button class="btn-small btn-quiet" type="submit" style="margin-left:4px">View as player</button>
+    </form>` : '';
   return layout({
     title: name,
     user,
     tabs: coachTabs('hitters', user.approvalCount, user),
     body: `<h1 class="page-title">${esc(name)} ${rolePill(pt)}</h1>
-    <p><a href="/coach/hitters">← Back to players</a>${msgUserId ? ` · <a class="btn-small" href="/coach/messages/${msgUserId}">Message</a>` : ''}</p>
+    <p><a href="/coach/hitters">← Back to players</a>${msgUserId ? ` · <a class="btn-small" href="/coach/messages/${msgUserId}">Message</a>` : ''}${viewAsBtn}</p>
     ${pt === 'pitcher' ? '' : routineReadonly(routine)}
     ${pt !== 'hitter' ? throwingSummarySection(throwSum) : ''}
     ${memorySection(email, memories, canEdit)}

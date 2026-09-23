@@ -6569,7 +6569,7 @@ app.get('/coach/user/:email', requireCoachAny, (req, res) => {
         .all(user.id)
         .reverse();
   const pt = user.player_type || 'hitter';
-  res.send(views.coachUser(realUser(req), name, rows, restricted ? null : whatWorksData(name, user.id), thread, user.email, brain.listMemory(db, user.id), getRoutine(user.id), pt, pt === 'hitter' ? null : throwingSummary(user.id), isMyProgramPlayer(user.id) ? user.id : null, { restricted }));
+  res.send(views.coachUser(realUser(req), name, rows, restricted ? null : whatWorksData(name, user.id), thread, user.email, brain.listMemory(db, user.id), getRoutine(user.id), pt, pt === 'hitter' ? null : throwingSummary(user.id), isMyProgramPlayer(user.id) ? user.id : null, { restricted, viewAsId: user.id }));
 });
 
 // Throwing summary for a pitcher's or two-way player's coach view: session
