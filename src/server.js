@@ -2333,14 +2333,25 @@ app.get('/program', requireLogin, requireWaiver, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
   if (!req.user.remoteProgramId) return res.redirect('/');
   const sub = String(req.query.sub || 'hitting');
-  // Bobby (Sep 23 2026): hitting = the document, lifting = interactive program.
-  // Default to hitting document; ?sub=lifting shows the lifting program.
-  if (sub === 'lifting') {
-    // Let the lifting sub-tab handler below take it (don't redirect)
-    // Fall through to the original program tab logic
-  } else {
-    return res.redirect('/program/hitting-plan');
+  // Bobby (Sep 23 2026): Program tab defaults to hitting document (which has Mobility/Hitting tabs).
+  // ?sub=mobility goes to the mobility page.
+  if (sub === 'mobility') {
+    return res.redirect('/program/mobility');
   }
+  return res.redirect('/program/hitting-plan');
+});
+
+// Mobility page (Sep 23 2026): mobility + med ball for non-lifters.
+app.get('/program/mobility', requireLogin, requireWaiver, (req, res) => {
+  if (req.user.role === 'coach') return res.redirect('/coach');
+  if (!req.user.remoteProgramId) return res.redirect('/');
+  const p = getProgram(req.user.remoteProgramId);
+  if (!p) return res.redirect('/');
+  const liftingId = db.prepare('SELECT lifting_program_id FROM remote_programs WHERE id = ?').get(p.id);
+  const lifting = getLifting(liftingId && liftingId.lifting_program_id);
+  const tabs = programSubTabs(p, lifting);
+  const blocks = splitProgramBlocks(p);
+  res.send(views.mobilityPage(req.user, p, { tabs, blocks }));
 });
 
 // Hitting plan document (Sep 23 2026): one-page document per remote hitter —
@@ -2358,7 +2369,10 @@ app.get('/program/hitting-plan', requireLogin, requireWaiver, (req, res) => {
     db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?')
       .run(JSON.stringify(p.prog), new Date().toISOString(), p.id);
   }
-  res.send(views.hittingPlanPage(req.user, p));
+  const liftingId = db.prepare('SELECT lifting_program_id FROM remote_programs WHERE id = ?').get(p.id);
+  const lifting = getLifting(liftingId && liftingId.lifting_program_id);
+  const tabs = programSubTabs(p, lifting);
+  res.send(views.hittingPlanPage(req.user, p, { tabs, sub: 'hitting' }));
 });
 
 // Lifting program (Sep 23 2026): interactive lifting, accessible from Program tab.

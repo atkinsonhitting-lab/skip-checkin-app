@@ -5073,10 +5073,62 @@ function substitutePage(user, o) {
 }
 
 
-function hittingPlanPage(user, p) {
+function mobilityPage(user, p, opts) {
+  const prog = (p && p.prog) || {};
+  const athleteName = (p && p.athlete_name) || prog.athlete || 'Hitter';
+  const o = opts || {};
+  const tabs = o.tabs || [];
+  const blocks = o.blocks || { mobility: [], medball: [] };
+  const tabBar = tabs.length > 1 ? `<div class="prog-tabs">${tabs.map(t =>
+    `<a href="/program?sub=${t.id}" class="prog-tab${t.id === 'mobility' ? ' active' : ''}">${esc(t.label)}</a>`
+  ).join('')}</div>` : '';
+  const renderBlock = (b) => {
+    const items = (b.items || []).map(it =>
+      `<div class="mob-row"><span class="mob-name">${esc(it.drill || '')}</span><span class="mob-vol">${esc(it.volume || '')}</span></div>`
+    ).join('');
+    return `<h3>${esc(b.category || 'Mobility')}</h3><div class="mob-list">${items}</div>`;
+  };
+  const mobilityHtml = blocks.mobility.map(renderBlock).join('');
+  const medballHtml = blocks.medball.map(renderBlock).join('');
+  return layout({
+    title: `Mobility — ${athleteName}`,
+    user,
+    body: `${tabBar}
+    <div class="doc-page">
+      <div class="doc-header"><div class="doc-logo">ATKINSON<br>HITTING</div></div>
+      <h1 class="doc-sec-title">Mobility & Med Ball - ${esc(athleteName)}</h1>
+      ${mobilityHtml}
+      ${medballHtml}
+      <style>
+        .prog-tabs { display: flex; gap: 8px; justify-content: center; margin-bottom: 16px; }
+        .prog-tab { padding: 8px 16px; border-radius: 8px; text-decoration: none; color: #666;
+          background: #f0f0f0; font-weight: 600; font-size: 14px; }
+        .prog-tab.active { background: #111; color: #fff; }
+        .doc-page { max-width: 720px; margin: 0 auto; background: #fff; color: #111;
+          padding: 28px 24px; font-family: Arial, Helvetica, sans-serif; line-height: 1.5; }
+        .doc-header { display: flex; align-items: center; justify-content: center; margin-bottom: 12px; }
+        .doc-logo { font-weight: 900; font-size: 13px; line-height: 1.2; text-align: center; color: #c00; letter-spacing: 1px; }
+        .doc-sec-title { font-size: 24px; margin: 0 0 16px; color: #111; text-align: center; }
+        .mob-list { margin-bottom: 20px; }
+        .mob-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #eee; }
+        .mob-name { font-weight: 600; }
+        .mob-vol { color: #666; }
+      </style>
+    </div>`,
+  });
+}
+
+function hittingPlanPage(user, p, opts) {
   const prog = (p && p.prog) || {};
   const plan = prog.hitting_plan || {};
   const athleteName = (p && p.athlete_name) || prog.athlete || 'Hitter';
+  const o = opts || {};
+  // Bobby (Sep 23 2026): tab navigation for Mobility/Hitting
+  const tabs = o.tabs || [];
+  const activeSub = o.sub || 'hitting';
+  const tabBar = tabs.length > 1 ? `<div class="prog-tabs">${tabs.map(t =>
+    `<a href="/program?sub=${t.id}" class="prog-tab${t.id === activeSub ? ' active' : ''}">${esc(t.label)}</a>`
+  ).join('')}</div>` : '';
 
   // === EVAL: Hitting Evaluation Report (Bobby's template, Sep 23 2026) ===
   // Key Strengths, Grades (his sheet system), Overall Grade, Need.
@@ -5153,7 +5205,7 @@ function hittingPlanPage(user, p) {
     title: 'Hitting Program',
     user,
     tabs: userTabs('program', user),
-    body: `<div class="doc-page">
+    body: `${tabBar}<div class="doc-page">
       <div class="doc-header">
         <div class="doc-logo">ATKINSON<br>HITTING</div>
         <div class="doc-title-wrap">
@@ -5176,6 +5228,10 @@ function hittingPlanPage(user, p) {
     <style>
       .doc-page { max-width: 720px; margin: 0 auto; background: #fff; color: #111;
         padding: 28px 24px; font-family: Arial, Helvetica, sans-serif; line-height: 1.5; }
+      .prog-tabs { display: flex; gap: 8px; justify-content: center; margin-bottom: 16px; }
+      .prog-tab { padding: 8px 16px; border-radius: 8px; text-decoration: none; color: #666;
+        background: #f0f0f0; font-weight: 600; font-size: 14px; }
+      .prog-tab.active { background: #111; color: #fff; }
 
       .doc-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
       .doc-logo { font-weight: 900; font-size: 13px; line-height: 1.2; text-align: center; color: #c00;
@@ -5419,6 +5475,7 @@ module.exports = {
   waiverPage,
   substitutePage,
   routineEditPage,
+  mobilityPage,
   hittingPlanPage,
   hittingPlanEditPage,
 };
