@@ -2632,34 +2632,8 @@ function programPage(user, p, opts) {
         `<a href="/program?sub=${t.id}${day ? '&day=' + encodeURIComponent(day) : ''}" class="subtab${t.id === sub ? ' active' : ''}">${esc(t.label)}</a>`
     )
     .join('')}</nav>`;
-  // Session order (Bobby's call, Sep 2026): hitting and lifting can run in
-  // either order. The athlete or Bobby picks; tabs follow the choice.
-  // Hidden in coach preview (view-as): previews are read-only by design,
-  // so the buttons would be dead there. Bobby sets it in the program editor.
-  const sessionOrder = o.sessionOrder === 'lifting_first' ? 'lifting_first' : 'hitting_first';
-  const hasLiftingTab = tabs.some((t) => t.id === 'lifting');
-  const orderToggle = hasLiftingTab && !user.viewAs ? `<form method="post" action="/program/session-order" class="order-toggle">
-      <input type="hidden" name="sub" value="${esc(sub)}">
-      <span class="hint-inline">Session order:</span>
-      <button type="submit" name="session_order" value="hitting_first" class="btn-small${sessionOrder === 'hitting_first' ? '' : ' btn-quiet'}">Hitting first</button>
-      <button type="submit" name="session_order" value="lifting_first" class="btn-small${sessionOrder === 'lifting_first' ? '' : ' btn-quiet'}">Lifting first</button>
-    </form>` : '';
-  // Lifting-first primer: no hitting beforehand to warm them up, so the
-  // integrated warm-up has to fully prime med ball / explosive work and
-  // heavy lifting. Hitting-first just needs the short banner.
-  const liftPrimer = sessionOrder === 'lifting_first' ? `<details class="card warmup-block" open>
-      <summary class="routine-summary"><span class="routine-station">Prime-up — lifting first</span></summary>
-      <p class="hint" style="margin:0 0 6px">No hitting beforehand today, so prime fully before med ball. Do the <strong>Mobility tab</strong> first, then:</p>
-      <ol class="warmup-list">
-        <li>Leg swings front-to-back — 10 each leg</li>
-        <li>Hip openers — 8 each side</li>
-        <li>World's greatest stretch — 5 each side</li>
-        <li>A-skips — 2 x 20 yd (in place if no space)</li>
-        <li>Bounds — 2 x 20 yd</li>
-        <li>Build-up sprints: 3 x 30 yd, each faster (last ~90%)</li>
-      </ol>
-      <p class="hint" style="margin:6px 0 0">Then med ball, then lifts — the ramp-up sets on main lifts are <strong>essential</strong> today.</p>
-    </details>` : '';
+  // Session order removed (Bobby, Sep 23 2026) — hitting always runs first.
+  const sessionOrder = 'hitting_first';
 
   // Day helpers.
   const dayPrefix = (cat) => {
@@ -2866,7 +2840,7 @@ function programPage(user, p, opts) {
         ? `<h3 class=\"prog-h3\"><span class=\"flow-num\">0</span> \U0001f9d8 Mobility — move first, then work</h3>` +
           mobBlocks.map((c) => blockCard(c.category, c.items, 'mob')).join('')
         : '';
-      content = `${topStartBtn}${phaseBanner}${liftPrimer}${sessionOrder === 'hitting_first' ? `<p class=\"hint\">Hit first, then lift — you're warm, go straight to speed work. Ramp-up sets on main lifts still apply.${mobBlocks.length ? '' : ' Lifting-only day? Full Mobility tab first.'}</p>` : ''}${mobHtml}${speedHtml}${medHtml}${liftSubTab(user, lifting, days, effLday, sub, checkoffs, today, o.liftData || {}, o.subs || {}, secBase, o.todayLdayIdx, o.sched, o.weekday)}${YT_TOGGLE_SCRIPT}`;
+      content = `${topStartBtn}${phaseBanner}${mobHtml}${speedHtml}${medHtml}${liftSubTab(user, lifting, days, effLday, sub, checkoffs, today, o.liftData || {}, o.subs || {}, secBase, o.todayLdayIdx, o.sched, o.weekday)}${YT_TOGGLE_SCRIPT}`;
     }
   } else {
     // HITTING (default): today's plan first — prep for the day + the day's
@@ -2936,7 +2910,6 @@ function programPage(user, p, opts) {
         (tabs.some((t) => t.id === 'lifting') ? '&lday=' + lday : '');
       return `<a class="btn-primary session-cta" href="${href}">▶ Start ${isToday ? 'today\u2019s' : 'this day\u2019s'} session</a>`;
     })()}
-    ${orderToggle}
     ${content}
     <div class="card finish-card"><p style="margin:0 0 8px">Done with the work? <a href="/checkin"><strong>Log your session →</strong></a></p>
     <p class="hint-inline" style="margin:0">Work first, journal second.</p></div>`,
@@ -4194,11 +4167,6 @@ function programEditPage(user, p, profileEmail, hasLifting, progression, opts) {
     <form method="post" action="/coach/program/${p.id}/save" class="form">
       <div class="card routine-group">
         <label class="fld">Date range<input type="text" name="date_range" value="${esc(prog.date_range || '')}" maxlength="60" placeholder="8/18–9/16"></label>
-        <label class="fld">Session order <span class="hint-inline">— which runs first when he trains</span>
-          <select name="session_order">
-            <option value="hitting_first"${(p.session_order || 'hitting_first') === 'hitting_first' ? ' selected' : ''}>Hitting first (default)</option>
-            <option value="lifting_first"${p.session_order === 'lifting_first' ? ' selected' : ''}>Lifting first</option>
-          </select></label>
         <label class="fld">Phase emphasis<input type="text" name="phase_emphasis" value="${esc(prog.phase_emphasis || '')}" maxlength="120" placeholder="Coil and Barrel Turn"></label>
         <label class="fld">The adjustment — the one thing he's working on
           <textarea name="adjustment" rows="2" maxlength="500">${esc(prog.adjustment || '')}</textarea>
@@ -5347,7 +5315,7 @@ function hittingPlanPage(user, p) {
   const athleteName = (p && p.athlete_name) || prog.athlete || 'Hitter';
 
   // Training environments — Bobby's standard explainer (coach-editable via plan.environments_note)
-  const defaultEnvironments = `<p><strong>Training environments</strong> — do your work across all of them. Each one trains something different:</p>
+  const defaultEnvironments = `<p>Do your work across all <strong>training environments</strong>. Each one trains something different:</p>
 <ul>
 <li><strong>Tee</strong> — most controlled. Feel the move, own your positions. This is where the pattern gets built.</li>
 <li><strong>Toss</strong> (side flips, front toss) — the ball's moving now, short distance. Blend what you felt off the tee into timing.</li>
@@ -5360,14 +5328,14 @@ function hittingPlanPage(user, p) {
   // Warmup — Bobby's prep work
   const warmup = Array.isArray(plan.warmup) ? plan.warmup : [];
   const warmupHtml = warmup.length
-    ? `<ul>${warmup.map((w) => `<li><strong>${esc(w.name || '')}</strong>${w.detail ? ` — ${esc(w.detail)}` : ''}</li>`).join('')}</ul>
-       <p class="hint-inline">Demos for all prep work are in the Remote library (Videos tab).</p>`
-    : '<p class="hint-inline">Your coach will add your prep work here.</p>';
+    ? `<ul class="doc-list">${warmup.map((w) => `<li><strong>${esc(w.name || '')}</strong>${w.detail ? ` — ${esc(w.detail)}` : ''}</li>`).join('')}</ul>
+       <p class="doc-note">Demos for all prep work are in the Remote library (Videos tab).</p>`
+    : '<p class="doc-note">Your coach will add your prep work here.</p>';
 
   // Drills table
   const drills = Array.isArray(plan.drills) ? plan.drills : [];
   const drillsHtml = drills.length
-    ? `<table class="plan-table">
+    ? `<table class="doc-table">
         <thead><tr><th>Drill</th><th>Volume</th><th>Cues</th><th>Why?</th></tr></thead>
         <tbody>${drills.map((d) => `<tr>
           <td><strong>${esc(d.name || '')}</strong></td>
@@ -5376,46 +5344,82 @@ function hittingPlanPage(user, p) {
           <td>${esc(d.why || '')}</td>
         </tr>`).join('')}</tbody>
       </table>
-      <p class="hint-inline">Drill demos are all in the Remote library (Videos tab).</p>`
-    : '<p class="hint-inline">Your coach will add your drills here.</p>';
+      <p class="doc-note">Drill demos are all in the Remote library (Videos tab).</p>`
+    : '<p class="doc-note">Your coach will add your drills here.</p>';
 
-  const footer = plan.footer ? `<div class="plan-footer">${plan.footer}</div>` : '';
+  const footer = plan.footer ? `<div class="doc-footer">${esc(plan.footer)}</div>` : '';
 
   return layout({
     title: 'Hitting Plan',
     user,
     tabs: userTabs('program', user),
-    body: `<h1 class="page-title">Hitting Program</h1>
-    <p class="athlete-name">${esc(athleteName)}</p>
-    <div class="hitting-plan-doc">
-      <section class="plan-section">
+    body: `<div class="doc-page">
+      <div class="doc-brand">
+        <div class="doc-brand-mark">AH</div>
+        <div class="doc-brand-text">
+          <div class="doc-brand-name">ATKINSON HITTING</div>
+          <div class="doc-brand-sub">Remote Development</div>
+        </div>
+      </div>
+      <h1 class="doc-title">Hitting Program</h1>
+      <p class="doc-athlete">${esc(athleteName)}</p>
+      <hr class="doc-rule">
+      <section class="doc-section">
         <h2>Training Environments</h2>
         ${environmentsHtml}
       </section>
-      <section class="plan-section">
+      <section class="doc-section">
         <h2>Warmup — Prep Work</h2>
         ${warmupHtml}
       </section>
-      <section class="plan-section">
+      <section class="doc-section">
         <h2>The Work</h2>
         ${drillsHtml}
       </section>
       ${footer}
     </div>
-    <p style="margin-top:16px"><a href="/program" class="hint-inline">‹ Back to program</a></p>
+    <p class="doc-back"><a href="/program" class="hint-inline">‹ Back to program</a></p>
     <style>
-      .hitting-plan-doc { max-width: 720px; margin: 0 auto; }
-      .athlete-name { font-size: 1.2em; color: #666; margin-top: -10px; }
-      .plan-section { margin: 24px 0; padding: 16px; background: #f9f9f9; border-radius: 8px; }
-      .plan-section h2 { margin-top: 0; font-size: 1.1em; }
-      .plan-table { width: 100%; border-collapse: collapse; margin: 12px 0; }
-      .plan-table th, .plan-table td { padding: 10px 8px; text-align: left; border-bottom: 1px solid #ddd; font-size: 0.9em; }
-      .plan-table th { background: #f0f0f0; font-weight: 600; }
-      .plan-footer { margin-top: 20px; padding: 12px; background: #fffbe6; border-radius: 8px; font-style: italic; }
-      @media print { .plan-section { break-inside: avoid; } }
+      .doc-page { max-width: 760px; margin: 0 auto; background: #ffffff; color: #1a1a1a;
+        padding: 40px 36px; border-radius: 4px; box-shadow: 0 2px 12px rgba(0,0,0,0.12);
+        font-family: Georgia, 'Times New Roman', serif; line-height: 1.6; }
+      .doc-brand { display: flex; align-items: center; gap: 14px; margin-bottom: 8px; }
+      .doc-brand-mark { width: 52px; height: 52px; border-radius: 50%; background: #111; color: #fff;
+        display: flex; align-items: center; justify-content: center;
+        font-family: -apple-system, Helvetica, Arial, sans-serif; font-weight: 800; font-size: 20px; letter-spacing: 1px; }
+      .doc-brand-name { font-family: -apple-system, Helvetica, Arial, sans-serif; font-weight: 800;
+        font-size: 18px; letter-spacing: 2px; color: #111; }
+      .doc-brand-sub { font-family: -apple-system, Helvetica, Arial, sans-serif; font-size: 12px;
+        letter-spacing: 3px; text-transform: uppercase; color: #666; }
+      .doc-title { font-size: 32px; margin: 18px 0 0; color: #111; font-weight: 700; }
+      .doc-athlete { font-size: 20px; color: #444; margin: 4px 0 0; font-style: italic; }
+      .doc-rule { border: none; border-top: 3px solid #111; margin: 18px 0 24px; }
+      .doc-section { margin: 28px 0; }
+      .doc-section h2 { font-size: 20px; color: #111; border-bottom: 1px solid #ddd;
+        padding-bottom: 6px; margin: 0 0 12px; font-family: -apple-system, Helvetica, Arial, sans-serif; }
+      .doc-section p, .doc-section li { color: #222; font-size: 16px; }
+      .doc-list { padding-left: 22px; }
+      .doc-list li { margin: 6px 0; }
+      .doc-note { font-size: 14px; color: #666; font-style: italic;
+        font-family: -apple-system, Helvetica, Arial, sans-serif; }
+      .doc-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 15px;
+        font-family: -apple-system, Helvetica, Arial, sans-serif; }
+      .doc-table th { background: #111; color: #fff; padding: 10px 12px; text-align: left; font-weight: 600; }
+      .doc-table td { padding: 10px 12px; border-bottom: 1px solid #e0e0e0; color: #222; vertical-align: top; }
+      .doc-table tr:nth-child(even) td { background: #f7f7f7; }
+      .doc-footer { margin-top: 24px; padding: 14px 16px; background: #fffbe6;
+        border-left: 4px solid #e6a800; font-style: italic; color: #333; font-size: 15px; }
+      .doc-back { max-width: 760px; margin: 16px auto 0; }
+      @media (max-width: 600px) { .doc-page { padding: 24px 18px; } .doc-title { font-size: 26px; } }
+      @media print {
+        .doc-page { box-shadow: none; padding: 0; max-width: none; }
+        .doc-back { display: none; }
+        .doc-section { break-inside: avoid; }
+      }
     </style>`,
   });
 }
+
 
 function hittingPlanEditPage(user, p) {
   const prog = (p && p.prog) || {};

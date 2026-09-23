@@ -1867,22 +1867,19 @@ function programSubTabs(p, lifting) {
   const hasLifting = liftDays.some((d) =>
     (Array.isArray(d.exercises) ? d.exercises : []).some((ex) => String((ex && ex.name) || '').trim())
   );
-  const liftFirst = (p && p.session_order) === 'lifting_first';
-  // Session order is flexible (Bobby's call): lifting can run before hitting.
-  // Med ball rides with lifting either way — it's the explosive start of it.
+  // Med ball rides with lifting — it's the explosive start of it.
   // Bobby (Sep 23 2026): no standalone Mobility section unless the athlete
   // has mobility work AND no lifting program. Lifters get mobility paired
   // inside the Lifting tab; non-lifters get mobility + med ball paired in one
   // flow (the Mobility tab). A lone Med Ball tab only appears when there's med
   // ball work but no mobility blocks to pair it with.
   if (blocks.mobility.length && !hasLifting) tabs.push({ id: 'mobility', label: 'Mobility' });
-  if (liftFirst && hasLifting) tabs.push({ id: 'lifting', label: 'Lifting' });
   if (!hasLifting && blocks.medball.length && !blocks.mobility.length) tabs.push({ id: 'medball', label: 'Med Ball' });
   tabs.push({ id: 'hitting', label: 'Hitting' });
   // No Metabolic tab (Sep 2026): speed work lives inside the Lifting tab.
   // Legacy 'Metabolic' blocks in old programs render in the Lifting tab's
   // Speed section instead of getting their own tab.
-  if (!liftFirst && hasLifting) {
+  if (hasLifting) {
     tabs.push({ id: 'lifting', label: 'Lifting' });
   }
   return tabs;
@@ -2435,13 +2432,6 @@ app.post('/program/component-order', requireLogin, requireWaiver, (req, res) => 
 
 // Athlete (or Bobby via the program edit page) picks which runs first in a
 // session: hitting or lifting. Tabs reorder to match.
-app.post('/program/session-order', requireLogin, requireWaiver, (req, res) => {
-  if (req.user.role === 'coach' || !req.user.remoteProgramId || req.user.viewAs) return res.redirect('/program');
-  const order = req.body.session_order === 'lifting_first' ? 'lifting_first' : 'hitting_first';
-  db.prepare('UPDATE remote_programs SET session_order = ? WHERE id = ?').run(order, req.user.remoteProgramId);
-  res.redirect('/program?sub=' + encodeURIComponent(String(req.body.sub || 'lifting')));
-});
-
 // drive_file_id -> { id, hidden }: resolves a program item's stored video URL
 // to the in-app library watch page when the video is in Bobby's library.
 function videoLibMap() {
@@ -3745,11 +3735,9 @@ app.post('/coach/program/:id/save', requireCoach, (req, res) => {
   delete prog.draft;
   delete prog.draft_source;
   delete prog.draft_note;
-  const sessionOrder = b.session_order === 'lifting_first' ? 'lifting_first' : 'hitting_first';
-  db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ?, session_order = ? WHERE id = ?').run(
+  db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?').run(
     JSON.stringify(prog),
     new Date().toISOString(),
-    sessionOrder,
     p.id
   );
   // The Programs tab is gone — program editing now lives on the Organizations page.
