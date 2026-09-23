@@ -2299,6 +2299,11 @@ app.get('/mental-game', requireLogin, (req, res) => {
   const bsRow = db.prepare('SELECT bible_study FROM users WHERE id = ?').get(req.user.id);
   const bibleOptIn = bsRow && bsRow.bible_study === 1;
   const checkedInToday = !!db.prepare("SELECT 1 FROM checkins WHERE user_id = ? AND date(created_at, 'unixepoch', 'localtime') = date('now', 'localtime')").get(req.user.id);
+  // Routine data (Sep 23 2026)
+  const routineRow = db.prepare('SELECT morning_json FROM mental_routines WHERE user_id = ?').get(req.user.id);
+  const routineItems = routineRow ? JSON.parse(routineRow.morning_json || '[]') : [];
+  const routineDone = !!db.prepare('SELECT 1 FROM mental_card_done WHERE user_id = ? AND day = ? AND card = ?').get(req.user.id, today, 'routine');
+  const bibleDone = !!db.prepare('SELECT 1 FROM mental_card_done WHERE user_id = ? AND day = ? AND card = ?').get(req.user.id, today, 'bible');
   res.send(views.mentalGamePage(req.user, {
     baseline: getMentalBaseline(req.user.id),
     saved: req.query.saved === '1',
@@ -2309,8 +2314,10 @@ app.get('/mental-game', requireLogin, (req, res) => {
     exerciseDone,
     bibleOptIn,
     bibleVerse: bibleOptIn ? todayBibleVerse() : null,
+    bibleDone,
     checkedInToday,
     showBiblePopup: showBiblePopupFor(req.user, bsRow ? bsRow.bible_study : null),
+    routine: { morning: routineItems, done: routineDone },
   }));
 });
 
@@ -2330,6 +2337,31 @@ app.post('/mental-game/exercise/done', requireLogin, (req, res) => {
 app.post('/mental-game/keys/delete', requireLogin, (req, res) => {
   const id = parseInt(req.body.id, 10);
   if (id) db.prepare('DELETE FROM mental_keys WHERE id = ? AND user_id = ?').run(id, req.user.id);
+  res.redirect('/mental-game');
+});
+// Lock In routine builder (Sep 23 2026) — morning routine checklist.
+app.post('/mental-game/routine/add', requireLogin, (req, res) => {
+  const text = String(req.body.text || '').trim().slice(0, 200);
+  if (text) {
+    const row = db.prepare('SELECT morning_json FROM mental_routines WHERE user_id = ?').get(req.user.id);
+    const items = row ? JSON.parse(row.morning_json || '[]') : [];
+    items.push({ text, done: false });
+    db.prepare(`INSERT INTO mental_routines (user_id, morning_json, updated_at) VALUES (?, ?, ?)
+      ON CONFLICT(user_id) DO UPDATE SET morning_json=excluded.morning_json, updated_at=excluded.updated_at`)
+      .run(req.user.id, JSON.stringify(items), new Date().toISOString());
+  }
+  res.redirect('/mental-game');
+});
+app.post('/mental-game/routine/done', requireLogin, (req, res) => {
+  const today = todayChicagoDate();
+  db.prepare('INSERT OR IGNORE INTO mental_card_done (user_id, day, card, completed_at) VALUES (?, ?, ?, ?)')
+    .run(req.user.id, today, 'routine', new Date().toISOString());
+  res.redirect('/mental-game');
+});
+app.post('/mental-game/bible/done', requireLogin, (req, res) => {
+  const today = todayChicagoDate();
+  db.prepare('INSERT OR IGNORE INTO mental_card_done (user_id, day, card, completed_at) VALUES (?, ?, ?, ?)')
+    .run(req.user.id, today, 'bible', new Date().toISOString());
   res.redirect('/mental-game');
 });
 // Daily mental exercises (Sep 23 2026) — one concrete exercise per day from

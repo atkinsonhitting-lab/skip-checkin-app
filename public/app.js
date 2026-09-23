@@ -688,3 +688,18 @@
   yes.addEventListener('click', function () { choose(1); });
   no.addEventListener('click', function () { choose(0); });
 })();
+
+// Lock In cards — tap to expand/collapse (Sep 23 2026)
+(function () {
+  document.addEventListener('click', function (ev) {
+    const btn = ev.target.closest('[data-toggle]');
+    if (!btn) return;
+    const id = btn.getAttribute('data-toggle');
+    const body = document.getElementById('card-' + id);
+    const card = btn.closest('.lockin-card');
+    if (!body || !card) return;
+    const isHidden = body.hidden;
+    body.hidden = !isHidden;
+    card.classList.toggle('open', isHidden);
+  });
+})();

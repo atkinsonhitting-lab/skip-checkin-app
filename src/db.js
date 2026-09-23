@@ -980,6 +980,14 @@ db.exec(`CREATE TABLE IF NOT EXISTS mental_daily_done (
   completed_at TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (user_id, day)
 );`);
+// Lock In card completions (Sep 23 2026): routine / bible cards, one per day.
+db.exec(`CREATE TABLE IF NOT EXISTS mental_card_done (
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  day TEXT NOT NULL,
+  card TEXT NOT NULL,
+  completed_at TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (user_id, day, card)
+);`);
 // Structured routines (Sep 23 2026): morning / pre-practice / pregame as JSON
 // step lists. Bible study auto-included in morning routine for opt-ins.
 db.exec(`CREATE TABLE IF NOT EXISTS mental_routines (

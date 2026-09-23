@@ -748,25 +748,31 @@ function checkinForm(user, error, values, drillNames, routine, recentGroups, act
       <div class="field-label">Where were you?</div>
       <div class="pills">${envPills}</div>
       <div class="field-label">What did you do today?</div>
-      <p class="hint" id="drills-subtitle" data-default="Everything you did \u2014 tee work, flips, BP, machine. Blank is fine.">Everything you did \u2014 tee work, flips, BP, machine. Blank is fine.</p>
-      <div class="drill-top-actions">
-        ${rt.length ? `<button type="button" id="use-routine" class="btn-ghost" data-routine="${routineJson}">Use my daily routine</button>` : ''}
-        <a href="/routine" class="drill-edit-link">Edit daily routine →</a>
+      <p class="hint">Tap what you did, then list the drills for each.</p>
+      <div class="activity-checklist">
+        ${DRILL_SECTIONS.filter(s => s.key !== 'other').map((s) => {
+          const secVal = v[s.field] || (v.sections && v.sections[s.key]) || '';
+          const checked = secVal.trim() ? ' checked' : '';
+          return `<div class="activity-item">
+            <label class="activity-check">
+              <input type="checkbox" data-section="${s.key}"${checked}>
+              <span>${s.label}</span>
+            </label>
+            <input type="text" name="${s.field}" value="${esc(secVal)}" placeholder="What drills?" class="activity-drills"${checked ? '' : ' hidden'}>
+          </div>`;
+        }).join('')}
+        ${(() => {
+          const secVal = v['sec_other'] || (v.sections && v.sections['other']) || '';
+          const checked = secVal.trim() ? ' checked' : '';
+          return `<div class="activity-item">
+            <label class="activity-check">
+              <input type="checkbox" data-section="other"${checked}>
+              <span>Other</span>
+            </label>
+            <input type="text" name="sec_other" value="${esc(secVal)}" placeholder="What did you do?" class="activity-drills"${checked ? '' : ' hidden'}>
+          </div>`;
+        })()}
       </div>
-      <div class="drill-combo-row">
-        <select id="drill-section" aria-label="Where you did it">
-          ${DRILL_SECTIONS.map((s) => `<option value="${s.key}">${s.label}</option>`).join('')}
-        </select>
-        <div class="drill-combo">
-          <input id="drill-input" type="text" placeholder="Search drills or type your own" autocomplete="off" autocapitalize="off" spellcheck="false" role="combobox" aria-expanded="false" aria-controls="drill-menu" aria-label="Add a drill">
-          <div id="drill-menu" class="drill-menu" role="listbox" hidden></div>
-        </div>
-      </div>
-      <div id="drill-tokens" class="drill-tokens" aria-live="polite"></div>
-      <p class="hint">Tap a drill to add it — or just type and hit enter. Leave blank if you didn't do drills; blank counts as none.</p>
-      <script type="application/json" id="drill-options">${drillOptionsJson}</script>
-      <script type="application/json" id="drill-initial">${initialTokensJson}</script>
-      ${hiddenSectionInputs}
       ${sliderField('feel', 'Feel', 'How good did you feel?', v.feel)}
       ${sliderField('confidence', 'Confidence', 'How confident did you feel?', v.confidence)}
       ${sliderField('focus', 'Focus', 'How locked in was your focus?', v.focus)}
@@ -3006,6 +3012,73 @@ function mentalGamePage(user, data) {
       <p style="margin:0 0 8px">Haven't checked in today yet.</p>
       <a href="/checkin" class="btn btn-primary">Check in today's session</a>
     </div>` : '';
+  // Compact cards (Sep 23 2026) — Bobby: no long scroll. Tappable boxes with
+  // checkmarks. Tap to expand, do it, mark done → green.
+  const routine = data.routine || { morning: [], done: false };
+  const routineItems = Array.isArray(routine.morning) ? routine.morning : [];
+  const routineDone = !!routine.done;
+  
+  const card = (id, title, done, content) => `
+    <div class="lockin-card${done ? ' done' : ''}" data-card="${id}">
+      <button type="button" class="lockin-card-head" data-toggle="${id}">
+        <span class="lockin-check">${done ? '✓' : '○'}</span>
+        <span class="lockin-title">${esc(title)}</span>
+        <span class="lockin-chevron">›</span>
+      </button>
+      <div class="lockin-card-body" id="card-${id}" hidden>
+        ${content}
+      </div>
+    </div>`;
+  
+  const routineContent = `
+    ${routineItems.length ? `<ul class="routine-list">${routineItems.map((item, i) => `
+      <li><label><input type="checkbox" data-routine-item="${i}"${item.done ? ' checked' : ''}> ${esc(item.text)}</label></li>
+    `).join('')}</ul>` : '<p class="hint">No routine yet — add your first item below.</p>'}
+    <form method="post" action="/mental-game/routine/add" class="form" style="margin-top:8px">
+      <div style="display:flex;gap:8px">
+        <input type="text" name="text" placeholder="Add to morning routine..." maxlength="200" style="flex:1">
+        <button type="submit" class="btn btn-sm">Add</button>
+      </div>
+    </form>
+    ${routineItems.length && !routineDone ? `<form method="post" action="/mental-game/routine/done" style="margin:8px 0 0"><button type="submit" class="btn btn-primary btn-sm">Mark routine done</button></form>` : ''}`;
+  
+  const exerciseContent = exercise ? `
+    <p style="margin:0 0 8px"><strong>${esc(exercise.title)}</strong> <span class="hint">— ${esc(exercise.book)}</span></p>
+    <p style="margin:0 0 8px">${esc(exercise.concept)}</p>
+    <p style="margin:0 0 8px"><strong>Baseball:</strong> ${esc(exercise.baseball)}</p>
+    <p style="margin:0 0 8px"><strong>Do this:</strong> ${esc(exercise.action)}</p>
+    ${!exerciseDone ? `<form method="post" action="/mental-game/exercise/done" style="margin:0"><button type="submit" class="btn btn-primary btn-sm">Mark done</button></form>` : ''}` : '';
+  
+  const bibleContent = (bibleOptIn && bibleVerse) ? `
+    <p style="margin:0 0 4px"><strong>${esc(bibleVerse.ref)}</strong> <span class="hint">— ${esc(bibleVerse.theme)}</span></p>
+    <p style="margin:0 0 8px;font-style:italic">"${esc(bibleVerse.text)}"</p>
+    <p style="margin:0 0 8px">${esc(bibleVerse.explanation)}</p>
+    <p style="margin:0 0 8px"><strong>Baseball:</strong> ${esc(bibleVerse.baseball)}</p>
+    <p style="margin:0 0 8px"><strong>Life:</strong> ${esc(bibleVerse.life)}</p>
+    ${!data.bibleDone ? `<form method="post" action="/mental-game/bible/done" style="margin:0"><button type="submit" class="btn btn-primary btn-sm">Mark done</button></form>` : ''}` : '';
+  
+  const planCard = b.plan ? card('plan', 'Your Plan', true, `<p style="white-space:pre-wrap;margin:0">${esc(b.plan)}</p>`) : '';
+  
+  const keysContent = `
+    <p class="hint">Tell Skip <strong>"add this to my lock in"</strong> and it lands here.</p>
+    ${(keys || []).length
+      ? `<ul class="keys-list">${(keys || []).map((k) => `<li><span>${esc(k.content)}</span>
+          <form method="post" action="/mental-game/keys/delete" style="display:inline;margin:0">
+            <input type="hidden" name="id" value="${k.id}">
+            <button type="submit" class="link-danger" aria-label="Remove">✕</button>
+          </form></li>`).join('')}</ul>`
+      : `<p class="hint">Nothing saved yet.</p>`}`;
+  
+  const cardsHtml = b.plan ? `
+    <h2 class="section-title">Today</h2>
+    ${card('routine', 'Morning Routine', routineDone, routineContent)}
+    ${exercise ? card('exercise', 'Daily Exercise', exerciseDone, exerciseContent) : ''}
+    ${(bibleOptIn && bibleVerse) ? card('bible', 'Bible Study', !!data.bibleDone, bibleContent) : ''}
+    <h2 class="section-title" style="margin-top:16px">Yours</h2>
+    ${planCard}
+    ${card('keys', 'Your Keys', false, keysContent)}
+  ` : '';
+
   return layout({
     title: 'Lock In',
     user,
@@ -3013,27 +3086,14 @@ function mentalGamePage(user, data) {
     body: `<h1 class="page-title">Lock In</h1>
     ${showBiblePopup ? biblePopupHtml() : ''}
     ${questionnaireHtml}
-    ${checkinHtml}
-    ${exerciseHtml}
-    ${bibleHtml}
     ${saved ? '<div class="notice">Saved — your plan is below.</div>' : ''}
     ${planFailed ? '<div class="notice">Baseline saved, but the plan didn\u2019t come through — tap the button again.</div>' : ''}
-    ${planHtml}
-    <div class="card">
-      <h2 class="routine-station">Your keys</h2>
-      <p class="hint">Things you saved from the chat. Tell him <strong>&ldquo;add this to my mental game&rdquo;</strong> and it lands here.</p>
-      ${(keys || []).length
-        ? `<ul class="keys-list">${(keys || []).map((k) => `<li><span>${esc(k.content)}</span>
-            <form method="post" action="/mental-game/keys/delete" style="display:inline;margin:0">
-              <input type="hidden" name="id" value="${k.id}">
-              <button type="submit" class="link-danger" aria-label="Remove">\u2715</button>
-            </form></li>`).join('')}</ul>`
-        : `<p class="hint">Nothing saved yet.</p>`}
-    </div>
+    ${cardsHtml}
+    ${b.plan ? `
     <div class="card">
       <p style="margin:0">Feeling sped up or rushing in a game? <a href="/chat">Talk to Coach Skip →</a> — he'll give you one thing to lock back in.</p>
     </div>
-    <p style="text-align:center;margin-top:24px"><a href="/mental-game?retake=1" class="hint">Retake the questionnaire</a></p>`,
+    <p style="text-align:center;margin-top:24px"><a href="/mental-game?retake=1" class="hint">Retake the questionnaire</a></p>` : ''}`,
   });
 }
 
