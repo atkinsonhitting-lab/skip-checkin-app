@@ -2174,54 +2174,8 @@ function backfillRemoteLinks() {
 app.get('/program', requireLogin, requireWaiver, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
   if (!req.user.remoteProgramId) return res.redirect('/');
-  const p = getProgram(req.user.remoteProgramId);
-  if (!p) return res.redirect('/');
-  // Sub-tab: mobility / medball / hitting / lifting (data-driven; default = first).
-  const prog = p.prog || {};
-  const liftingId = db.prepare('SELECT lifting_program_id FROM remote_programs WHERE id = ?').get(p.id);
-  const lifting = getLifting(liftingId && liftingId.lifting_program_id);
-  const tabs = programSubTabs(p, lifting);
-  const tabIds = tabs.map((t) => t.id);
-  const reqSub = String(req.query.sub || '').toLowerCase();
-  const sub = tabIds.includes(reqSub) ? reqSub : tabIds[0];
-  // Day: manual pick (?day=) or auto-detected from the schedule (weekday -> day label).
-  const labels = programDayLabels(p);
-  const rawAuto = programCurrentDay(p);
-  const restToday = /^(off|rest|recovery|mobility)/i.test(String(rawAuto || '').trim());
-  const autoDay = restToday ? '' : rawAuto;
-  const reqDay = String(req.query.day || '').trim();
-  const day = labels.some((l) => l.toLowerCase() === reqDay.toLowerCase())
-    ? labels.find((l) => l.toLowerCase() === reqDay.toLowerCase())
-    : (autoDay || labels[0] || '');
-  const today = chiToday();
-  const checkoffs = getCheckoffs(req.user.id, today);
-  // Lifting day selection + per-exercise last-time/history for the current day.
-  // Blank days (no real exercises) never reach the athlete — not as pills,
-  // not as content.
-  const liftDays = lifting && Array.isArray(lifting.days)
-    ? lifting.days.filter((d) =>
-        (Array.isArray(d.exercises) ? d.exercises : []).some((ex) => String((ex && ex.name) || '').trim())
-      )
-    : [];
-  const ldayIdx = pickLiftingDayIdx(req, p, liftDays.length);
-  const todayLdayIdx = todayLiftingDayIdx(p, liftDays.length);
-  const liftData = {};
-  if (sub === 'lifting' && liftDays[ldayIdx]) {
-    for (const ex of liftDays[ldayIdx].exercises || []) {
-      const key = 'lift::' + String((liftDays[ldayIdx].label || '')) + '::' + String(ex.name || '');
-      liftData[key] = { last: lastLiftLog(req.user.id, key, today), history: liftHistory(req.user.id, key, 8) };
-    }
-  }
-  res.send(views.programPage(req.user, p, {
-    tabs, sub, day, autoDay, labels, today, checkoffs, lifting,
-    sched: (prog.schedule || []).map((s) => [s[0], s[1]]),
-    weekday: new Date().toLocaleDateString('en-US', { weekday: 'long', timeZone: 'America/Chicago' }),
-    isToday: !reqDay || (autoDay && reqDay.toLowerCase() === autoDay.toLowerCase()),
-    ldayIdx, todayLdayIdx, liftData,
-    videoLib: videoLibMap(),
-    subs: todaySubs(req.user.id),
-    sessionOrder: p.session_order || 'hitting_first',
-  }));
+  // Bobby (Sep 23 2026): the hitting plan document IS the program — open straight to it.
+  return res.redirect('/program/hitting-plan');
 });
 
 // Hitting plan document (Sep 23 2026): one-page document per remote hitter —

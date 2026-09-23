@@ -5158,7 +5158,6 @@ function hittingPlanPage(user, p) {
       </section>
       ${footer}
     </div>
-    <p class="doc-back"><a href="/program" class="hint-inline">‹ Back to program</a></p>
     <style>
       .doc-page { max-width: 760px; margin: 0 auto; background: #ffffff; color: #1a1a1a;
         padding: 40px 36px; border-radius: 4px; box-shadow: 0 2px 12px rgba(0,0,0,0.12);
