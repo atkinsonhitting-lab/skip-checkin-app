@@ -1966,7 +1966,7 @@ function programSubTabs(p, lifting) {
   // inside the Lifting tab; non-lifters get mobility + med ball paired in one
   // flow (the Mobility tab). A lone Med Ball tab only appears when there's med
   // ball work but no mobility blocks to pair it with.
-  if (blocks.mobility.length && !hasLifting) tabs.push({ id: 'mobility', label: 'Mobility' });
+  if (blocks.mobility.length && !hasLifting) tabs.push({ id: 'mobility', label: 'Warm-up' });
   if (!hasLifting && blocks.medball.length && !blocks.mobility.length) tabs.push({ id: 'medball', label: 'Med Ball' });
   tabs.push({ id: 'hitting', label: 'Hitting' });
   // No Metabolic tab (Sep 2026): speed work lives inside the Lifting tab.
@@ -2486,7 +2486,7 @@ app.get('/program/workout', requireLogin, requireWaiver, (req, res) => {
 // order the athlete chooses. Item keys match the Programs-tab checkoff keys
 // exactly, so progress syncs both ways.
 const SESSION_COMPS = [
-  { id: 'mobility', label: 'Mobility', icon: '🧘', tag: 'Warm up first' },
+  { id: 'mobility', label: 'Warm-up', icon: '🧘', tag: 'Warm up first' },
   { id: 'medball', label: 'Med Ball', icon: '💥', tag: 'Power' },
   { id: 'hitting', label: 'Hitting', icon: '⚾', tag: 'Cage work' },
   { id: 'lifting', label: 'Lifting', icon: '🏋️', tag: 'Get strong' },

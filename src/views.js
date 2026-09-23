@@ -5104,9 +5104,9 @@ function mobilityWorkoutPage(user, p, opts) {
     </div>`;
   }).join('');
   return layout({
-    title: `Mobility Workout — ${athleteName}`,
+    title: `Warm-up Workout — ${athleteName}`,
     user,
-    body: `<h1 class="page-title">Mobility & Med Ball</h1>
+    body: `<h1 class="page-title">Warm-up & Med Ball</h1>
     <p><a href="/program/mobility">← Back</a></p>
     <p class="hint">Tap through each exercise. Log your med ball weight and sets.</p>
     <div class="wo-list">${exHtml || '<div class="empty">No mobility exercises found.</div>'}</div>
@@ -5147,12 +5147,12 @@ function mobilityPage(user, p, opts) {
   const mobilityHtml = blocks.mobility.map(renderBlock).join('');
   const medballHtml = blocks.medball.map(renderBlock).join('');
   return layout({
-    title: `Mobility — ${athleteName}`,
+    title: `Warm-up — ${athleteName}`,
     user,
     body: `${tabBar}
     <div class="doc-page">
       <div class="doc-header"><div class="doc-logo">ATKINSON<br>HITTING</div></div>
-      <h1 class="doc-sec-title">Mobility & Med Ball - ${esc(athleteName)}</h1>
+      <h1 class="doc-sec-title">Warm-up & Med Ball - ${esc(athleteName)}</h1>
       <p style="text-align:center;margin-bottom:20px"><a href="/program/mobility-workout" class="btn" style="display:inline-block;text-decoration:none;padding:12px 24px;background:#111;color:#fff;border-radius:8px;font-weight:700">▶ Start Workout</a></p>
       ${mobilityHtml}
       ${medballHtml}
