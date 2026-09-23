@@ -458,7 +458,7 @@ function privacyPage() {
 }
 
 function userHome(user, extras) {
-  const { whatWorks = {}, avgScore = null, checkinCount = 0, recent = [], streak = null, pushOn = false, pushEnabled = false, precheckin = null } = extras || {};
+  const { whatWorks = {}, avgScore = null, checkinCount = 0, recent = [], streak = null, pushOn = false, pushEnabled = false, precheckin = null, showBiblePopup = false } = extras || {};
   // Unread coach messages + no push: point them at the inbox (the Messages
   // page itself carries the turn-on-notifications nudge).
   const msgBanner =
@@ -495,11 +495,44 @@ function userHome(user, extras) {
         ${precheckin.flush ? `<p class="hint" style="margin:0">Flushing: ${esc(precheckin.flush)}</p>` : ''}
         <p class="hint" style="margin:8px 0 0"><a href="/precheckin?kind=${precheckin.kind === 'game' ? 'game' : 'cage'}">Update it →</a></p></div>`
     : `<div class="card"><p style="margin:0"><strong>Before you hit?</strong> <span class="hint">Set your intent in two minutes — what you're working on and how. Optional.</span> <a href="/precheckin">Pre-hit check-in →</a></p></div>`;
+  // Bible study opt-in popup (Sep 23 2026, Bobby): appears on app open until
+  // the athlete answers. Yes/No posts once; the popup never shows again.
+  const biblePopup = showBiblePopup ? `
+    <div id="bible-popup-overlay" class="modal-overlay">
+      <div class="card modal-card" role="dialog" aria-modal="true" aria-labelledby="bible-popup-title">
+        <h2 id="bible-popup-title" style="margin-top:0">New: Daily Bible Study</h2>
+        <p>We&apos;re adding an optional daily Bible study &mdash; a verse plus a short breakdown in the Mental Game tab. Only for guys who want it.</p>
+        <div class="modal-actions">
+          <button type="button" class="btn-primary" id="bible-yes">Yes, count me in</button>
+          <button type="button" class="btn-secondary" id="bible-no">No thanks</button>
+        </div>
+      </div>
+    </div>
+    <script>
+    (function () {
+      function choose(v) {
+        var yes = document.getElementById('bible-yes');
+        var no = document.getElementById('bible-no');
+        yes.disabled = true; no.disabled = true;
+        fetch('/api/bible-study-choice', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ choice: v })
+        }).then(function (r) {
+          if (!r.ok) throw 0;
+          document.getElementById('bible-popup-overlay').remove();
+        }).catch(function () { yes.disabled = false; no.disabled = false; });
+      }
+      document.getElementById('bible-yes').addEventListener('click', function () { choose(1); });
+      document.getElementById('bible-no').addEventListener('click', function () { choose(0); });
+    })();
+    </script>` : '';
   return layout({
     title: 'Home',
     user,
     tabs: userTabs('home', user),
     body: `<h1 class="page-title">What's up, ${esc(user.displayName)}</h1>
+    ${biblePopup}
     ${msgBanner}
     <div class="card cta-card">
       <p class="skip-intro">Check in daily. Every session gets a read, and the app learns what your best days look like.</p>
@@ -2308,9 +2341,11 @@ function programPage(user, p, opts) {
     .join('')}</nav>`;
   // Session order (Bobby's call, Sep 2026): hitting and lifting can run in
   // either order. The athlete or Bobby picks; tabs follow the choice.
+  // Hidden in coach preview (view-as): previews are read-only by design,
+  // so the buttons would be dead there. Bobby sets it in the program editor.
   const sessionOrder = o.sessionOrder === 'lifting_first' ? 'lifting_first' : 'hitting_first';
   const hasLiftingTab = tabs.some((t) => t.id === 'lifting');
-  const orderToggle = hasLiftingTab ? `<form method="post" action="/program/session-order" class="order-toggle">
+  const orderToggle = hasLiftingTab && !user.viewAs ? `<form method="post" action="/program/session-order" class="order-toggle">
       <input type="hidden" name="sub" value="${esc(sub)}">
       <span class="hint-inline">Session order:</span>
       <button type="submit" name="session_order" value="hitting_first" class="btn-small${sessionOrder === 'hitting_first' ? '' : ' btn-quiet'}">Hitting first</button>
@@ -2409,43 +2444,51 @@ function programPage(user, p, opts) {
       ${blocks.map((c) => blockCard(c.category, c.items, 'mob')).join('') || '<div class="card empty">No mobility work in your program.</div>'}`;
   } else if (sub === 'medball') {
     const blocks = routine.filter((c) => kindOf(c.category) === 'medball' && realItems(c.items).length);
-    const todays = day ? blocks.filter((c) => inDay(c.category, day)) : [];
-    const others = day ? blocks.filter((c) => !inDay(c.category, day)) : blocks;
+    const todays = day ? blocks.filter((c) => inDay(c.category, day)) : blocks;
+    const others = day ? blocks.filter((c) => !inDay(c.category, day)) : [];
     content = `${dayHead(true)}
-      ${(todays.map((c) => blockCard(c.category, c.items, 'med', dayPrefix(c.category))).join('')) ||
-        (day && blocks.length ? '<div class="card empty">No med ball work for this day.</div>' : '')}
-      ${others.length && todays.length ? '<h3 class="prog-h3">Other days</h3>' : ''}
-      ${others.map((c) => blockCard(c.category, c.items, 'med', dayPrefix(c.category))).join('') ||
-        (!todays.length ? '<div class="card empty">No med ball work in your program.</div>' : '')}`;
-  } else if (sub === 'metabolic') {
-    const blocks = routine.filter((c) => kindOf(c.category) === 'metabolic' && realItems(c.items).length);
-    const todays = day ? blocks.filter((c) => inDay(c.category, day)) : [];
-    const others = day ? blocks.filter((c) => !inDay(c.category, day)) : blocks;
-    content = `${dayHead(true)}
-      ${(todays.map((c) => blockCard(c.category, c.items, 'met', dayPrefix(c.category))).join('')) ||
-        (day && blocks.length ? '<div class="card empty">No metabolic work for this day.</div>' : '')}
-      ${others.length && todays.length ? '<h3 class="prog-h3">Other days</h3>' : ''}
-      ${others.map((c) => blockCard(c.category, c.items, 'met', dayPrefix(c.category))).join('') ||
-        (!todays.length ? '<div class="card empty">No metabolic work in your program.</div>' : '')}`;
+      ${(todays.length || others.length
+        ? todays.map((c) => blockCard(c.category, c.items, 'med', dayPrefix(c.category))).join('') +
+          (others.length
+            ? `<details class="card"><summary class="routine-summary"><span class="routine-station">Other days</span></summary>` +
+              others.map((c) => blockCard(c.category, c.items, 'med', dayPrefix(c.category))).join('') +
+              `</details>`
+            : '')
+        : '<div class="card empty">No med ball work in your program.</div>')}`;
   } else if (sub === 'lifting' && lifting) {
     const days = (Array.isArray(lifting.days) ? lifting.days : []).filter((d) => realExercises(d.exercises).length);
-    // Lifters get their med ball work INSIDE the Lifting tab — it leads the
-    // day's flow (med ball before lifts), day-scoped exactly like the
-    // standalone Med Ball tab, with the lifting-day carried on check-offs.
+    // Bobby's session order (Sep 2026): 1. SPEED (sprints first) → 2. POWER
+    // (med ball) → 3. LIFTS. No standalone Metabolic tab — speed lives here.
+    // Legacy 'Metabolic' blocks in old programs fold into the Speed section.
     const lday = o.ldayIdx || 0;
     const ldayExtra = `<input type="hidden" name="lday" value="${lday}">`;
-    const medBlocks = routine.filter((c) => kindOf(c.category) === 'medball' && realItems(c.items).length);
-    const mbToday = day ? medBlocks.filter((c) => inDay(c.category, day)) : [];
-    const mbOthers = day ? medBlocks.filter((c) => !inDay(c.category, day)) : medBlocks;
-    const medHtml = medBlocks.length
-      ? `<h3 class="prog-h3">Med Ball</h3>\n${dayHead(true)}\n` +
-        (mbToday.map((c) => blockCard(c.category, c.items, 'med', dayPrefix(c.category), ldayExtra)).join('') ||
-          (day ? '<div class="card empty">No med ball work for this day.</div>' : '')) +
-        (mbOthers.length && mbToday.length ? '<h3 class="prog-h3">Other days</h3>' : '') +
-        (mbOthers.map((c) => blockCard(c.category, c.items, 'med', dayPrefix(c.category), ldayExtra)).join('') ||
-          (!mbToday.length ? '<div class="card empty">No med ball work in your program.</div>' : ''))
+    const curDay = days[lday] || {};
+    const daySpeed = Array.isArray(curDay.speed) ? curDay.speed.filter((s) => String(s && s.name || '').trim()) : [];
+    const metBlocks = routine.filter((c) => kindOf(c.category) === 'metabolic' && realItems(c.items).length);
+    const speedHtml = (daySpeed.length || metBlocks.length)
+      ? `<h3 class="prog-h3"><span class="flow-num">1</span> Speed — sprints first</h3>\n` +
+        (daySpeed.length
+          ? `<div class="card routine-group">${daySpeed.map((s) =>
+              checkRow('spd', `spd::${dayScope || ''}::${curDay.label || ''}::${s.name}`, s.name,
+                [s.volume, s.notes].filter(Boolean).join(' — '), s.video, ldayExtra)
+            ).join('')}</div>`
+          : '') +
+        metBlocks.map((c) => blockCard(c.category, c.items, 'spd', dayPrefix(c.category), ldayExtra)).join('')
       : '';
-    content = `${liftPrimer}${sessionOrder === 'hitting_first' ? `<p class="hint">Hit first, then lift — you're warm, go straight to med ball. Ramp-up sets on main lifts still apply. Lifting-only day? Full Mobility tab first.</p>` : ''}${medHtml}${medBlocks.length ? '<h3 class="prog-h3">Lifts</h3>' : ''}${liftSubTab(user, lifting, days, lday, sub, checkoffs, today, o.liftData || {}, o.subs || {})}`;
+    const medBlocks = routine.filter((c) => kindOf(c.category) === 'medball' && realItems(c.items).length);
+    const mbToday = day ? medBlocks.filter((c) => inDay(c.category, day)) : medBlocks;
+    const mbOthers = day ? medBlocks.filter((c) => !inDay(c.category, day)) : [];
+    const medHtml = mbToday.length || mbOthers.length
+      ? `<h3 class="prog-h3"><span class="flow-num">2</span> Power — med ball</h3>\n` +
+        mbToday.map((c) => blockCard(c.category, c.items, 'med', dayPrefix(c.category), ldayExtra)).join('') +
+        (mbOthers.length
+          ? `<details class="card"><summary class="routine-summary"><span class="routine-station">Other days</span></summary>` +
+            mbOthers.map((c) => blockCard(c.category, c.items, 'med', dayPrefix(c.category), ldayExtra)).join('') +
+            `</details>`
+          : '')
+      : '';
+    const liftsHead = (daySpeed.length || metBlocks.length || medBlocks.length) ? `<h3 class="prog-h3"><span class="flow-num">3</span> Lifts</h3>\n` : '';
+    content = `${liftPrimer}${sessionOrder === 'hitting_first' ? `<p class="hint">Hit first, then lift — you're warm, go straight to speed work. Ramp-up sets on main lifts still apply. Lifting-only day? Full Mobility tab first.</p>` : ''}${speedHtml}${medHtml}${liftsHead}${liftSubTab(user, lifting, days, lday, sub, checkoffs, today, o.liftData || {}, o.subs || {})}`;
   } else {
     // HITTING (default): today's plan first — prep for the day + the day's
     // hitting blocks. Then pregame, then Focus/Grades/Strengths/Notes.
@@ -2502,6 +2545,7 @@ function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftDat
   const day = days[ldayIdx] || { label: '', exercises: [] };
   const dayKey = String(day.label || '');
   const subsMap = subs || {};
+  const readOnly = !!(user && user.viewAs);
   const pills = days
     .map(
       (d, i) =>
@@ -2514,6 +2558,19 @@ function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftDat
       return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     } catch (e) { return d; }
   };
+  const fmtSet = (s) => {
+    if (!s) return '—';
+    const w = s.w != null && s.w !== '' ? String(s.w) : '—';
+    const r = s.r != null && s.r !== '' ? String(s.r) : '—';
+    if (w === '—' && r === '—') return '—';
+    return `${w} × ${r}`;
+  };
+  const parseRowSets = (row) => {
+    try {
+      const s = JSON.parse(row && row.sets_json ? row.sets_json : '[]');
+      return Array.isArray(s) ? s : [];
+    } catch (e) { return []; }
+  };
   const warmup = Array.isArray(day.warmup) ? day.warmup : [];
   const warmupHtml = warmup.length
     ? `<details class="card warmup-block" open><summary class="routine-summary"><span class="routine-station">Warm-up — do this first</span></summary>
@@ -2525,59 +2582,161 @@ function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftDat
       const key = `lift::${dayKey}::${name}`;
       const swapped = subsMap[key];
       const shown = swapped ? String(swapped.sub_name || name) : name;
-      const done = !!checkoffs[key];
-      const logged = checkoffs[key] || {};
+      const row = checkoffs[key] || null;
+      const loggedSets = parseRowSets(row);
       const info = liftData[key] || {};
       const last = info.last || null;
+      const lastSets = last && Array.isArray(last.sets) ? last.sets : [];
       const hist = Array.isArray(info.history) ? info.history : [];
+      const progSetCount = Math.max(1, Math.min(20, parseInt(ex.sets, 10) || 3));
+      const progReps = String(ex.reps || '').trim();
+      // Display sets: today's logged sets, or programmed shells prefilled
+      // from last time so set 1 is one tap away.
+      const dispSets = loggedSets.length
+        ? loggedSets
+        : Array.from({ length: progSetCount }, (_, i) => {
+            const prev = lastSets[i];
+            return {
+              w: prev && prev.w != null ? prev.w : null,
+              r: prev && prev.r != null ? prev.r : (progReps === '' ? null : parseInt(progReps, 10) || null),
+              done: 0,
+              _prefill: true,
+            };
+          });
+      const doneSets = dispSets.filter((s) => s.done).length;
+      const done = dispSets.length > 0 && doneSets === dispSets.length && loggedSets.length > 0;
       const sr = [ex.sets, ex.reps].filter(Boolean).join(' × ');
       const trpe = ex.target_rpe ? `<span class="rpe-chip">Target RPE ${esc(String(ex.target_rpe))}</span>` : '';
-      const lastHtml = last
-        ? `<div class="lift-last">Last: <strong>${last.weight != null ? esc(String(last.weight)) + ' lbs' : '—'}</strong>${last.rpe != null ? ` · RPE ${esc(String(last.rpe))}` : ''} <span class="hint-inline">· ${esc(fmtDay(last.day))}</span></div>`
+      const lastSummary = last
+        ? lastSets.length
+          ? lastSets.map(fmtSet).join(' · ')
+          : `${last.weight != null ? esc(String(last.weight)) + ' lbs' : '—'}${last.rpe != null ? ` · RPE ${esc(String(last.rpe))}` : ''}`
+        : null;
+      const lastHtml = lastSummary
+        ? `<div class="lift-last">Last: <strong>${lastSummary}</strong> <span class="hint-inline">· ${esc(fmtDay(last.day))}</span></div>`
         : `<div class="lift-last dim">First time logging this one — set the tone.</div>`;
       const histHtml = hist.length
         ? `<ul class="hist-list">${hist
-            .map(
-              (h) =>
-                `<li><span class="hint-inline">${esc(fmtDay(h.day))}</span> ${h.weight != null ? esc(String(h.weight)) + ' lbs' : '—'}${h.rpe != null ? ` · RPE ${esc(String(h.rpe))}` : ''}</li>`
-            )
+            .map((h) => {
+              const hs = Array.isArray(h.sets) ? h.sets : [];
+              const txt = hs.length
+                ? hs.map(fmtSet).join(' · ')
+                : `${h.weight != null ? esc(String(h.weight)) + ' lbs' : '—'}${h.rpe != null ? ` · RPE ${esc(String(h.rpe))}` : ''}`;
+              return `<li><span class="hint-inline">${esc(fmtDay(h.day))}</span> ${txt}</li>`;
+            })
             .join('')}</ul>`
         : '<div class="hint-inline">No logs yet.</div>';
       const rpeOpts = Array.from({ length: 10 }, (_, i) => {
         const v = i + 1;
-        return `<option value="${v}"${String(logged.rpe) === String(v) ? ' selected' : ''}>${v}</option>`;
+        return `<option value="${v}"${row && String(row.rpe) === String(v) ? ' selected' : ''}>${v}</option>`;
       }).join('');
       const subUrl = `/program/substitute?name=${encodeURIComponent(name)}&key=${encodeURIComponent(key)}&sub=lifting&lday=${ldayIdx}`;
       const subBadge = swapped
         ? `<span class="sub-badge">⇄ swapped from ${esc(name)}</span>
-           <form method="post" action="/program/substitute/revert" class="inline-form" style="display:inline">
+           ${readOnly ? '' : `<form method="post" action="/program/substitute/revert" class="inline-form" style="display:inline">
              <input type="hidden" name="key" value="${esc(key)}"><input type="hidden" name="sub" value="lifting"><input type="hidden" name="lday" value="${ldayIdx}">
              <button class="btn-small btn-quiet" type="submit">Revert</button>
-           </form>`
-        : `<a class="sub-link" href="${subUrl}">⇄ Substitute</a>`;
-      return `<div class="lift-ex${done ? ' done' : ''}">
-        <form method="post" action="/program/check" class="lift-check">
-          <input type="hidden" name="kind" value="lift">
-          <input type="hidden" name="sub" value="lifting">
-          <input type="hidden" name="lday" value="${ldayIdx}">
-          <input type="hidden" name="item_key" value="${esc(key)}">
-          <button type="submit" class="checkbtn" aria-label="${done ? 'Mark not done' : 'Mark done'}">${done ? '☑' : '☐'}</button>
-        </form>
-        <div class="lift-main">
-          <div class="lift-name">${esc(shown)}${sr ? ` <span class="hint-inline">${esc(sr)}</span>` : ''} ${trpe}</div>
-          <div class="hint-inline">${subBadge}</div>
-          ${ex.notes ? `<div class="hint-inline">${esc(ex.notes)}</div>` : ''}
-          ${lastHtml}
-          <form method="post" action="/program/check" class="lift-log">
+           </form>`}`
+        : (readOnly ? '' : `<a class="sub-link" href="${subUrl}">⇄ Substitute</a>`);
+      const setRows = dispSets
+        .map((s, i) => {
+          const prev = lastSets[i];
+          const prevTxt = prev ? fmtSet(prev) : '—';
+          const wVal = s.w != null && s.w !== '' ? esc(String(s.w)) : '';
+          const rVal = s.r != null && s.r !== '' ? esc(String(s.r)) : '';
+          const isDone = !!s.done;
+          const checkCell = readOnly
+            ? `<span class="set-check${isDone ? ' on' : ''}" aria-hidden="true">${isDone ? '☑' : '☐'}</span>`
+            : `<form method="post" action="/program/check" class="set-check-form">
+                <input type="hidden" name="kind" value="lift">
+                <input type="hidden" name="sub" value="lifting">
+                <input type="hidden" name="lday" value="${ldayIdx}">
+                <input type="hidden" name="item_key" value="${esc(key)}">
+                <input type="hidden" name="lift_op" value="${isDone ? 'unset' : 'set'}">
+                <input type="hidden" name="set_idx" value="${i}">
+                <input type="hidden" name="prog_sets" value="${progSetCount}">
+                <input type="hidden" name="prog_reps" value="${esc(progReps)}">
+                <input type="hidden" name="set_weight" value="${wVal}">
+                <input type="hidden" name="set_reps" value="${rVal}">
+                <button type="submit" class="set-check${isDone ? ' on' : ''}" aria-label="${isDone ? 'Uncheck set ' + (i + 1) : 'Check off set ' + (i + 1)}">${isDone ? '☑' : '☐'}</button>
+              </form>`;
+          const inputs = readOnly
+            ? `<span class="set-val">${wVal === '' ? '—' : wVal}</span>`
+            : `<input name="set_weight" type="number" inputmode="decimal" step="any" min="0" max="2000" placeholder="lbs" value="${wVal}" aria-label="Set ${i + 1} weight">`;
+          const repsInput = readOnly
+            ? `<span class="set-val">${rVal === '' ? '—' : rVal}</span>`
+            : `<input name="set_reps" type="number" inputmode="numeric" step="1" min="0" max="500" placeholder="reps" value="${rVal}" aria-label="Set ${i + 1} reps">`;
+          // Editable weight/reps live in the per-set check form so one tap
+          // logs whatever is typed. Wrap inputs+button in a single form.
+          const rowForm = readOnly
+            ? `<tr class="set-row${isDone ? ' done' : ''}">
+                <td class="set-num">${i + 1}</td>
+                <td class="set-prev">${esc(prevTxt)}</td>
+                <td>${inputs}</td>
+                <td>${repsInput}</td>
+                <td class="set-check-cell">${checkCell}</td>
+              </tr>`
+            : `<tr class="set-row${isDone ? ' done' : ''}">
+                <td class="set-num">${i + 1}</td>
+                <td class="set-prev">${esc(prevTxt)}</td>
+                <td colspan="3">
+                  <form method="post" action="/program/check" class="set-form">
+                    <input type="hidden" name="kind" value="lift">
+                    <input type="hidden" name="sub" value="lifting">
+                    <input type="hidden" name="lday" value="${ldayIdx}">
+                    <input type="hidden" name="item_key" value="${esc(key)}">
+                    <input type="hidden" name="lift_op" value="${isDone ? 'unset' : 'set'}">
+                    <input type="hidden" name="set_idx" value="${i}">
+                    <input type="hidden" name="prog_sets" value="${progSetCount}">
+                    <input type="hidden" name="prog_reps" value="${esc(progReps)}">
+                    <input name="set_weight" type="number" inputmode="decimal" step="any" min="0" max="2000" placeholder="lbs" value="${wVal}" aria-label="Set ${i + 1} weight in pounds">
+                    <input name="set_reps" type="number" inputmode="numeric" step="1" min="0" max="500" placeholder="reps" value="${rVal}" aria-label="Set ${i + 1} reps">
+                    <button type="submit" class="set-check${isDone ? ' on' : ''}" aria-label="${isDone ? 'Uncheck set ' + (i + 1) : 'Log set ' + (i + 1)}">${isDone ? '☑' : '☐'}</button>
+                  </form>
+                </td>
+              </tr>`;
+          return rowForm;
+        })
+        .join('');
+      const addSetHtml = readOnly
+        ? ''
+        : `<form method="post" action="/program/check" class="inline-form set-add">
             <input type="hidden" name="kind" value="lift">
             <input type="hidden" name="sub" value="lifting">
             <input type="hidden" name="lday" value="${ldayIdx}">
             <input type="hidden" name="item_key" value="${esc(key)}">
-            <input name="weight" type="number" inputmode="decimal" step="any" min="0" max="2000" placeholder="lbs"
-              value="${logged.weight != null ? esc(String(logged.weight)) : ''}" aria-label="Weight in pounds">
+            <input type="hidden" name="lift_op" value="addset">
+            <button type="submit" class="btn-small">+ Add set</button>
+          </form>`;
+      const rpeHtml = readOnly
+        ? (row && row.rpe != null ? `<div class="hint-inline">RPE ${esc(String(row.rpe))}</div>` : '')
+        : `<form method="post" action="/program/check" class="lift-rpe">
+            <input type="hidden" name="kind" value="lift">
+            <input type="hidden" name="sub" value="lifting">
+            <input type="hidden" name="lday" value="${ldayIdx}">
+            <input type="hidden" name="item_key" value="${esc(key)}">
+            <input type="hidden" name="lift_op" value="rpe">
             <select name="rpe" aria-label="Actual RPE 1 to 10"><option value="">RPE</option>${rpeOpts}</select>
-            <button type="submit" class="btn btn-sm">${done ? 'Update' : 'Log'}</button>
-          </form>
+            <button type="submit" class="btn btn-sm">Save</button>
+          </form>`;
+      const progressHtml = dispSets.length
+        ? `<div class="hint-inline set-progress">${doneSets}/${dispSets.length} sets</div>`
+        : '';
+      return `<div class="lift-ex${done ? ' done' : ''}">
+        <div class="lift-main">
+          <div class="lift-name-row">
+            <div class="lift-name">${esc(shown)}${sr ? ` <span class="hint-inline">${esc(sr)}</span>` : ''} ${trpe}${ex.video ? ` <a class="watch-link" href="${esc(ex.video)}" target="_blank" rel="noopener" aria-label="Watch video">&#9654; <span>Watch</span></a>` : ''}</div>
+            ${progressHtml}
+          </div>
+          ${subBadge ? `<div class="hint-inline">${subBadge}</div>` : ''}
+          ${ex.notes ? `<div class="hint-inline">${esc(ex.notes)}</div>` : ''}
+          ${ex.suggested_weight ? `<div class="lift-suggest">Suggested: <strong>${esc(String(ex.suggested_weight))} lbs</strong> <span class="hint-inline">based on your maxes</span></div>` : ''}
+          ${lastHtml}
+          <table class="set-table">
+            <thead><tr><th>Set</th><th>Previous</th><th>lbs</th><th>Reps</th><th aria-label="Done">✓</th></tr></thead>
+            <tbody>${setRows}</tbody>
+          </table>
+          <div class="set-actions">${addSetHtml}${rpeHtml}</div>
           <details class="lift-hist"><summary>History</summary>${histHtml}</details>
         </div>
       </div>`;
@@ -2586,6 +2745,7 @@ function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftDat
   return `<div class="day-pills">${pills}</div>
     <h3 class="prog-h3">${esc(dayKey)}</h3>
     ${warmupHtml}
+    ${readOnly ? '<p class="hint">Preview — logging is disabled.</p>' : ''}
     ${exRows || '<div class="card empty">No exercises on this day yet — your coach can add them.</div>'}`;
 }
 
@@ -2672,6 +2832,8 @@ function liftingEditPage(user, lp) {
         <label class="lift-field">Day label <input name="lday_${i}_label" value="${esc(d.label || '')}" maxlength="40"></label>
         <label class="lift-field">Warm-up <span class="hint-inline">(one per line — renders first on the day, no logging)</span>
           <textarea name="lday_${i}_warmup" rows="3" style="width:100%;box-sizing:border-box" placeholder="Jump rope — 2 min&#10;Leg swings — 10 each leg">${esc((d.warmup || []).join('\n'))}</textarea></label>
+        <label class="lift-field">Speed — sprints first <span class="hint-inline">(one per line: Name | volume | notes — the day's opening block)</span>
+          <textarea name="lday_${i}_speed" rows="3" style="width:100%;box-sizing:border-box" placeholder="Build-Up Sprints | 6 x 40 yd | Walk-back recovery">${esc((d.speed || []).map((s) => [s.name, s.volume, s.notes].filter(Boolean).join(' | ')).join('\n'))}</textarea></label>
         <div class="lift-ex-list" data-exlist>
         ${(d.exercises || [])
           .map(
@@ -2681,6 +2843,7 @@ function liftingEditPage(user, lp) {
               <input name="lex_${i}_${j}_reps" value="${esc(ex.reps || '')}" placeholder="Reps" maxlength="24" class="num">
               <select name="lex_${i}_${j}_trpe" title="Target RPE">${rpeOpts(ex.target_rpe)}</select>
               <input name="lex_${i}_${j}_notes" value="${esc(ex.notes || '')}" placeholder="Cue / note" maxlength="200" class="wide">
+              <input name="lex_${i}_${j}_video" value="${esc(ex.video || '')}" placeholder="YouTube link" maxlength="300" class="wide" inputmode="url">
               <button type="button" class="btn btn-sm btn-danger" data-rmex>✕</button>
             </div>`
           )
@@ -2967,7 +3130,7 @@ function programEditPage(user, p, profileEmail, hasLifting, progression, opts) {
       </div>
       <h2 class="section-head">Training blocks</h2>
       ${hasLifting ? '<p class="hint-inline"><strong>This athlete has a lifting program</strong> — their Med Ball blocks don\'t get their own tab; they show inside the <em>Lifting</em> tab, ahead of the lifts.</p>' : ''}
-      <p class="hint-inline">Blocks named with <em>Mobility</em> feed the Mobility tab, <em>Med Ball</em> feeds the Med Ball tab (or lands inside the <em>Lifting</em> tab for athletes with a lifting program), <em>Metabolic</em> feeds the Metabolic tab, <em>Prep</em> stays with Hitting — naming a block is how tabs appear or disappear for the athlete.</p>
+      <p class="hint-inline">Blocks named with <em>Mobility</em> feed the Mobility tab, <em>Med Ball</em> feeds the Med Ball tab (or lands inside the <em>Lifting</em> tab for athletes with a lifting program), <em>Prep</em> stays with Hitting. Speed work lives inside the <em>Lifting</em> program (its Speed section) — there's no Metabolic tab; legacy <em>Metabolic</em> blocks fold into the Lifting tab's Speed section. Naming a block is how tabs appear or disappear for the athlete.</p>
       <div id="prog-cats" data-next="${routine.length}">${catBlocks}</div>
       <p><button type="button" class="btn" id="prog-add-cat">+ Add block</button>
       <button type="button" class="btn" data-addcat-name="Mobility">+ Mobility block</button>
@@ -3753,9 +3916,8 @@ function intakeFormPage(token, err, values, opts) {
         <div class="pick-group" data-required-group="components">
           ${checkRow('components', 'mobility', 'Mobility', 'baseball-specific: hips, t-spine, shoulders, ankles')}
           ${checkRow('components', 'hitting', 'Hitting', "Bobby picks your drills")}
-          ${checkRow('components', 'lifting', 'Lifting', 'med ball + explosive work included automatically')}
+          ${checkRow('components', 'lifting', 'Lifting', 'speed + med ball + explosive work included automatically')}
           ${checkRow('components', 'medball', 'Med ball only', 'without lifting — lifters get it inside lifting')}
-          ${checkRow('components', 'metabolic', 'Metabolic / conditioning', '')}
         </div>
         <p class="hint" id="lift-note" hidden><strong>Lifting selected:</strong> med ball and explosive work come with it — no need to check med ball separately.</p>`)}
 
