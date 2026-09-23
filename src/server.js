@@ -1544,12 +1544,26 @@ function userScoreSummary(userId) {
 
 // ---- Hitter routes ----
 
+// Bible study opt-in popup (Sep 23 2026, Bobby): shown once on app open to
+// athletes who haven't answered yet (bible_study IS NULL). Excludes Sammy
+// Atkinson and Tommy (Bobby's call) and never shows in coach view-as.
+function showBiblePopupFor(user, bibleStudy) {
+  if (!user || user.role !== 'athlete' || user.viewAs) return false;
+  if (bibleStudy !== null && bibleStudy !== undefined) return false;
+  const full = `${user.firstName || ''} ${user.lastName || ''}`.trim().toLowerCase();
+  if (full === 'sammy atkinson') return false;
+  // TODO: tighten to full name once Bobby confirms Tommy's last name.
+  if ((user.firstName || '').trim().toLowerCase() === 'tommy') return false;
+  return true;
+}
+
 app.get('/', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
   const { avgScore, checkinCount } = userScoreSummary(req.user.id);
   const recent = db
     .prepare('SELECT * FROM checkins WHERE user_id = ? ORDER BY created_at DESC LIMIT 3')
     .all(req.user.id);
+  const bsRow = db.prepare('SELECT bible_study FROM users WHERE id = ?').get(req.user.id);
   res.send(views.userHome(req.user, {
     whatWorks: whatWorksData(req.user.athleteName, req.user.id),
     avgScore,
@@ -1559,6 +1573,7 @@ app.get('/', requireLogin, (req, res) => {
     pushOn: userPushSubscriptions(req.user.id).length > 0,
     pushEnabled,
     precheckin: todayPreCheckin(req.user.id),
+    showBiblePopup: showBiblePopupFor(req.user, bsRow ? bsRow.bible_study : null),
   }));
 });
 
@@ -1792,7 +1807,9 @@ function programSubTabs(p, lifting) {
   if (liftFirst && hasLifting) tabs.push({ id: 'lifting', label: 'Lifting' });
   if (!hasLifting && blocks.medball.length) tabs.push({ id: 'medball', label: 'Med Ball' });
   tabs.push({ id: 'hitting', label: 'Hitting' });
-  if (blocks.metabolic.length) tabs.push({ id: 'metabolic', label: 'Metabolic' });
+  // No Metabolic tab (Sep 2026): speed work lives inside the Lifting tab.
+  // Legacy 'Metabolic' blocks in old programs render in the Lifting tab's
+  // Speed section instead of getting their own tab.
   if (!liftFirst && hasLifting) {
     tabs.push({ id: 'lifting', label: 'Lifting' });
   }
@@ -1844,13 +1861,20 @@ function getCheckoffs(userId, day) {
   return map;
 }
 
-// Most recent logged lift for an exercise (weight/RPE). Prefers an earlier
-// day ("what you did last time"); falls back to any earlier log today.
+// Most recent logged lift for an exercise (per-set log or legacy weight/RPE).
+// Prefers an earlier day ("what you did last time"); falls back to any
+// earlier log today.
+function parseSets(row) {
+  try {
+    const s = JSON.parse(row && row.sets_json ? row.sets_json : '[]');
+    return Array.isArray(s) ? s : [];
+  } catch (e) { return []; }
+}
 function lastLiftLog(userId, itemKey, today) {
   let r = db
     .prepare(
       `SELECT * FROM program_checkoffs
-       WHERE user_id = ? AND item_key = ? AND day < ? AND (weight IS NOT NULL OR rpe IS NOT NULL)
+       WHERE user_id = ? AND item_key = ? AND day < ? AND (weight IS NOT NULL OR rpe IS NOT NULL OR sets_json IS NOT NULL)
        ORDER BY day DESC LIMIT 1`
     )
     .get(userId, itemKey, today);
@@ -1858,21 +1882,24 @@ function lastLiftLog(userId, itemKey, today) {
     r = db
       .prepare(
         `SELECT * FROM program_checkoffs
-         WHERE user_id = ? AND item_key = ? AND day <= ? AND (weight IS NOT NULL OR rpe IS NOT NULL)
+         WHERE user_id = ? AND item_key = ? AND day <= ? AND (weight IS NOT NULL OR rpe IS NOT NULL OR sets_json IS NOT NULL)
          ORDER BY day DESC, id DESC LIMIT 1`
       )
       .get(userId, itemKey, today);
   }
+  if (r) r.sets = parseSets(r);
   return r || null;
 }
 function liftHistory(userId, itemKey, limit) {
-  return db
+  const rows = db
     .prepare(
       `SELECT * FROM program_checkoffs
-       WHERE user_id = ? AND item_key = ? AND (weight IS NOT NULL OR rpe IS NOT NULL)
+       WHERE user_id = ? AND item_key = ? AND (weight IS NOT NULL OR rpe IS NOT NULL OR sets_json IS NOT NULL)
        ORDER BY day DESC, id DESC LIMIT ?`
     )
     .all(userId, itemKey, limit || 8);
+  for (const r of rows) r.sets = parseSets(r);
+  return rows;
 }
 // Find the remote program for a hitter's name, honoring aliases
 // ("Samuel Chapman" links to the "Sam Chapman" program).
@@ -1999,7 +2026,60 @@ app.post('/program/check', requireLogin, requireWaiver, (req, res) => {
   const rpeRaw = String(req.body.rpe || '').trim();
   const weight = weightRaw === '' ? null : Number(weightRaw);
   const rpe = rpeRaw === '' ? null : Math.max(1, Math.min(10, parseInt(rpeRaw, 10) || 0)) || null;
-  if (existing) {
+  // Hevy-style per-set logging (Sep 2026): lift_op=set/unset/addset/rpe
+  // operate on the sets_json array [{w, r, done}] stored on the checkoff row.
+  const liftOp = String(req.body.lift_op || '').slice(0, 10);
+  const getSets = (row) => {
+    try {
+      const s = JSON.parse(row && row.sets_json ? row.sets_json : '[]');
+      return Array.isArray(s) ? s : [];
+    } catch (e) { return []; }
+  };
+  const saveSets = (rowId, sets) => {
+    db.prepare('UPDATE program_checkoffs SET sets_json = ? WHERE id = ?').run(JSON.stringify(sets), rowId);
+  };
+  if (kind === 'lift' && liftOp) {
+    const setIdx = Math.max(0, parseInt(req.body.set_idx, 10) || 0);
+    let row = existing;
+    if (!row) {
+      const info = db.prepare(
+        'INSERT INTO program_checkoffs (user_id, day, kind, item_key, created_at) VALUES (?, ?, ?, ?, ?)'
+      ).run(req.user.id, today, kind, itemKey, new Date().toISOString());
+      row = { id: info.lastInsertRowid, sets_json: null };
+    }
+    const sets = getSets(row);
+    // First touch on an exercise with no set array yet: seed the programmed
+    // sets (hidden prog_sets / prog_reps fields from the lift card) so a
+    // check tap on set 1 never lands on an empty row.
+    const seedProgrammedSets = () => {
+      if (sets.length) return;
+      const n = Math.max(1, Math.min(20, parseInt(req.body.prog_sets, 10) || 3));
+      const pr = String(req.body.prog_reps || '').trim();
+      for (let i = 0; i < n; i++) sets.push({ w: null, r: pr === '' ? null : parseInt(pr, 10) || null, done: 0 });
+    };
+    if (liftOp === 'addset') {
+      const repsRaw = String(req.body.reps || '').trim();
+      sets.push({ w: null, r: repsRaw === '' ? null : parseInt(repsRaw, 10) || null, done: 0 });
+      saveSets(row.id, sets);
+    } else if (liftOp === 'rpe') {
+      db.prepare('UPDATE program_checkoffs SET rpe = ? WHERE id = ?').run(rpe, row.id);
+    } else if (liftOp === 'set' || liftOp === 'unset') {
+      seedProgrammedSets();
+      if (sets[setIdx]) {
+        if (liftOp === 'unset') {
+          sets[setIdx].done = 0;
+        } else {
+          // set: record weight/reps and mark the set done.
+          const sw = String(req.body.set_weight || '').trim();
+          const sr = String(req.body.set_reps || '').trim();
+          sets[setIdx].w = sw === '' ? sets[setIdx].w : Number(sw);
+          sets[setIdx].r = sr === '' ? sets[setIdx].r : parseInt(sr, 10) || null;
+          sets[setIdx].done = 1;
+        }
+        saveSets(row.id, sets);
+      }
+    }
+  } else if (existing) {
     // Already done: with a lift log payload, update it; otherwise toggle off.
     if (kind === 'lift' && (weight !== null || rpe !== null)) {
       db.prepare('UPDATE program_checkoffs SET weight = ?, rpe = ? WHERE id = ?').run(weight, rpe, existing.id);
@@ -2197,6 +2277,15 @@ function coachForPlayer(playerId) {
 app.get('/api/push/vapid-key', (req, res) => res.json({ publicKey: VAPID_PUBLIC_KEY || null }));
 app.get('/api/push/status', requireLogin, (req, res) => {
   res.json({ pushEnabled, subscribed: userPushSubscriptions(req.user.id).length > 0 });
+});
+// Bible study opt-in choice (Sep 23 2026): the athlete answers the popup once.
+// Athletes only; view-as POSTs are already blocked upstream.
+app.post('/api/bible-study-choice', requireLogin, (req, res) => {
+  if (req.user.role !== 'athlete') return res.status(403).json({ error: 'athletes only' });
+  const c = Number((req.body || {}).choice);
+  if (c !== 0 && c !== 1) return res.status(400).json({ error: 'choice must be 0 or 1' });
+  db.prepare('UPDATE users SET bible_study = ? WHERE id = ?').run(c, req.user.id);
+  res.json({ ok: true });
 });
 app.post('/api/push/subscribe', requireLogin, (req, res) => {
   const sub = req.body && req.body.subscription;
@@ -5862,6 +5951,7 @@ HOW YOU COACH:
 4. SUGGESTIONS ARE THE FALLBACK — only when his old feels aren't working, suggest new things to try — a feel, an external cue, something to experiment with. Suggestions, never "the fix."
 5. Their words first — a cue in the hitter's own words beats a "better" cue every time.
 6. One thing at a time — praise what's good first. When his old feels aren't working and you're suggesting something new to try, one thing at a time — never dump three changes in one message.
+NEVER REPEAT YOURSELF — the conversation history shows everything you've already said to this hitter. Before every reply, scan it. If you've already given a cue, reminder, phrase, or piece of advice in this conversation, DO NOT say it again — not even reworded. Saying the same thing twice is how coaches get tuned out. If you've already covered the point, move on: ask him a question, notice something new, or leave the floor open. Fresh words every message.
 WHEN HE WANTS TO SKIP A QUESTION: if he asks to skip a question, just skip it — acknowledge briefly and move on. Never push back with 'remember you logged this today' or any version of that. He knows what he logged; he just doesn't want to answer right now. No guilt, and don't rephrase the question or circle back to the same topic — drop that thread entirely. Keep helping some other way, or leave the floor open.
 7. THE HITTING MATERIAL BELOW IS BACKGROUND KNOWLEDGE — stuff you've learned, not a script. Draw on it when it's genuinely needed — answering a question, explaining something, working through a problem — not just for diagnoses and fixes. Common sense first, and the hitter's own history and words always come before anything here. Never throw knowledge at him without knowing his problem first — ask, listen, understand what's actually going on before bringing anything in. No random tips, no lectures, no quoting entries at him. Let it shape how you talk, not what you say. And nothing below overrides rule 8.
 8. NEVER INVENT A CAUSE — no matter what problem he describes, never state or imply a specific mechanical cause as THE reason. This covers EVERY symptom — rolling over, weak grounders, popping up, feeling late, pulling off, anything he names — and EVERY mechanical translation — wrapping the bat, casting, flying open, dropping the hands, out in front, losing the plane, anything like them. The only exceptions: HE described that detail himself, or you've seen video of his swing. Translating his symptom into mechanics IS the diagnosis: when he says "weak grounders," you do NOT say "that means you're out in front" — that's the diagnosis wearing different words. Stay in HIS words. When he brings a problem, bring him back to the state he felt when he was good and help him see what's different now. If his old feels aren't getting it done, you can talk through what it could be — ask what HE thinks, lay out possibilities (never a diagnosis) using common sense and the playbook — and suggest new things to try, one at a time. A guessed cause teaches the wrong fix. This rule overrides every playbook entry below — no diagnosis or example changes it.
@@ -5888,6 +5978,7 @@ HOW YOU COACH (MIRROR MODE):
 5. NEVER INVENT A CAUSE — no matter what problem he describes — command issues, velo down, a pitch not biting, feeling off on the mound — never state or imply a specific mechanical cause as THE reason: not arm slot, not stride, not release point, not sequencing, nothing. The only exceptions: HE described that detail himself, or you've seen video of him throwing. Translating his symptom into mechanics IS the diagnosis. Stay in HIS words. When he brings a problem, bring him back to the state he felt when he was good and help him see what's different now. If his old feels aren't getting it done, talk through what it could be — ask what HE thinks, lay out possibilities (never a diagnosis) — and suggest new things to try, one at a time. A guessed cause teaches the wrong fix.
 6. Their words first — a feel in the pitcher's own words beats a "better" cue every time.
 7. One thing at a time — praise what's good first. When his old feels aren't working and you're suggesting something new to try, one thing at a time — never dump three changes in one message.
+NEVER REPEAT YOURSELF — the conversation history shows everything you've already said to this pitcher. Before every reply, scan it. If you've already given a feel, reminder, phrase, or piece of advice in this conversation, DO NOT say it again — not even reworded. Saying the same thing twice is how coaches get tuned out. If you've already covered the point, move on: ask him a question, notice something new, or leave the floor open. Fresh words every message.
 WHEN HE WANTS TO SKIP A QUESTION: if he asks to skip a question, just skip it — acknowledge briefly and move on. Never push back with 'remember you logged this today' or any version of that. He knows what he logged; he just doesn't want to answer right now. No guilt, and don't rephrase the question or circle back to the same topic — drop that thread entirely. Keep helping some other way, or leave the floor open.
 
 SUPPORT, NOT THERAPY: You're a coach, not a therapist or mental health professional — never diagnose mental health conditions (depression, anxiety disorders, eating disorders, anything like them) and never try to provide therapy. Struggling is normal — a lot of players feel this way, and it's fine to say so. Point him toward a real human: a parent, a coach, a counselor. If he talks about self-harm, hurting himself, or suicide: respond with care, don't try to counsel him through it — tell him to talk to a trusted adult right now, and give him the 988 Suicide and Crisis Lifeline: call or text 988, any time. This is a hard boundary — it overrides everything below, alongside the never-invent-a-cause rule.
@@ -6495,6 +6586,46 @@ app.post('/api/leads', (req, res) => {
   pushToCoaches(
     'New application',
     `${name}${ageLevel ? ' · ' + ageLevel : ''} just applied — tap to call them back.`,
+    '/coach#leads'
+  ).catch((e) => console.warn('lead push failed:', e.message));
+  res.json({ ok: true });
+});
+
+// Public lead intake (Sep 2026): the Hitter Development System sales site is a
+// static page with no backend, so it cannot hold LEADS_API_SECRET. This
+// endpoint accepts the same application fields as /api/leads WITHOUT any
+// secret — the secret never appears in client-side code. Same honeypot and
+// per-IP rate limiting as /api/leads. Bobby: this is intentionally public;
+// abuse protection is the honeypot + rate limit, not the secret. (The old
+// site embedded the secret in its JavaScript, which made /api/leads
+// effectively public anyway — this just stops shipping the credential.)
+app.options('/api/lead-intake', (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type');
+  res.status(204).end();
+});
+app.post('/api/lead-intake', (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  if (String((req.body || {}).website || '').trim() !== '') return res.status(400).json({ error: 'invalid submission' });
+  const ip = String((req.headers['x-forwarded-for'] || '').split(',')[0] || '').trim() || req.ip || 'unknown';
+  if (!leadRateOk(ip)) return res.status(429).json({ error: 'too many submissions' });
+  const b = req.body || {};
+  const name = String(b.name || '').trim().slice(0, 80);
+  const phone = String(b.phone || '').trim().slice(0, 30);
+  const ageLevel = String(b.age_level || b.age || '').trim().slice(0, 60);
+  const programInterest = String(b.program_interest || b.programInterest || '').trim().slice(0, 60);
+  const goals = String(b.goals || '').trim().slice(0, 500);
+  const source = String(b.source || 'website').trim().slice(0, 40) || 'website';
+  if (!name) return res.status(400).json({ error: 'name is required' });
+  if (!phone) return res.status(400).json({ error: 'phone is required' });
+  db.prepare(
+    'INSERT INTO leads (name, phone, age_level, program_interest, goals, source, status, submitted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(name, phone, ageLevel, programInterest, goals, source, 'new', new Date().toISOString());
+  // Same coach-push path as signup approvals (Bobby, Sep 18 2026: push only).
+  pushToCoaches(
+    'New application',
+    `${name}${ageLevel ? ' · ' + ageLevel : ''}${programInterest ? ' · ' + programInterest : ''} just applied — tap to call them back.`,
     '/coach#leads'
   ).catch((e) => console.warn('lead push failed:', e.message));
   res.json({ ok: true });
