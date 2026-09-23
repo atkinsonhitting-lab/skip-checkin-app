@@ -909,7 +909,9 @@ window.SkipMic = (function () {
       html = `<div class="rp-kind">Daily verse</div>
         <p class="rp-verse">\u201c${escHtml(s.verse)}\u201d</p>
         <div class="rp-ref">${escHtml(s.ref)}${s.theme ? ' · ' + escHtml(s.theme) : ''}</div>
-        <p class="rp-detail">Read it twice. Let one phrase stick — carry it today.</p>`;
+        ${s.explanation ? `<p class="rp-detail">${escHtml(s.explanation)}</p>` : ''}
+        ${s.baseball ? `<p class="rp-detail"><strong>Baseball:</strong> ${escHtml(s.baseball)}</p>` : ''}
+        ${s.life ? `<p class="rp-detail"><strong>Life:</strong> ${escHtml(s.life)}</p>` : ''}`;
     } else if (s.kind === 'breath') {
       html = `<div class="rp-kind">Breathe</div>
         <div class="rp-breath"></div>

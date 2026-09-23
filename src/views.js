@@ -3159,6 +3159,9 @@ function mentalGamePage(user, data) {
     verse: bibleVerse.text,
     ref: bibleVerse.ref,
     theme: bibleVerse.theme,
+    explanation: bibleVerse.explanation || '',
+    baseball: bibleVerse.baseball || '',
+    life: bibleVerse.life || '',
   } : null;
   const stepList = (items) => (items || []).map((it) => ({
     title: it.text || '',
