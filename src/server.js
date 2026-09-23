@@ -25,7 +25,7 @@ const { seedUsers, writeCredentialsFile, userCount } = require('./seed');
 // Bobby's own organization — his 4 remote hitters, Talk to Skip on, free
 // forever. Pinned at the top of the Organizations list; the only org whose
 // players get "Edit program" links (it's the only org with programs).
-const FOUNDER_ORG_NAME = 'Atkinson Hitting Remote Development';
+const FOUNDER_ORG_NAME = 'Atkinson Hitter Development System';
 
 const app = express();
 app.set('trust proxy', 1); // needed for secure cookies behind Render's proxy
@@ -120,11 +120,11 @@ if (process.env.BOOT_CREATE_USER) {
 }
 
 // Remote org one-shot (Sep 2026): set BOOT_REMOTE_ORG=1 to create Bobby's own
-// organization "Atkinson Hitting Remote Development" and place his 4 remote
+// organization "Atkinson Hitter Development System" and place his 4 remote
 // hitters in it. Idempotent: skips creation if the org exists, re-ensures the
 // hitter assignments and Talk to Skip access on every run.
 if (process.env.BOOT_REMOTE_ORG === '1') {
-  const REMOTE_ORG_NAME = 'Atkinson Hitting Remote Development';
+  const REMOTE_ORG_NAME = 'Atkinson Hitter Development System';
   const REMOTE_NAMES = ['Liam Stoffel', 'Dylan Kakuda', 'Ryan Seddon', 'Sam Chapman'];
   let org = db.prepare('SELECT id, code, skip_enabled FROM organizations WHERE name = ?').get(REMOTE_ORG_NAME);
   if (!org) {
@@ -414,7 +414,7 @@ function deleteOrgLogoFile(logoPath) {
 })();
 
 // Bobby's own programs (Sep 17 2026): "Atkinson Hitting" (in-person guys) and
-// "Atkinson Hitting Remote Development" (remote guys). Idempotent boot setup:
+// "Atkinson Hitter Development System" (remote guys). Idempotent boot setup:
 // find-or-create both orgs (Bobby may have created one via the app already),
 // mark is_mine=1 so they power the My Players tab, mirror branding between
 // them when only one has a logo, and move his named players in. Standalone
@@ -423,7 +423,9 @@ function deleteOrgLogoFile(logoPath) {
 (function seedBobbysPrograms() {
   try {
     const INPERSON = 'Atkinson Hitting';
-    const REMOTE = 'Atkinson Hitting Remote Development';
+    const REMOTE = 'Atkinson Hitter Development System';
+    // Bobby renamed it (Sep 23 2026): was "Atkinson Hitting Remote Development".
+    db.prepare("UPDATE organizations SET name = ? WHERE LOWER(name) = LOWER('Atkinson Hitting Remote Development')").run(REMOTE);
     const now = new Date().toISOString();
     const findOrg = (name) => db.prepare('SELECT * FROM organizations WHERE LOWER(name) = LOWER(?)').get(name);
     const ensureOrg = (name, notes) => {
