@@ -8,7 +8,13 @@
   var DAY = (window.WO_DAY && window.WO_DAY.day) || null;
   var bodyEl = document.getElementById('wo-body');
   if (!DAY) {
-    // Server-rendered fallback is already in #wo-body; leave it visible.
+    // Server-rendered fallback is already in #wo-body; add diagnostic.
+    var diag = document.createElement('div');
+    diag.className = 'card';
+    diag.style.marginTop = '12px';
+    diag.innerHTML = '<p class="hint">Debug: WO_DAY=' + (window.WO_DAY ? 'set' : 'missing') +
+      ', day=' + (window.WO_DAY && window.WO_DAY.day ? 'set' : 'missing') + '</p>';
+    if (bodyEl) bodyEl.appendChild(diag);
     return;
   }
 
