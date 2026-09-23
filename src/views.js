@@ -753,7 +753,8 @@ function checkinForm(user, error, values, drillNames, routine, recentGroups, act
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
       <div class="field-label compact">What did you do today?</div>
       ${pill('session_type', [['game', 'Game'], ['cage', 'Cage'], ['live_abs', 'Live ABs'], ['team_practice', 'Team Practice']], v.session_type)}
-      <div class="field-label compact">Follow your hitting routine? <a href="/routine" class="hint-inline">edit</a></div>
+      <div class="field-label compact">Follow your hitting routine?</div>
+      <a href="/routine" class="btn btn-secondary btn-sm" style="margin-bottom:8px">View / edit my routine</a>
       ${pill('routine_followed', [['yes', 'Yes'], ['mostly', 'Mostly'], ['no', 'No']], v.routine_followed)}
       <div class="field-label compact">How did your swing feel?</div>
       ${slider('swing_feel', v.swing_feel)}
@@ -3209,7 +3210,7 @@ function mentalGamePage(user, data) {
           <span class="routine-hero-go">›</span>
         </button>
       </div>
-      <p style="text-align:center;margin:8px 0 0"><a href="/mental-game/routines/edit" class="hint-inline">Edit your routines</a></p>
+      <p style="text-align:center;margin:10px 0 0"><a href="/mental-game/routines/edit" class="btn btn-secondary btn-sm">Edit your routines</a></p>
     </div>
     ${exercise ? heroCard('exercise', '🧠', 'Daily Exercise',
       [
