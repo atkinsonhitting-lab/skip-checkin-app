@@ -28,6 +28,11 @@ const { seedUsers, writeCredentialsFile, userCount } = require('./seed');
 const FOUNDER_ORG_NAME = 'Atkinson Hitter Development System';
 
 const app = express();
+
+// Never let an async throw kill the process (Bobby, Sep 23 2026: 502s on
+// check-in submit). Log it; the request-level try/catch handles the user.
+process.on('unhandledRejection', (e) => console.error('unhandledRejection:', e && e.message));
+process.on('uncaughtException', (e) => console.error('uncaughtException:', e && e.message));
 app.set('trust proxy', 1); // needed for secure cookies behind Render's proxy
 
 app.use(helmet({
@@ -4512,7 +4517,15 @@ app.post('/checkin', requireLogin, async (req, res) => {
   // The hitting form is for hitters; pitchers and two-ways have their own.
   if ((req.user.playerType || 'hitter') !== 'hitter') return res.redirect('/checkin');
   const b = req.body;
-  const fail = (msg) => res.send(views.checkinForm(req.user, msg, b));
+  const fail = (msg) => {
+    try {
+      res.send(views.checkinForm(req.user, msg, b));
+    } catch (e) {
+      console.error('checkin form render failed:', e.message);
+      res.status(500).send('Something went wrong saving your check-in. Please try again.');
+    }
+  };
+  try {
   // Bobby's simplified check-in (Sep 23 2026): a few taps + mic. Swing feel
   // is a 1-10 slider; Skip parses the talk text server-side into the summary.
   const sessionTypes = ['game', 'cage', 'live_abs', 'team_practice'];
@@ -4581,6 +4594,10 @@ Infer ratings from their words (e.g. "felt great" = 5, "terrible" = 1, "pretty g
     );
   notifyMyPlayerCheckin(req.user.id, req.user.displayName, '/coach/user/' + encodeURIComponent(req.user.email)).catch((e) => console.warn('checkin push failed:', e.message));
   res.redirect(`/checkin/score/${info.lastInsertRowid}`);
+  } catch (e) {
+    console.error('checkin submit failed:', e.message);
+    return fail('Something went wrong saving your check-in — please try again.');
+  }
 });
 
 // ---- Optional pre-hit check-in: set the intent BEFORE the session ----
