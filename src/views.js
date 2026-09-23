@@ -652,7 +652,7 @@ function sliderField(name, label, question, value, ends, ids) {
   return `<div class="slider-block">
     <div class="field-label">${esc(label)} <span class="hint-inline"${qId}>${esc(question)}</span></div>
     <div class="slider-row">
-      <input type="range" name="${name}" min="1" max="10" step="1" value="${v}" class="slider" data-out="${name}-out" aria-label="${esc(label)}">
+      <input type="range" name="${name}" min="1" max="10" step="1" value="${v}" class="slider" data-out="${name}-out" aria-label="${esc(label)}" oninput="var o=document.getElementById('${name}-out');if(o)o.textContent=this.value">
       <span class="slider-val" id="${name}-out">${v}</span>
     </div>
     <div class="slider-ends"><span${loId}>${esc(lo)}</span><span${hiId}>${esc(hi)}</span></div>
@@ -740,7 +740,7 @@ function checkinForm(user, error, values, drillNames, routine, recentGroups, act
   // Condensed: sliders not stars, tight spacing.
   const slider = (name, val) => `
     <div class="feel-slider">
-      <input type="range" name="${name}" min="1" max="10" step="1" value="${val || 5}" id="slider-${name}">
+      <input type="range" name="${name}" min="1" max="10" step="1" value="${val || 5}" id="slider-${name}" oninput="document.getElementById('slider-${name}-val').textContent=this.value">
       <div class="feel-slider-labels"><span>Rough</span><span id="slider-${name}-val">${val || 5}</span><span>Locked in</span></div>
     </div>`;
   return layout({
