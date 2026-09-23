@@ -217,7 +217,9 @@
   }
 
   function intentBadge(it) {
-    return it.intent === 'max' ? ' <span class="intent-badge">⚡ MAX INTENT</span>' : '';
+    if (it.intent === 'max') return ' <span class="intent-badge">⚡ MAX INTENT</span>';
+    if (it.intent === 'ecc') return ' <span class="intent-badge intent-ecc">🐌 ECCENTRIC</span>';
+    return '';
   }
 
   function blockHtml(it) {

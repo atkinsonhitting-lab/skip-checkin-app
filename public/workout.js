@@ -19,6 +19,9 @@
   }
 
   var items = [];
+  // Bobby (Sep 23 2026): mobility pairs with the lifting — guided workout
+  // opens with mobility, then Speed → Med Ball → Lifts.
+  (DAY.mobility || []).forEach(function (s) { s.type = s.type || 'mobility'; items.push(s); });
   (DAY.speed || []).forEach(function (s) { items.push(s); });
   (DAY.medball || []).forEach(function (s) { items.push(s); });
   (DAY.lifts || []).forEach(function (s) { items.push(s); });
@@ -64,6 +67,7 @@
   function renderSeq() {
     var html = '';
     var sections = [
+      { key: 'mobility', label: 'Mobility' },
       { key: 'speed', label: 'Speed' },
       { key: 'medball', label: 'Med Ball' },
       { key: 'lift', label: 'Lifts' },
@@ -121,16 +125,20 @@
     prevBtn.disabled = idx === 0;
     nextBtn.disabled = idx === items.length - 1;
     if (it.type === 'lift') body.innerHTML = liftHtml(it);
+    else if (it.type === 'mobility') body.innerHTML = mobilityHtml(it);
     else body.innerHTML = blockHtml(it);
     wireVideo();
     if (it.type === 'lift') wireLift(it);
+    else if (it.type === 'mobility') wireMobility(it);
     else wireBlock(it);
     syncProgress();
     window.scrollTo(0, 0);
   }
 
   function intentBadge(it) {
-    return it.intent === 'max' ? ' <span class="intent-badge">⚡ MAX INTENT</span>' : '';
+    if (it.intent === 'max') return ' <span class="intent-badge">⚡ MAX INTENT</span>';
+    if (it.intent === 'ecc') return ' <span class="intent-badge intent-ecc">🐌 ECCENTRIC</span>';
+    return '';
   }
 
   function secLabel(it) {
@@ -139,8 +147,32 @@
       ? s.charAt(0).toUpperCase() + s.slice(1) : '';
   }
 
+  function mobilityHtml(it) {
+    return '<div class="wo-card' + (it.done ? ' done' : '') + '">' +
+      '<div class="wo-kicker">Mobility</div>' +
+      '<h2 class="wo-name">' + esc(it.name) + '</h2>' +
+      (it.volume ? '<p class="wo-meta">' + esc(it.volume) + '</p>' : '') +
+      videoHtml(it) +
+      '<button type="button" class="wo-logbtn wo-mobbtn" data-act="' + (it.done ? 'unset' : 'set') + '">' +
+        (it.done ? '\u2713 Done' : 'Mark done') + '</button>' +
+      '</div>';
+  }
+
+  function wireMobility(it) {
+    var btn = body.querySelector('.wo-mobbtn');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      it.done = !it.done;
+      btn.textContent = it.done ? '\u2713 Done' : 'Mark done';
+      btn.setAttribute('data-act', it.done ? 'unset' : 'set');
+      btn.closest('.wo-card').classList.toggle('done', it.done);
+      buzz(10);
+      syncProgress();
+    });
+  }
+
   function blockHtml(it) {
-    var kindLabel = it.type === 'speed' ? 'Speed' : 'Med Ball';
+    var kindLabel = it.type === 'speed' ? 'Speed' : it.type === 'mobility' ? 'Mobility' : 'Med Ball';
     var meta = [it.volume, it.notes].filter(Boolean).join(' · ');
     var isMed = it.type === 'medball';
     var rows = (it.dispSets || []).map(function (s, k) {

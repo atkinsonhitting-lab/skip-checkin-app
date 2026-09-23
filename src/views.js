@@ -46,7 +46,10 @@ function ytIdOf(url) {
   return m ? m[1] : '';
 }
 function intentBadgeHtml(intent) {
-  return String(intent || '').toLowerCase() === 'max' ? ' <span class="intent-badge">⚡ MAX INTENT</span>' : '';
+  const s = String(intent || '').toLowerCase();
+  if (s === 'max') return ' <span class="intent-badge">⚡ MAX INTENT</span>';
+  if (s === 'ecc') return ' <span class="intent-badge intent-ecc">🐌 ECCENTRIC</span>';
+  return '';
 }
 // Lifting video control: YouTube demos expand inline (tap ▶, plays in page);
 // anything else falls back to the plain watch link.
@@ -2710,7 +2713,10 @@ function programPage(user, p, opts) {
       const lab = s ? s.label : '';
       const isToday = wd.toLowerCase() === String(weekday).toLowerCase();
       const isOff = /^(off|rest)/i.test(lab) || !lab;
-      const tab = /mobility day/i.test(lab) ? 'mobility' : sub;
+      // Bobby (Sep 23 2026): Mobility Day opens the Mobility tab for non-lifters;
+      // lifters get mobility inside the Lifting tab, so it opens lifting.
+      const hasMobTab = tabs.some((t) => t.id === 'mobility');
+      const tab = /mobility day/i.test(lab) ? (hasMobTab ? 'mobility' : 'lifting') : sub;
       const inner = `<span class="ws-dow">${wd.slice(0, 3)}</span><span class="ws-lab">${esc(lab || '—')}</span>`;
       const cls = `ws-cell${isToday ? ' ws-today' : ''}${isOff ? ' ws-off' : ''}`;
       return isOff
@@ -2754,9 +2760,16 @@ function programPage(user, p, opts) {
   let content = '';
   if (sub === 'mobility') {
     const blocks = routine.filter((c) => kindOf(c.category) === 'mobility' && realItems(c.items).length);
+    // Bobby (Sep 23 2026): mobility + med ball paired in one flow for athletes
+    // without a lifting program — med ball work renders below the mobility.
+    const medBlocks = routine.filter((c) => kindOf(c.category) === 'medball' && realItems(c.items).length);
+    const medHtmlMob = medBlocks.length
+      ? `<h3 class="prog-h3"><span class="flow-num">2</span> \U0001f4a5 Med Ball — explosive throws</h3>` +
+        medBlocks.map((c) => blockCard(c.category, c.items, 'med', dayPrefix(c.category))).join('')
+      : '';
     content = `${dayHead(false)}
       <p class="lede">Do this first, every day — then get after the work below.</p>
-      ${blocks.map((c) => blockCard(c.category, c.items, 'mob')).join('') || '<div class="card empty">No mobility work in your program.</div>'}`;
+      ${blocks.map((c) => blockCard(c.category, c.items, 'mob')).join('') || '<div class="card empty">No mobility work in your program.</div>'}${medHtmlMob}`;
   } else if (sub === 'medball') {
     const blocks = routine.filter((c) => kindOf(c.category) === 'medball' && realItems(c.items).length);
     const todays = day ? blocks.filter((c) => inDay(c.category, day)) : blocks;
@@ -2846,7 +2859,14 @@ function programPage(user, p, opts) {
         <span class="start-workout-play">▶</span>
         <span class="start-workout-text"><strong>Start Lift</strong>
         <span>Walk through it — video + logging as you go</span></span></a>`;
-      content = `${topStartBtn}${phaseBanner}${liftPrimer}${sessionOrder === 'hitting_first' ? `<p class=\"hint\">Hit first, then lift — you're warm, go straight to speed work. Ramp-up sets on main lifts still apply. Lifting-only day? Full Mobility tab first.</p>` : ''}${speedHtml}${medHtml}${liftSubTab(user, lifting, days, effLday, sub, checkoffs, today, o.liftData || {}, o.subs || {}, secBase, o.todayLdayIdx, o.sched, o.weekday)}${YT_TOGGLE_SCRIPT}`;
+      // Bobby (Sep 23 2026): mobility pairs WITH the lifting — no standalone
+      // Mobility tab for lifters. Mobility blocks render first, as the warm-up.
+      const mobBlocks = routine.filter((c) => kindOf(c.category) === 'mobility' && realItems(c.items).length);
+      const mobHtml = mobBlocks.length
+        ? `<h3 class=\"prog-h3\"><span class=\"flow-num\">0</span> \U0001f9d8 Mobility — move first, then work</h3>` +
+          mobBlocks.map((c) => blockCard(c.category, c.items, 'mob')).join('')
+        : '';
+      content = `${topStartBtn}${phaseBanner}${liftPrimer}${sessionOrder === 'hitting_first' ? `<p class=\"hint\">Hit first, then lift — you're warm, go straight to speed work. Ramp-up sets on main lifts still apply.${mobBlocks.length ? '' : ' Lifting-only day? Full Mobility tab first.'}</p>` : ''}${mobHtml}${speedHtml}${medHtml}${liftSubTab(user, lifting, days, effLday, sub, checkoffs, today, o.liftData || {}, o.subs || {}, secBase, o.todayLdayIdx, o.sched, o.weekday)}${YT_TOGGLE_SCRIPT}`;
     }
   } else {
     // HITTING (default): today's plan first — prep for the day + the day's
@@ -2927,7 +2947,19 @@ function programPage(user, p, opts) {
 // rest timer, no page reloads. The day JSON rides in window.WO_DAY;
 // /workout.js renders and runs the session.
 function workoutPage(user, program, wd, ldayIdx, preview, phaseNotes) {
-  const dayJson = JSON.stringify(wd).replace(/</g, '\\u003c');
+  // Bobby (Sep 23 2026): mobility pairs WITH the lifting — the guided workout
+  // opens with the athlete's mobility blocks, then Speed → Med Ball → Lifts.
+  const progRoutine = (program && program.prog && Array.isArray(program.prog.routine)) ? program.prog.routine : [];
+  const mobItems = [];
+  for (const c of progRoutine) {
+    if (!/mobility/i.test(String((c && c.category) || ''))) continue;
+    for (const it of (Array.isArray(c.items) ? c.items : [])) {
+      const nm = String((it && it.drill) || '').trim();
+      if (nm) mobItems.push({ name: nm, volume: String((it && it.sets) || ''), video: String((it && it.video) || ''), type: 'mobility' });
+    }
+  }
+  const wdMob = wd && wd.day ? { ...wd, day: { ...wd.day, mobility: mobItems } } : wd;
+  const dayJson = JSON.stringify(wdMob).replace(/</g, '\\u003c');
   const lday = Number(ldayIdx) || 0;
   const previewBanner = preview
     ? '<div class="card" style="margin:0 0 12px;background:#fff8e1;border:1px solid #f0d060"><p style="margin:0"><strong>Preview</strong> — you\'re viewing as a coach. Logging is disabled.</p></div>'
@@ -2939,8 +2971,8 @@ function workoutPage(user, program, wd, ldayIdx, preview, phaseNotes) {
     : '';
   // Server-rendered fallback: if the client JS fails, the athlete still sees
   // the workout. The JS guided mode enhances this when it loads.
-  const d = (wd && wd.day) || {};
-  const allItems = [...(d.speed || []), ...(d.medball || []), ...(d.lifts || [])];
+  const d = (wdMob && wdMob.day) || {};
+  const allItems = [...(d.mobility || []), ...(d.speed || []), ...(d.medball || []), ...(d.lifts || [])];
   const fallbackHtml = allItems.length
     ? `<div class="card"><h3 style="margin-top:0">Today's exercises (${allItems.length})</h3>` +
       allItems.map((it, i) => {
@@ -4040,15 +4072,91 @@ function programEditPage(user, p, profileEmail, hasLifting, progression, opts) {
   for (const pair of Array.isArray(prog.schedule) ? prog.schedule : []) {
     if (Array.isArray(pair) && pair[0]) editSchedMap[String(pair[0])] = String(pair[1] || '');
   }
+  // Bobby (Sep 23 2026): interactive schedule calendar — tap a day, tap another
+  // day to swap their workouts; or pick a label from the dropdown. The hidden
+  // sched_N inputs keep the existing save handler working unchanged.
+  const schedDayLabels = (() => {
+    const seen = [];
+    for (const c of routine) {
+      const m = /^([A-Za-z]+ ?\d+|Pregame)/i.exec(String((c && c.category) || '').trim());
+      const lab = m ? m[1].trim() : null;
+      if (lab && !seen.some((s) => s.toLowerCase() === lab.toLowerCase())) seen.push(lab);
+    }
+    return seen;
+  })();
+  const schedOptions = ['OFF', 'Recovery', 'Mobility Day', ...schedDayLabels];
   const schedFields = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
     .map(
       (d, i) => {
         const cur = editSchedMap[d] || '';
-        const isOff = /^(off|rest)/i.test(cur);
-        return `<label class="sched-cal-cell${isOff ? ' is-off' : ''}"><span class="sched-cal-dow">${esc(d.slice(0, 3))}</span><input type="text" name="sched_${i}" value="${esc(cur)}" maxlength="40" placeholder="OFF"></label>`;
+        const isOff = /^(off|rest)/i.test(cur) || !cur;
+        const opts = schedOptions
+          .map((o) => `<option value="${esc(o)}"${o.toLowerCase() === cur.toLowerCase() ? ' selected' : ''}>${esc(o)}</option>`)
+          .join('');
+        // Include the current value even if it's not in the options list
+        const curOpt = cur && !schedOptions.some((o) => o.toLowerCase() === cur.toLowerCase())
+          ? `<option value="${esc(cur)}" selected>${esc(cur)}</option>` : '';
+        return `<div class="sched-cal-cell${isOff ? ' is-off' : ''}" data-sched-day="${i}" tabindex="0" role="button" aria-label="${esc(d)}: ${esc(cur || 'OFF')}. Tap to select, tap another day to swap.">` +
+          `<span class="sched-cal-dow">${esc(d.slice(0, 3))}</span>` +
+          `<span class="sched-cal-lab">${esc(cur || 'OFF')}</span>` +
+          `<select class="sched-cal-pick" data-sched-pick="${i}" aria-label="${esc(d)} workout">${curOpt}${opts}</select>` +
+          `<input type="hidden" name="sched_${i}" value="${esc(cur)}" data-sched-hidden="${i}">` +
+          `</div>`;
       }
     )
     .join('');
+  const schedCalScript = `<script>(function(){
+    var cells = Array.prototype.slice.call(document.querySelectorAll('[data-sched-day]'));
+    var selected = -1;
+    function labelOf(i){
+      var h = document.querySelector('[data-sched-hidden="'+i+'"]');
+      return h ? h.value : '';
+    }
+    function setLabel(i, v){
+      var h = document.querySelector('[data-sched-hidden="'+i+'"]');
+      var lab = document.querySelector('[data-sched-day="'+i+'"] .sched-cal-lab');
+      var pick = document.querySelector('[data-sched-pick="'+i+'"]');
+      var cell = document.querySelector('[data-sched-day="'+i+'"]');
+      if (h) h.value = v;
+      if (lab) lab.textContent = v || 'OFF';
+      if (cell) cell.classList.toggle('is-off', /^(off|rest)/i.test(v) || !v);
+      if (pick && pick.value !== v) {
+        var found = false;
+        for (var k = 0; k < pick.options.length; k++) if (pick.options[k].value.toLowerCase() === String(v).toLowerCase()) { pick.selectedIndex = k; found = true; break; }
+        if (!found && v) { var o = document.createElement('option'); o.value = v; o.textContent = v; o.selected = true; pick.appendChild(o); }
+        if (!v) pick.selectedIndex = 0;
+      }
+    }
+    function clearSel(){
+      cells.forEach(function(c){ c.classList.remove('is-sel'); });
+      selected = -1;
+    }
+    cells.forEach(function(cell){
+      var i = Number(cell.getAttribute('data-sched-day'));
+      cell.addEventListener('click', function(e){
+        if (e.target && e.target.classList && e.target.classList.contains('sched-cal-pick')) return;
+        if (selected === -1) { selected = i; cell.classList.add('is-sel'); }
+        else if (selected === i) { clearSel(); }
+        else {
+          var a = labelOf(selected), b = labelOf(i);
+          setLabel(selected, b); setLabel(i, a);
+          clearSel();
+          if (navigator.vibrate) try { navigator.vibrate(10); } catch (e2) {}
+        }
+      });
+      cell.addEventListener('keydown', function(e){
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); cell.click(); }
+      });
+    });
+    document.querySelectorAll('[data-sched-pick]').forEach(function(pick){
+      pick.addEventListener('change', function(){
+        var i = Number(pick.getAttribute('data-sched-pick'));
+        setLabel(i, pick.value);
+        clearSel();
+      });
+      pick.addEventListener('click', function(e){ e.stopPropagation(); });
+    });
+  })();</script>`;
   const editNotes = Array.isArray(prog.notes) ? prog.notes.filter(Boolean) : [];
   const draftBanner = prog.draft
     ? `<div class="draft-banner"><strong>DRAFT — built from the intake questionnaire.</strong> Review everything below, add your drills and cues, fix the lifting program, then save. Saving clears the draft flag.</div>`
@@ -4106,7 +4214,7 @@ function programEditPage(user, p, profileEmail, hasLifting, progression, opts) {
         <label class="fld">Timing<input type="text" name="cue_timing" value="${esc(cues.timing || '')}" maxlength="300"></label>
         <label class="fld">Game<input type="text" name="cue_game" value="${esc(cues.game || '')}" maxlength="300"></label>
       </div>
-      <div class="card routine-group"><h2 class="routine-station">Weekly schedule</h2><p class="hint">One cell per day — type <strong>Day 1</strong>, <strong>Recovery</strong>, <strong>Mobility Day</strong>, or <strong>OFF</strong>. This is the athlete's week.</p><div class="sched-cal">${schedFields}</div></div>
+      <div class="card routine-group"><h2 class="routine-station">Weekly schedule</h2><p class="hint"><strong>Tap a day, then tap another day to swap their workouts.</strong> Or pick a workout from each day's dropdown. This is the athlete's week.</p><div class="sched-cal">${schedFields}</div></div>${schedCalScript}
       <div class="card routine-group">
         <label class="fld">Notes — one per line
           <textarea name="notes" rows="3">${esc(editNotes.join('\n'))}</textarea>

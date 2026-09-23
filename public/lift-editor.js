@@ -164,8 +164,11 @@ const DEMO_VIDEOS = [
 
   // ---- movement rows ----
   function intentCheck(obj) {
-    return '<label class="le-f le-check"><input type="checkbox" data-f="intent" value="max"' +
-      (obj.intent === 'max' ? ' checked' : '') + '> <span>⚡ Max intent</span></label>';
+    return '<label class="le-f">Tag<select data-f="intent">' +
+      '<option value="">—</option>' +
+      '<option value="max"' + (obj.intent === 'max' ? ' selected' : '') + '>⚡ Max intent</option>' +
+      '<option value="ecc"' + (obj.intent === 'ecc' ? ' selected' : '') + '>🐌 Eccentric</option>' +
+      '</select></label>';
   }
   function speedRow(obj, section) {
     obj.intent = obj.intent || '';
@@ -190,9 +193,9 @@ const DEMO_VIDEOS = [
     for (var i = 0; i < inputs.length; i++) {
       (function (inp) {
         if (inp.getAttribute('data-f') === 'video') obj.inputEl = inp;
-        if (inp.type === 'checkbox' && inp.getAttribute('data-f') === 'intent') {
+        if (inp.getAttribute('data-f') === 'intent') {
           inp.addEventListener('change', function () {
-            obj.intent = inp.checked ? 'max' : '';
+            obj.intent = inp.value === 'max' ? 'max' : inp.value === 'ecc' ? 'ecc' : '';
             changed();
           });
           return;
@@ -273,9 +276,9 @@ const DEMO_VIDEOS = [
     for (var i = 0; i < inputs.length; i++) {
       (function (inp) {
         if (inp.getAttribute('data-f') === 'video') obj.inputEl = inp;
-        if (inp.type === 'checkbox' && inp.getAttribute('data-f') === 'intent') {
+        if (inp.getAttribute('data-f') === 'intent') {
           inp.addEventListener('change', function () {
-            obj.intent = inp.checked ? 'max' : '';
+            obj.intent = inp.value === 'max' ? 'max' : inp.value === 'ecc' ? 'ecc' : '';
             changed();
           });
           return;

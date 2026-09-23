@@ -1510,6 +1510,50 @@ CREATE TABLE IF NOT EXISTS settings (
       if (repaired) console.log(`Lifting template repair: refreshed ${repaired} empty template(s).`);
     }
   }
+
+  // Lifting v4c (Sep 23 2026, Bobby: landmine press out of med ball, more
+  // rotational/explosive work, ECCENTRIC tag, expanded eccentric cues, more
+  // max-intent, no test/retest). Refreshes the v4 system templates in place.
+  // Updates a template row ONLY when its day labels + exercise names/order
+  // still match the unmodified v4 structure — a coach-customized row (renamed
+  // or reordered exercises) is kept as-is. Athletes point at template rows
+  // via remote_programs.lifting_program_id, so updating the row updates
+  // everyone on that block.
+  {
+    const done = db.prepare("SELECT value FROM settings WHERE key = 'lifting_update_v4c'").get();
+    if (!done) {
+      const { YT_V4, buildPrograms } = require('./lifting_v4');
+      Object.assign(YT, YT_V4);
+      const programs = buildPrograms(YT);
+      const crypto = require('crypto');
+      const sig = (days) => crypto.createHash('sha256').update(JSON.stringify(
+        (Array.isArray(days) ? days : []).map((d) => ({
+          label: String((d && d.label) || ''),
+          speed: (Array.isArray(d && d.speed) ? d.speed : []).map((s) => String((s && s.name) || '')),
+          medball: (Array.isArray(d && d.medball) ? d.medball : []).map((s) => String((s && s.name) || '')),
+          exercises: (Array.isArray(d && d.exercises) ? d.exercises : []).map((e) => String((e && e.name) || '')),
+        }))
+      )).digest('hex').slice(0, 16);
+      // Structural signatures of the unmodified v4 templates (day labels +
+      // exercise names/order). M1/M2/M3 share one signature.
+      const OLD_SIG = new Set(['68b97f934df2592d', '4d0b17518559872a']);
+      const now = new Date().toISOString();
+      let updated = 0, kept = 0;
+      for (const p of programs) {
+        const row = db.prepare('SELECT id, program_json FROM lifting_programs WHERE name = ? AND is_template = 1').get(p.name);
+        if (!row) { kept++; continue; }
+        let cur = null;
+        try { cur = JSON.parse(row.program_json || '{}'); } catch (e) { kept++; continue; }
+        if (OLD_SIG.has(sig(cur.days))) {
+          db.prepare('UPDATE lifting_programs SET program_json = ?, updated_at = ? WHERE id = ?')
+            .run(JSON.stringify({ days: p.days, notes: p.notes }), now, row.id);
+          updated++;
+        } else { kept++; }
+      }
+      db.prepare("INSERT INTO settings (key, value) VALUES ('lifting_update_v4c', '1')").run();
+      console.log(`Lifting v4c: updated ${updated} template(s), kept ${kept} (customized or missing).`);
+    }
+  }
 }
 
 // One-time cleanup (Sep 15 2026): Bobby asked to remove ALL test accounts

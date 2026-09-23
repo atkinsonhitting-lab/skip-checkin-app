@@ -1828,11 +1828,12 @@ function splitProgramBlocks(p) {
   }
   return out;
 }
-// Which Programs sub-tabs an athlete gets: Mobility only when their program
-// actually has that content; Med Ball only when they have that content AND
-// no lifting program (Bobby's rule: lifters get med ball INSIDE the Lifting
-// tab, so they get no standalone Med Ball tab); Hitting always; Lifting only
-// when a lifting program with real exercises is assigned.
+// Which Programs sub-tabs an athlete gets (Bobby, Sep 23 2026): Mobility tab
+// only when the program has mobility content AND no lifting program — lifters
+// get mobility paired INSIDE the Lifting tab. Med Ball tab only when they have
+// med ball content, no lifting, AND no mobility (mobility + med ball pair in
+// the Mobility tab for non-lifters). Hitting always; Lifting only when a
+// lifting program with real exercises is assigned.
 // Returns [{ id, label }].
 function programSubTabs(p, lifting) {
   const blocks = splitProgramBlocks(p);
@@ -1844,9 +1845,14 @@ function programSubTabs(p, lifting) {
   const liftFirst = (p && p.session_order) === 'lifting_first';
   // Session order is flexible (Bobby's call): lifting can run before hitting.
   // Med ball rides with lifting either way — it's the explosive start of it.
-  if (blocks.mobility.length) tabs.push({ id: 'mobility', label: 'Mobility' });
+  // Bobby (Sep 23 2026): no standalone Mobility section unless the athlete
+  // has mobility work AND no lifting program. Lifters get mobility paired
+  // inside the Lifting tab; non-lifters get mobility + med ball paired in one
+  // flow (the Mobility tab). A lone Med Ball tab only appears when there's med
+  // ball work but no mobility blocks to pair it with.
+  if (blocks.mobility.length && !hasLifting) tabs.push({ id: 'mobility', label: 'Mobility' });
   if (liftFirst && hasLifting) tabs.push({ id: 'lifting', label: 'Lifting' });
-  if (!hasLifting && blocks.medball.length) tabs.push({ id: 'medball', label: 'Med Ball' });
+  if (!hasLifting && blocks.medball.length && !blocks.mobility.length) tabs.push({ id: 'medball', label: 'Med Ball' });
   tabs.push({ id: 'hitting', label: 'Hitting' });
   // No Metabolic tab (Sep 2026): speed work lives inside the Lifting tab.
   // Legacy 'Metabolic' blocks in old programs render in the Lifting tab's
@@ -3943,7 +3949,10 @@ function sanitizeLiftingDays(rawDays) {
     const s = String(u || '').trim().slice(0, 300);
     return /^https?:\/\//i.test(s) ? s : '';
   };
-  const cleanIntent = (v) => String(v || '').toLowerCase() === 'max' ? 'max' : '';
+  const cleanIntent = (v) => {
+    const s = String(v || '').toLowerCase();
+    return s === 'max' ? 'max' : s === 'ecc' ? 'ecc' : '';
+  };
   const cleanSection = (v) => {
     const s = String(v || '').toLowerCase();
     return s === 'rotational' || s === 'brakes' ? s : 'strength';
