@@ -6,7 +6,11 @@
 (function () {
   'use strict';
   var DAY = (window.WO_DAY && window.WO_DAY.day) || null;
-  if (!DAY) return;
+  var bodyEl = document.getElementById('wo-body');
+  if (!DAY) {
+    // Server-rendered fallback is already in #wo-body; leave it visible.
+    return;
+  }
 
   var items = [];
   (DAY.speed || []).forEach(function (s) { items.push(s); });

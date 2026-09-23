@@ -2930,6 +2930,19 @@ function workoutPage(user, program, wd, ldayIdx, preview) {
   const previewBanner = preview
     ? '<div class="card" style="margin:0 0 12px;background:#fff8e1;border:1px solid #f0d060"><p style="margin:0"><strong>Preview</strong> — you\'re viewing as a coach. Logging is disabled.</p></div>'
     : '';
+  // Server-rendered fallback: if the client JS fails, the athlete still sees
+  // the workout. The JS guided mode enhances this when it loads.
+  const d = (wd && wd.day) || {};
+  const allItems = [...(d.speed || []), ...(d.medball || []), ...(d.lifts || [])];
+  const fallbackHtml = allItems.length
+    ? `<div class="card"><h3 style="margin-top:0">Today's exercises (${allItems.length})</h3>` +
+      allItems.map((it, i) => {
+        const nm = esc(it.name || '');
+        const vol = esc(it.volume || [it.sets, it.reps].filter(Boolean).join(' × ') || '');
+        const vid = it.video ? ` <a href="${esc(it.video)}" target="_blank" rel="noopener">▶ video</a>` : '';
+        return `<div class="routine-row"><span class="routine-name">${i + 1}. ${nm}</span>${vol ? `<span class="hint-inline">${vol}</span>` : ''}${vid}</div>`;
+      }).join('') + `<p class="hint" style="margin-bottom:0">Guided mode didn't load — this is the full list. Try refreshing.</p></div>`
+    : '<div class="card empty">No work programmed for this day.</div>';
   return layout({
     title: wd.day.label + ' · Lift',
     user,
@@ -2942,7 +2955,7 @@ function workoutPage(user, program, wd, ldayIdx, preview) {
         <div class="wo-day">${esc(wd.day.label)}</div>
       </div>
       <div class="wo-seq" id="wo-seq"></div>
-      <main class="wo-body" id="wo-body"></main>
+      <main class="wo-body" id="wo-body">${fallbackHtml}</main>
       <nav class="wo-nav">
         <button type="button" class="wo-navbtn" id="wo-prev">‹ Prev</button>
         <button type="button" class="wo-navbtn primary" id="wo-next">Next ›</button>
