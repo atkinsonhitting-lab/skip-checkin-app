@@ -143,9 +143,29 @@ ${tabbarHtml}
 ${user && user.viewAs ? `<div class="viewas-banner">Previewing as <strong>${esc(user.viewAsName)}</strong> — actions are disabled. <form method="post" action="/coach/view-as/exit" style="display:inline;margin:0"><button type="submit" class="viewas-exit">Exit preview</button></form></div>` : ''}
 ${user && user.role === 'coach' && user.canEdit === false ? '<div class="viewonly-banner">View-only coach — you can look at everything, but changes are disabled.</div>' : ''}
 <main class="wrap">${body}</main>
+${onboardingOverlay(user)}
 <script src="/app.js?v=${ASSET_V}"></script>
 </body>
 </html>`;
+}
+
+// First-run onboarding (Bobby, Sep 23 2026): 3 swipe screens so a new kid
+// learns the daily loop — Lock In → Check In → Talk to Skip. Athletes only,
+// shown once (app.js gates on localStorage).
+function onboardingOverlay(user) {
+  if (!user || user.role !== 'athlete') return '';
+  const slides = [
+    { icon: '🔒', title: 'Lock In first', text: 'Before you train: run your morning routine, read today\u2019s verse, and do the daily mental exercise. Show up locked in.' },
+    { icon: '✅', title: 'Check in after', text: 'Three taps and talk. Tell Skip how the session went \u2014 he sorts it out and scores your day.' },
+    { icon: '💬', title: 'Talk to Skip anytime', text: 'Struggling? Skip has seen every session you\u2019ve logged. He\u2019ll point you back to what works for YOU.' },
+  ];
+  return `<div id="onboard" hidden>
+    <div class="onboard-card">
+      <div class="onboard-slides">${slides.map((s, i) => `<div class="onboard-slide" data-slide="${i}"${i ? ' hidden' : ''}><div class="onboard-icon">${s.icon}</div><h2>${s.title}</h2><p>${s.text}</p></div>`).join('')}</div>
+      <div class="onboard-dots">${slides.map((_, i) => `<span class="onboard-dot${i ? '' : ' active'}" data-dot="${i}"></span>`).join('')}</div>
+      <div class="onboard-nav"><button type="button" id="onboard-skip" class="btn-ghost">Skip</button><button type="button" id="onboard-next" class="btn-primary">Next</button></div>
+    </div>
+  </div>`;
 }
 
 function userTabs(active, user) {
@@ -950,6 +970,20 @@ function routinePage(user, drills, error, drillNames, stations) {
 
 const LEARN_CATEGORIES = ['Mechanics', 'Mental', 'Approach', 'Drills', 'Other'];
 
+function sparkline(checkins) {
+  // Bobby, Sep 23 2026: 30-day score trend — the kid sees his arc, not just today.
+  const pts = (checkins || []).filter((c) => c.session_score != null).slice(0, 30).reverse();
+  if (pts.length < 2) return '';
+  const w = 300, h = 64, pad = 6;
+  const step = pts.length > 1 ? (w - pad * 2) / (pts.length - 1) : 0;
+  const y = (v) => h - pad - ((Math.max(1, Math.min(10, v)) - 1) / 9) * (h - pad * 2);
+  const d = pts.map((c, i) => `${i === 0 ? 'M' : 'L'}${(pad + i * step).toFixed(1)},${y(c.session_score).toFixed(1)}`).join(' ');
+  const first = pts[0].session_score, last = pts[pts.length - 1].session_score;
+  const color = last > first ? '#4ade80' : last < first ? '#f87171' : '#fbbf24';
+  const trend = last > first ? 'trending up' : last < first ? 'trending down' : 'holding steady';
+  return `<div class="card spark-card"><div class="spark-head"><span class="spark-label">Last ${pts.length} sessions</span><span class="hint-inline">${trend}</span></div><svg viewBox="0 0 ${w} ${h}" class="sparkline" preserveAspectRatio="none" aria-hidden="true"><path d="${d}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>`;
+}
+
 function notebookPage(user, checkins, notes, players, justSubmitted, filter, extras) {
   const streak = (extras && extras.streak) || null;
   // Streak card (absorbed from the old Home tab — Bobby, Sep 23 2026: Home is
@@ -1027,6 +1061,7 @@ function notebookPage(user, checkins, notes, players, justSubmitted, filter, ext
     <div class="subnav"><a href="#checkins">Check-ins</a><a href="#notes">Notes</a></div>
     ${justSubmitted ? `<div class="success">Check-in saved. Good work.</div>` : ''}
     ${streakCard}
+    ${sparkline(checkins)}
     <div id="skips-read" class="skips-read" hidden>
       <div class="skips-read-head"><span class="skips-read-title">👀 Skip's read</span><span class="hint-inline">patterns from your check-ins</span></div>
       <div id="skips-read-body"><p class="hint">Reading your check-ins…</p></div>
@@ -1174,7 +1209,7 @@ function levelLine(score, tier) {
   return `<div class="level-row">${levelBar(score, t)}<span class="badge ${tierBadgeClass(t)}">${esc(t)}</span></div>`;
 }
 
-function scorePage(user, c) {
+function scorePage(user, c, streak) {
   const isPitching = c.session_kind === 'pitching';
   const isCombined = c.session_kind === 'combined';
   const throwBits = [];
@@ -1193,10 +1228,11 @@ function scorePage(user, c) {
     title: "Session Level",
     user,
     tabs: userTabs('checkin', user),
-    body: `<div class="card score-hero">
+    body: `<div class="card score-hero score-reveal">
       <div class="score-kicker">Session Level</div>
       <div class="level-hero-meter">${levelBar(c.session_score, c.score_tier, true)}</div>
       <div><span class="badge ${tierBadgeClass(c.score_tier)} badge-lg">${esc(c.score_tier)}</span></div>
+      ${streak >= 2 ? `<div class="streak-flame">🔥 ${streak}-day streak — keep it rolling</div>` : ''}
       <p class="hint skip-note">${esc(TIER_NOTES[c.score_tier] || '')}</p>
       ${user.viewAsRestricted ? '' : `<div class="score-breakdown">
         <div><span class="label">Feel</span><strong>${esc(c.feel)}</strong></div>

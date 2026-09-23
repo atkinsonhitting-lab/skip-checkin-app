@@ -4676,7 +4676,7 @@ app.get('/checkin/score/:id', requireLogin, (req, res) => {
     row.difficulty,
     `${row.session_notes || ''} ${row.what_worked || ''}`
   );
-  res.send(views.scorePage(req.user, row));
+  res.send(views.scorePage(req.user, row, streakData(req.user.id).streak || 0));
 });
 
 app.post('/checkin', requireLogin, async (req, res) => {

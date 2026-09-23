@@ -1086,7 +1086,16 @@ document.querySelectorAll('.feel-slider input[type="range"]').forEach((el) => {
   fetch('/api/notebook/read')
     .then((r) => r.json())
     .then((d) => {
-      if (!d.ok || d.empty || !d.read) return;
+      if (!d.ok || d.empty) return;
+      // Bobby, Sep 23 2026: Skip's read starts after 3 sessions. Before that,
+      // tell the kid to keep going — confidence and momentum.
+      if (d.notEnough) {
+        const n = d.count || 0;
+        body.innerHTML = `<div class="skips-read-section"><h3>Skip's getting to know your game</h3><ul><li>Skip starts reading your game after 3 check-ins — you're at ${n}. Keep logging, keep going.</li></ul></div>`;
+        box.hidden = false;
+        return;
+      }
+      if (!d.read) return;
       const sections = (d.read.sections || []).filter((s) => s && s.title && s.items && s.items.length);
       if (!sections.length) return;
       body.innerHTML = sections.map((s) =>
@@ -1161,4 +1170,43 @@ document.querySelectorAll('.feel-slider input[type="range"]').forEach((el) => {
     }
     ov.hidden = false;
   });
+})();
+
+// First-run onboarding (Bobby, Sep 23 2026): 3 swipe screens, once ever.
+(function () {
+  const ov = document.getElementById('onboard');
+  if (!ov) return;
+  try { if (localStorage.getItem('dd-onboarded')) return; } catch (e) { return; }
+  const slides = Array.from(ov.querySelectorAll('.onboard-slide'));
+  const dots = Array.from(ov.querySelectorAll('.onboard-dot'));
+  const nextBtn = document.getElementById('onboard-next');
+  const skipBtn = document.getElementById('onboard-skip');
+  let i = 0;
+  const show = (n) => {
+    i = n;
+    slides.forEach((s, k) => { s.hidden = k !== i; });
+    dots.forEach((d, k) => d.classList.toggle('active', k === i));
+    nextBtn.textContent = i === slides.length - 1 ? "Let's go" : 'Next';
+  };
+  const done = () => {
+    try { localStorage.setItem('dd-onboarded', '1'); } catch (e) {}
+    ov.hidden = true;
+  };
+  nextBtn.addEventListener('click', () => { i < slides.length - 1 ? show(i + 1) : done(); });
+  skipBtn.addEventListener('click', done);
+  // Swipe support.
+  let sx = null;
+  ov.addEventListener('touchstart', (e) => { sx = e.touches[0].clientX; }, { passive: true });
+  ov.addEventListener('touchend', (e) => {
+    if (sx == null) return;
+    const dx = e.changedTouches[0].clientX - sx;
+    sx = null;
+    if (dx < -50 && i < slides.length - 1) show(i + 1);
+    else if (dx > 50 && i > 0) show(i - 1);
+  }, { passive: true });
+  ov.hidden = false;
+  document.body.style.overflow = 'hidden';
+  const unhide = () => { document.body.style.overflow = ''; };
+  nextBtn.addEventListener('click', unhide, { once: true });
+  skipBtn.addEventListener('click', unhide, { once: true });
 })();
