@@ -20,19 +20,20 @@
 })();
 
 // Voice dictation: mic buttons on the check-in textareas.
+// Uses SkipMic (getUserMedia + server transcription) — iOS only asks for
+// mic permission once, unlike the Web Speech API which prompts every time.
 // (Runs on DOMContentLoaded because the script tag sits above the buttons.)
 (function () {
   function init() {
-    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     var btns = document.querySelectorAll('.mic-btn');
     if (!btns.length) return;
-    if (!SR) {
+    if (!window.SkipMic || !navigator.mediaDevices) {
       for (var h = 0; h < btns.length; h++) btns[h].style.display = 'none';
       return;
     }
-    var rec = null, activeBtn = null;
+    var stopFn = null, activeBtn = null;
     function stop() {
-      if (rec) { try { rec.stop(); } catch (e) {} }
+      if (stopFn) { try { stopFn(); } catch (e) {} stopFn = null; }
     }
     for (var j = 0; j < btns.length; j++) {
       (function (btn) {
@@ -42,39 +43,20 @@
           var ta = document.getElementById(btn.getAttribute('data-target'));
           if (!ta) return;
           var base = ta.value ? ta.value.replace(/\s+$/, '') + ' ' : '';
-          var said = '';
-          rec = new SR();
-          rec.lang = 'en-US';
-          rec.interimResults = true;
-          rec.continuous = true;
-          rec.onresult = function (ev) {
-            var interim = '';
-            for (var k = ev.resultIndex; k < ev.results.length; k++) {
-              var t = ev.results[k][0].transcript;
-              if (ev.results[k].isFinal) said += t;
-              else interim += t;
-            }
-            ta.value = base + said + interim;
-          };
-          rec.onend = function () {
-            if (activeBtn === btn) {
-              btn.classList.remove('listening');
-              activeBtn = null;
-              rec = null;
-            }
-          };
-          rec.onerror = function (ev) {
-            if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
-              ta.placeholder = 'Microphone blocked — allow mic access to dictate.';
-            }
-            stop();
-          };
           activeBtn = btn;
           btn.classList.add('listening');
-          try { rec.start(); } catch (e) {
+          ta.placeholder = 'Listening… tap again to stop';
+          window.SkipMic.record(function (transcript) {
             btn.classList.remove('listening');
             activeBtn = null;
-          }
+            stopFn = null;
+            ta.placeholder = '';
+            if (transcript) ta.value = base + transcript;
+          }).then(function (fn) { stopFn = fn; }).catch(function () {
+            btn.classList.remove('listening');
+            activeBtn = null;
+            ta.placeholder = 'Microphone blocked — allow mic access to dictate.';
+          });
         });
       })(btns[j]);
     }

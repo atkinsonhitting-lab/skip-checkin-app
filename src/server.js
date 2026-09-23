@@ -2275,9 +2275,42 @@ app.post('/api/bible-study-choice', requireLogin, (req, res) => {
   db.prepare('UPDATE users SET bible_study = ? WHERE id = ?').run(c, req.user.id);
   res.json({ ok: true });
 });
-// Talk it out (Sep 23 2026): hitter dictates their session, Gemini parses the
-// transcript into the 12 check-in fields. Returns JSON the client uses to
-// fill the form for confirmation.
+// Audio transcription (Sep 23 2026): the app records with getUserMedia
+// (iOS remembers mic permission) and Gemini transcribes. Replaces the
+// Web Speech API, which iOS prompts for on every single use.
+app.post('/api/transcribe', requireLogin, async (req, res) => {
+  if (req.user.role !== 'athlete') return res.status(403).json({ error: 'athletes only' });
+  const audio = String((req.body || {}).audio || '').slice(0, 8 * 1024 * 1024); // ~6MB cap
+  const mime = String((req.body || {}).mime || 'audio/webm').slice(0, 50);
+  if (!audio) return res.status(400).json({ error: 'no audio' });
+  const apiKey = process.env.LLM_API_KEY;
+  if (!apiKey) return res.status(500).json({ error: 'not_configured' });
+  try {
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(LLM_MODEL)}:generateContent`,
+      {
+        method: 'POST',
+        headers: { 'x-goog-api-key': apiKey, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { text: 'Transcribe this audio exactly, word for word. Reply with ONLY the transcript, no other text.' },
+              { inline_data: { mime_type: mime, data: audio } },
+            ],
+          }],
+          generationConfig: { maxOutputTokens: 1000, temperature: 0 },
+        }),
+      }
+    );
+    if (!resp.ok) throw new Error(`llm_http_${resp.status}`);
+    const data = await resp.json();
+    const parts = (((data.candidates || [])[0] || {}).content || {}).parts || [];
+    const transcript = parts.map((p) => p.text || '').join('').trim();
+    res.json({ ok: true, transcript });
+  } catch (e) {
+    res.status(500).json({ error: 'transcribe_failed' });
+  }
+});
 app.post('/api/checkin/parse', requireLogin, async (req, res) => {
   if (req.user.role !== 'athlete') return res.status(403).json({ error: 'athletes only' });
   const transcript = String((req.body || {}).transcript || '').trim().slice(0, 4000);

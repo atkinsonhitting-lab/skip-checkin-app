@@ -1,3 +1,46 @@
+// Shared mic recorder (Sep 23 2026): uses getUserMedia + MediaRecorder.
+// iOS remembers the mic permission, so it only asks once — unlike the
+// Web Speech API which prompts on every use. Audio goes to /api/transcribe.
+window.SkipMic = (function () {
+  let stream = null;
+  async function getStream() {
+    if (stream && stream.active) return stream;
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    return stream;
+  }
+  // onDone(transcript), onStatus(text). Returns a stop function.
+  async function record(onDone, onStatus) {
+    const s = await getStream();
+    const mime = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4';
+    const rec = new MediaRecorder(s, { mimeType: mime });
+    const chunks = [];
+    rec.ondataavailable = (ev) => { if (ev.data.size) chunks.push(ev.data); };
+    rec.onstop = async () => {
+      if (onStatus) onStatus('Transcribing…');
+      const blob = new Blob(chunks, { type: mime });
+      const b64 = await new Promise((resolve) => {
+        const r = new FileReader();
+        r.onloadend = () => resolve(String(r.result).split(',')[1] || '');
+        r.readAsDataURL(blob);
+      });
+      try {
+        const resp = await fetch('/api/transcribe', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ audio: b64, mime }),
+        });
+        const d = await resp.json();
+        onDone(d.ok ? d.transcript || '' : '');
+      } catch (e) {
+        onDone('');
+      }
+    };
+    rec.start();
+    return () => { if (rec.state !== 'inactive') rec.stop(); };
+  }
+  return { record };
+})();
+
 // Skip client-side helpers: local timestamps, check-in sliders.
 (function () {
   // Localize server-rendered UTC timestamps.
@@ -733,33 +776,20 @@
 })();
 
 // Talk it out (Sep 23 2026): dictate the whole check-in, Skip parses it into
-// the 12 fields. Uses Web Speech API for transcription.
+// the 12 fields. Uses SkipMic (getUserMedia + server transcription) so iOS
+// only asks for mic permission once.
 (function () {
   const btn = document.getElementById('talk-it-out');
   if (!btn) return;
   const status = document.getElementById('talk-status');
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) {
+  if (!window.SkipMic || !navigator.mediaDevices) {
     btn.style.display = 'none';
     return;
   }
-  const rec = new SR();
-  rec.continuous = true;
-  rec.interimResults = true;
-  rec.lang = 'en-US';
-  let transcript = '';
-  let listening = false;
+  let stopFn = null;
   const setStatus = (t) => { if (status) { status.style.display = t ? 'block' : 'none'; status.textContent = t; } };
-  rec.onresult = (ev) => {
-    transcript = Array.from(ev.results).map((r) => r[0].transcript).join(' ');
-    setStatus('Listening… "' + transcript.slice(-60) + '" — tap again to stop');
-  };
-  rec.onerror = () => { listening = false; btn.textContent = '🎙 Talk it out'; setStatus(''); };
-  rec.onend = () => {
-    if (!listening) return;
-    listening = false;
-    btn.textContent = '🎙 Talk it out';
-    if (!transcript.trim()) { setStatus(''); return; }
+  const fillForm = (transcript) => {
+    if (!transcript.trim()) { setStatus(''); btn.textContent = '🎙 Talk it out'; return; }
     setStatus('Skip is sorting that out…');
     fetch('/api/checkin/parse', {
       method: 'POST',
@@ -768,6 +798,7 @@
     })
       .then((r) => r.json())
       .then((d) => {
+        btn.textContent = '🎙 Talk it out';
         if (!d.ok || !d.fields) { setStatus('Couldn\u2019t parse that — just fill it in.'); return; }
         const f = d.fields;
         const setRadio = (name, val) => {
@@ -794,15 +825,15 @@
         setText('whats_next', f.whats_next);
         setStatus('Done — check it over and hit submit.');
       })
-      .catch(() => setStatus('Something went wrong — just fill it in.'));
+      .catch(() => { btn.textContent = '🎙 Talk it out'; setStatus('Something went wrong — just fill it in.'); });
   };
   btn.addEventListener('click', () => {
-    if (listening) { listening = false; rec.stop(); return; }
-    transcript = '';
-    listening = true;
+    if (stopFn) { try { stopFn(); } catch (e) {} stopFn = null; return; } // tap again to stop
     btn.textContent = '⏹ Stop talking';
-    setStatus('Listening… talk through your session');
-    try { rec.start(); } catch (e) { listening = false; }
+    setStatus('Listening… talk through your session, tap again to stop');
+    window.SkipMic.record(fillForm, setStatus)
+      .then((fn) => { stopFn = fn; })
+      .catch(() => { btn.textContent = '🎙 Talk it out'; setStatus('Microphone blocked — allow mic access in Settings.'); });
   });
 })();
 
