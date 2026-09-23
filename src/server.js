@@ -252,15 +252,18 @@ const msgAttachmentUpload = multer({
 });
 
 // Serve message attachments. Filename is validated to a flat safe pattern;
-// only the sender, the recipient, and coaches can fetch.
+// only the sender, the recipient(s), and coaches can fetch.
 app.get('/msg-attachments/:file', requireLogin, (req, res) => {
   const f = String(req.params.file || '');
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*\.(mp4|mov|webm|png|jpg|jpeg|webp|gif|heic)$/i.test(f)) return res.status(404).end();
-  const row = db.prepare('SELECT sender_id, recipient_id FROM messages WHERE attachment_path = ?').get(f);
+  const row = db.prepare('SELECT id, sender_id, recipient_id FROM messages WHERE attachment_path = ?').get(f);
   if (!row) return res.status(404).end();
   const me = req.user.id;
   const isCoach = req.user.role === 'coach';
-  const involved = row.sender_id === me || row.recipient_id === me;
+  // Broadcasts have recipient_id NULL — check the message_recipients table.
+  const isRecipient = row.recipient_id === me ||
+    !!db.prepare('SELECT 1 FROM message_recipients WHERE message_id = ? AND user_id = ?').get(row.id, me);
+  const involved = row.sender_id === me || isRecipient;
   if (!isCoach && !involved) return res.status(403).end();
   res.sendFile(path.join(MSG_ATTACH_DIR, f));
 });
