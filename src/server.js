@@ -1934,6 +1934,16 @@ function splitProgramBlocks(p) {
     if (k === 'prep') out.prep.push(c);
     else out[k].push(c);
   }
+  // Bobby (Sep 23 2026): mobility/medball can also live in top-level prog
+  // fields (from sheets), not just routine blocks. Include those.
+  if (!out.mobility.length && Array.isArray(prog.mobility) && prog.mobility.length) {
+    const items = realItems(prog.mobility);
+    if (items.length) out.mobility.push({ category: 'Mobility', items });
+  }
+  if (!out.medball.length && Array.isArray(prog.medball) && prog.medball.length) {
+    const items = realItems(prog.medball);
+    if (items.length) out.medball.push({ category: 'Med Ball', items });
+  }
   return out;
 }
 // Which Programs sub-tabs an athlete gets (Bobby, Sep 23 2026): Mobility tab
@@ -2283,14 +2293,19 @@ function syncProgramsFromSheets() {
       if (sheet.mental_framework) progJson.mental_framework = sheet.mental_framework;
       if (sheet.days) {
         // Map sheet days -> routine blocks
+        // Bobby (Sep 23 2026): days use 'section', not 'category'
         progJson.routine = sheet.days.map(d => ({
-          category: d.category || '',
+          category: d.category || d.section || '',
           items: (d.items || []).map(it => ({
             drill: it.drill || '',
             volume: it.volume || '',
             note: it.note || ''
           }))
         }));
+      }
+      // Bobby (Sep 23 2026): preserve top-level mobility from sheets
+      if (sheet.mobility && !progJson.mobility) {
+        progJson.mobility = sheet.mobility;
       }
       if (sheet.date_range) progJson.date_range = sheet.date_range;
       
