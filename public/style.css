@@ -1073,3 +1073,11 @@ a.stat-card { padding: 14px 8px; }
 .skips-read-section h3 { font-size: 13px; margin: 0 0 4px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
 .skips-read-section ul { margin: 0; padding-left: 18px; }
 .skips-read-section li { font-size: 14px; line-height: 1.5; margin: 3px 0; }
+
+/* Day picker + routine edit (Sep 23 2026) */
+.day-picker { margin: 4px 0 12px; }
+.day-picker-btns { display: flex; flex-direction: column; gap: 10px; }
+.day-pick { margin: 0; }
+.edit-step { display: flex; gap: 8px; align-items: flex-start; margin: 8px 0; padding: 8px; background: #141416; border-radius: 10px; }
+.edit-step .form { display: flex; flex-direction: column; gap: 6px; }
+.edit-step input[type="text"] { margin: 0; }

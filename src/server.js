@@ -2542,19 +2542,32 @@ app.post('/mental-game/keys/delete', requireLogin, async (req, res) => {
   res.redirect('/mental-game');
 });
 // Lock In routine builder (Sep 23 2026) — morning / pregame / pre-practice checklists.
+// Edit routines page (Bobby, Sep 23 2026) — athletes can edit their routines.
+app.get('/mental-game/routines/edit', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.redirect('/coach');
+  const row = db.prepare('SELECT morning_json, pregame_json, prepractice_json FROM mental_routines WHERE user_id = ?').get(req.user.id) || {};
+  const routines = {
+    morning: { title: 'Morning Routine', items: JSON.parse(row.morning_json || '[]') },
+    pregame: { title: 'Game Day', items: JSON.parse(row.pregame_json || '[]') },
+    practice: { title: 'Practice Day', items: JSON.parse(row.prepractice_json || '[]') },
+  };
+  res.send(views.routineEditPage(req.user, routines));
+});
 app.post('/mental-game/routine/add', requireLogin, (req, res) => {
   const text = String(req.body.text || '').trim().slice(0, 200);
+  const detail = String(req.body.detail || '').trim().slice(0, 500);
   const which = req.body.which === 'pregame' ? 'pregame' : req.body.which === 'practice' ? 'practice' : 'morning';
   const col = which === 'pregame' ? 'pregame_json' : which === 'practice' ? 'prepractice_json' : 'morning_json';
+  const back = req.body.back === 'edit' ? '/mental-game/routines/edit' : '/mental-game';
   if (text) {
     const row = db.prepare(`SELECT ${col} FROM mental_routines WHERE user_id = ?`).get(req.user.id);
     const items = row ? JSON.parse(row[col] || '[]') : [];
-    items.push({ text, done: false });
+    items.push({ text, detail, done: false });
     db.prepare(`INSERT INTO mental_routines (user_id, ${col}, updated_at) VALUES (?, ?, ?)
       ON CONFLICT(user_id) DO UPDATE SET ${col}=excluded.${col}, updated_at=excluded.updated_at`)
       .run(req.user.id, JSON.stringify(items), new Date().toISOString());
   }
-  res.redirect('/mental-game');
+  res.redirect(back);
 });
 app.post('/mental-game/routine/done', requireLogin, (req, res) => {
   const today = todayChicagoDate();
@@ -2568,6 +2581,7 @@ app.post('/mental-game/routine/delete', requireLogin, (req, res) => {
   const which = req.body.which === 'pregame' ? 'pregame' : req.body.which === 'practice' ? 'practice' : 'morning';
   const col = which === 'pregame' ? 'pregame_json' : which === 'practice' ? 'prepractice_json' : 'morning_json';
   const idx = parseInt(req.body.idx, 10);
+  const back = req.body.back === 'edit' ? '/mental-game/routines/edit' : '/mental-game';
   const row = db.prepare(`SELECT ${col} FROM mental_routines WHERE user_id = ?`).get(req.user.id);
   if (row && Number.isInteger(idx)) {
     const items = JSON.parse(row[col] || '[]');
@@ -2577,23 +2591,25 @@ app.post('/mental-game/routine/delete', requireLogin, (req, res) => {
         .run(JSON.stringify(items), new Date().toISOString(), req.user.id);
     }
   }
-  res.redirect('/mental-game');
+  res.redirect(back);
 });
 app.post('/mental-game/routine/edit', requireLogin, (req, res) => {
   const which = req.body.which === 'pregame' ? 'pregame' : req.body.which === 'practice' ? 'practice' : 'morning';
   const col = which === 'pregame' ? 'pregame_json' : which === 'practice' ? 'prepractice_json' : 'morning_json';
   const idx = parseInt(req.body.idx, 10);
   const text = String(req.body.text || '').trim().slice(0, 200);
+  const detail = String(req.body.detail || '').trim().slice(0, 500);
   const row = db.prepare(`SELECT ${col} FROM mental_routines WHERE user_id = ?`).get(req.user.id);
   if (row && Number.isInteger(idx) && text) {
     const items = JSON.parse(row[col] || '[]');
     if (idx >= 0 && idx < items.length) {
       items[idx].text = text;
+      items[idx].detail = detail;
       db.prepare(`UPDATE mental_routines SET ${col} = ?, updated_at = ? WHERE user_id = ?`)
         .run(JSON.stringify(items), new Date().toISOString(), req.user.id);
     }
   }
-  res.redirect('/mental-game');
+  res.redirect('/mental-game/routines/edit');
 });
 app.post('/mental-game/bible/done', requireLogin, (req, res) => {
   const today = todayChicagoDate();

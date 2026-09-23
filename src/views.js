@@ -3159,6 +3159,13 @@ function mentalGamePage(user, data) {
     ref: bibleVerse.ref,
     theme: bibleVerse.theme,
   } : null;
+  const stepList = (items) => (items || []).map((it) => ({
+    title: it.text || '',
+    detail: it.detail || '',
+    kind: /breath/i.test(it.text || '') ? 'breath' : 'step',
+  }));
+  const pregameSteps = stepList(pregameItems);
+  const practiceSteps = stepList(practiceItems);
   const morningSteps = (() => {
     const steps = (routineItems || []).map((it) => ({
       title: it.text || '',
@@ -3184,8 +3191,26 @@ function mentalGamePage(user, data) {
   const cardsHtml = b.plan ? `
     <h2 class="section-title">Today</h2>
     ${heroCard('morning', '🌅', 'Morning Routine', routineItems, routineDone, '3 min')}
-    ${heroCard('pregame', '⚾', 'Game Day', pregameItems, pregame.done, '2 min')}
-    ${heroCard('practice', '🔥', 'Practice Day', practiceItems, practice.done, '2 min')}
+    <div class="day-picker">
+      <p class="field-label compact">What's today?</p>
+      <div class="day-picker-btns">
+        <button type="button" class="routine-hero day-pick" data-routine="pregame"
+          data-steps="${esc(JSON.stringify({ which: 'pregame', steps: pregameSteps }))}">
+          <span class="routine-hero-icon">⚾</span>
+          <span class="routine-hero-body"><span class="routine-hero-title">Game Day</span>
+          <span class="routine-hero-sub">${pregameItems.length} steps · ~2 min${pregame.done ? ' · ✓ done' : ''}</span></span>
+          <span class="routine-hero-go">›</span>
+        </button>
+        <button type="button" class="routine-hero day-pick" data-routine="practice"
+          data-steps="${esc(JSON.stringify({ which: 'practice', steps: practiceSteps }))}">
+          <span class="routine-hero-icon">🔥</span>
+          <span class="routine-hero-body"><span class="routine-hero-title">Practice Day</span>
+          <span class="routine-hero-sub">${practiceItems.length} steps · ~2 min${practice.done ? ' · ✓ done' : ''}</span></span>
+          <span class="routine-hero-go">›</span>
+        </button>
+      </div>
+      <p style="text-align:center;margin:8px 0 0"><a href="/mental-game/routines/edit" class="hint-inline">Edit your routines</a></p>
+    </div>
     ${exercise ? heroCard('exercise', '🧠', 'Daily Exercise',
       [
         { text: exercise.title, detail: exercise.concept, kind: 'step' },
@@ -4454,4 +4479,46 @@ module.exports = {
   welcomePage,
   waiverPage,
   substitutePage,
+  routineEditPage,
 };
+
+// Routine edit page (Bobby, Sep 23 2026) — athletes edit their own routines.
+function routineEditPage(user, routines) {
+  const section = (which, r) => `
+    <div class="card">
+      <h2 class="routine-station" style="margin-top:0">${esc(r.title)}</h2>
+      ${(r.items || []).map((it, i) => `
+        <div class="edit-step">
+          <form method="post" action="/mental-game/routine/edit" class="form" style="flex:1">
+            <input type="hidden" name="which" value="${which}">
+            <input type="hidden" name="idx" value="${i}">
+            <input type="text" name="text" value="${esc(it.text || '')}" maxlength="200" required>
+            <input type="text" name="detail" value="${esc(it.detail || '')}" maxlength="500" placeholder="What to do (optional)">
+            <button type="submit" class="btn btn-sm">Save</button>
+          </form>
+          <form method="post" action="/mental-game/routine/delete" style="margin:0">
+            <input type="hidden" name="which" value="${which}">
+            <input type="hidden" name="idx" value="${i}">
+            <input type="hidden" name="back" value="edit">
+            <button type="submit" class="link-danger" aria-label="Delete step">✕</button>
+          </form>
+        </div>`).join('')}
+      <form method="post" action="/mental-game/routine/add" class="form" style="margin-top:10px">
+        <input type="hidden" name="which" value="${which}">
+        <input type="hidden" name="back" value="edit">
+        <input type="text" name="text" placeholder="New step..." maxlength="200" required>
+        <input type="text" name="detail" placeholder="What to do (optional)" maxlength="500">
+        <button type="submit" class="btn btn-sm">Add step</button>
+      </form>
+    </div>`;
+  return layout({
+    title: 'Edit Routines',
+    user,
+    tabs: userTabs('mental', user),
+    body: `<h1 class="page-title">Edit Routines</h1>
+    <p><a href="/mental-game" class="hint-inline">‹ Back to Lock In</a></p>
+    ${section('morning', routines.morning)}
+    ${section('pregame', routines.pregame)}
+    ${section('practice', routines.practice)}`,
+  });
+}
