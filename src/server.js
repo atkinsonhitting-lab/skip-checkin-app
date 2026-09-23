@@ -5297,6 +5297,9 @@ app.get('/api/notebook/read', requireLogin, async (req, res) => {
               FROM checkins WHERE user_id = ? ORDER BY created_at DESC LIMIT 20`)
     .all(req.user.id);
   if (!checkins.length) return res.json({ ok: true, empty: true });
+  // Bobby, Sep 23 2026: Skip's read only starts after 3 sessions — the
+  // player is told to keep going until then (confidence + momentum).
+  if (checkins.length < 3) return res.json({ ok: true, notEnough: true, count: checkins.length });
   const cached = db.prepare('SELECT * FROM notebook_reads WHERE user_id = ?').get(req.user.id);
   if (cached && cached.checkin_count === checkins.length) {
     try { return res.json({ ok: true, read: JSON.parse(cached.content) }); }
@@ -7716,6 +7719,29 @@ async function ratePendingJournals() {
     journalRunning = false;
   }
 }
+
+// ---- Daily Bible study alert (7am Chicago, Sep 23 2026, Bobby) ----
+// Opt-ins only (users.bible_study = 1). Sammy/Tommy can never be opted in —
+// the popup excludes them, and this query only trusts the flag.
+let lastBibleDay = '';
+setInterval(async () => {
+  if (!pushEnabled) return;
+  try {
+    const nowDay = chiDay(new Date());
+    const hour = Number(chiHourFmt.format(new Date()));
+    if (hour < 7 || lastBibleDay === nowDay) return;
+    lastBibleDay = nowDay;
+    const verse = todayBibleVerse();
+    if (!verse) return;
+    const athletes = db.prepare("SELECT id FROM users WHERE role = 'athlete' AND status = 'approved' AND bible_study = 1").all();
+    for (const a of athletes) {
+      if (!userPushSubscriptions(a.id).length) continue;
+      await pushToUser(a.id, `Today's verse: ${verse.ref}`, `${verse.theme} — open Lock In for the breakdown.`, '/mental-game');
+    }
+  } catch (e) {
+    console.warn('bible alert sweep failed:', e.message);
+  }
+}, 15 * 60 * 1000);
 
 // ---- Nightly check-in reminder sweep (8pm Chicago) ----
 let lastReminderDay = '';
