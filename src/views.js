@@ -748,36 +748,77 @@ function checkinForm(user, error, values, drillNames, routine, recentGroups, act
     ).join('')}</div>`;
   const short = (name, label, val, placeholder) => `
     <label>${esc(label)}<span class="talk-wrap"><input type="text" id="${name}" name="${name}" value="${esc(val || '')}" placeholder="${esc(placeholder || '')}" maxlength="300"><button type="button" class="mic-btn" data-target="${name}" aria-label="Dictate instead of typing">🎙</button></span></label>`;
+  // Bobby's check-in, step 1 (Sep 23 2026): quick tap questions only.
+  // Step 2 is the big mic + talking points.
   return layout({
     title: 'Check In',
     user,
     tabs: userTabs('checkin', user),
     body: `<h1 class="page-title">${isEdit ? 'Edit check-in' : 'Check In'}</h1>
     <div class="card">
-    <button type="button" id="talk-it-out" class="btn btn-primary" style="width:100%;margin-bottom:12px">🎙 Talk it out</button>
-    <p class="hint" id="talk-status" style="display:none"></p>
-    <form method="post" action="${isEdit ? esc(action) : '/checkin'}" class="form" data-validate="hitting12">
+    <form method="post" action="/checkin/taps" class="form" data-validate="hittingTaps">
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
-      <div class="field-label">1. What did you do today?</div>
+      ${isEdit ? `<input type="hidden" name="edit_id" value="${esc(action.split('/').pop())}">` : ''}
+      <div class="field-label">What did you do today?</div>
       ${pill('session_type', [['game', 'Game'], ['cage', 'Cage'], ['live_abs', 'Live ABs'], ['team_practice', 'Team Practice']], v.session_type)}
-      <div class="field-label">2. Did you follow your hitting routine? <a href="/routine" class="hint-inline">add/edit routine</a></div>
+      <div class="field-label">Did you follow your hitting routine? <a href="/routine" class="hint-inline">add/edit routine</a></div>
       ${pill('routine_followed', [['yes', 'Yes'], ['mostly', 'Mostly'], ['no', 'No']], v.routine_followed)}
-      <div class="field-label">3. How did your swing feel today?</div>
+      <div class="field-label">How did your swing feel today?</div>
       ${stars('swing_feel', v.swing_feel)}
-      <div class="field-label">4. How was your timing?</div>
+      <div class="field-label">How was your timing?</div>
       ${pill('timing', [['early', 'Early'], ['on_time', 'On Time'], ['late', 'Late'], ['inconsistent', 'Inconsistent']], v.timing)}
-      <div class="field-label">5. How was your contact quality?</div>
+      <div class="field-label">How was your contact quality?</div>
       ${stars('contact_quality', v.contact_quality)}
-      <div class="field-label">6. How was your approach & decision-making?</div>
+      <div class="field-label">How was your approach & decision-making?</div>
       ${stars('approach_score', v.approach_score)}
-      ${short('main_focus', '7. What was your main focus today?', v.main_focus, 'One thing you locked in on')}
-      ${short('felt_good', '8. What felt good today?', v.felt_good, 'What clicked?')}
-      ${short('biggest_struggle', '9. What did you struggle with?', v.biggest_struggle, 'Be honest')}
-      ${short('adjustment_helped', '10. What adjustment or feel helped the most?', v.adjustment_helped, 'The thing that fixed it')}
-      ${short('learned', '11. What did you learn about yourself as a hitter today?', v.learned, '')}
-      ${short('whats_next', '12. What is your ONE focus for your next session/game?', v.whats_next, 'Just one')}
-      <button type="submit" class="btn-primary">${isEdit ? 'Save changes' : 'Submit check-in'}</button>
+      <button type="submit" class="btn-primary">Continue →</button>
     </form></div>`,
+  });
+}
+
+// Bobby's check-in, step 2 (Sep 23 2026): big flashing mic to talk it out
+// (or type). Suggestion chips tell them what to talk about. Skip sorts the
+// transcript into the 6 reflection fields for review before submitting.
+function checkinTalkForm(user, taps, error, values, editId) {
+  const v = values || {};
+  const hidden = Object.entries(taps).map(([k, val]) =>
+    `<input type="hidden" name="${esc(k)}" value="${esc(val)}">`).join('');
+  const field = (name, label, val) => `
+    <label>${esc(label)}<input type="text" name="${name}" value="${esc(val || '')}" maxlength="300"></label>`;
+  return layout({
+    title: 'Check In',
+    user,
+    tabs: userTabs('checkin', user),
+    body: `<h1 class="page-title">Talk it out</h1>
+    <div class="card" style="text-align:center">
+      ${error ? `<div class="error" style="text-align:left">${esc(error)}</div>` : ''}
+      <p class="hint" style="margin-top:0">Talk about your session — or type it below.</p>
+      <div class="talk-points">
+        <span class="talk-point" data-point="What felt good today was ">What felt good</span>
+        <span class="talk-point" data-point="I struggled with ">What you struggled with</span>
+        <span class="talk-point" data-point="My timing was ">Timing</span>
+        <span class="talk-point" data-point="My swing decisions were ">Swing decisions</span>
+        <span class="talk-point" data-point="The adjustment that helped most was ">What helped</span>
+        <span class="talk-point" data-point="My one focus for next time is ">Next focus</span>
+      </div>
+      <button type="button" id="big-mic" class="big-mic" aria-label="Talk it out">🎙</button>
+      <p class="hint" id="talk-status" style="display:none"></p>
+      <form method="post" action="/checkin" class="form" data-validate="hittingTalk" style="text-align:left">
+        ${hidden}
+        ${editId ? `<input type="hidden" name="edit_id" value="${esc(editId)}">` : ''}
+        <label>Your words<textarea id="talk-text" name="talk_text" rows="4" placeholder="Or type it here — what happened today?">${esc(v.talk_text || '')}</textarea></label>
+        <button type="button" id="sort-it-out" class="btn" style="width:100%;margin:8px 0">✨ Sort it out</button>
+        <div id="talk-fields" ${v.main_focus || v.felt_good ? '' : 'hidden'}>
+          ${field('main_focus', 'What was your main focus today?', v.main_focus)}
+          ${field('felt_good', 'What felt good today?', v.felt_good)}
+          ${field('biggest_struggle', 'What did you struggle with?', v.biggest_struggle)}
+          ${field('adjustment_helped', 'What adjustment or feel helped the most?', v.adjustment_helped)}
+          ${field('learned', 'What did you learn about yourself as a hitter today?', v.learned)}
+          ${field('whats_next', 'What is your ONE focus for your next session/game?', v.whats_next)}
+        </div>
+        <button type="submit" class="btn-primary">Submit check-in</button>
+      </form>
+    </div>`,
   });
 }
 
@@ -4324,6 +4365,7 @@ module.exports = {
   privacyPage,
   userHome,
   checkinForm,
+  checkinTalkForm,
   pitchingCheckinForm,
   combinedCheckinForm,
   pitchSessionTypeLabel,

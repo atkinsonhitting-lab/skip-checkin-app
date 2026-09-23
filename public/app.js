@@ -775,69 +775,6 @@ window.SkipMic = (function () {
   });
 })();
 
-// Talk it out (Sep 23 2026): dictate the whole check-in, Skip parses it into
-// the 12 fields. Uses SkipMic (getUserMedia + server transcription) so iOS
-// only asks for mic permission once.
-(function () {
-  const btn = document.getElementById('talk-it-out');
-  if (!btn) return;
-  const status = document.getElementById('talk-status');
-  if (!window.SkipMic || !navigator.mediaDevices) {
-    btn.style.display = 'none';
-    return;
-  }
-  let stopFn = null;
-  const setStatus = (t) => { if (status) { status.style.display = t ? 'block' : 'none'; status.textContent = t; } };
-  const fillForm = (transcript) => {
-    btn.textContent = '🎙 Talk it out';
-    if (!transcript.trim()) { setStatus('Didn\u2019t catch that — try again.'); return; }
-    setStatus('Heard: "' + transcript.slice(0, 120) + (transcript.length > 120 ? '…" — sorting it out…' : '" — sorting it out…'));
-    fetch('/api/checkin/parse', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ transcript: transcript.trim() }),
-    })
-      .then((r) => r.json())
-      .then((d) => {
-        btn.textContent = '🎙 Talk it out';
-        if (!d.ok || !d.fields) { setStatus('Couldn\u2019t parse that — just fill it in.'); return; }
-        const f = d.fields;
-        const setRadio = (name, val) => {
-          if (!val) return;
-          const el = document.querySelector(`input[name="${name}"][value="${val}"]`);
-          if (el) el.checked = true;
-        };
-        const setText = (name, val) => {
-          if (!val) return;
-          const el = document.querySelector(`[name="${name}"]`);
-          if (el) el.value = val;
-        };
-        setRadio('session_type', f.session_type);
-        setRadio('routine_followed', f.routine_followed);
-        setRadio('swing_feel', f.swing_feel);
-        setRadio('timing', f.timing);
-        setRadio('contact_quality', f.contact_quality);
-        setRadio('approach_score', f.approach_score);
-        setText('main_focus', f.main_focus);
-        setText('felt_good', f.felt_good);
-        setText('biggest_struggle', f.biggest_struggle);
-        setText('adjustment_helped', f.adjustment_helped);
-        setText('learned', f.learned);
-        setText('whats_next', f.whats_next);
-        setStatus('Done — check it over and hit submit.');
-      })
-      .catch(() => { btn.textContent = '🎙 Talk it out'; setStatus('Something went wrong — just fill it in.'); });
-  };
-  btn.addEventListener('click', () => {
-    if (stopFn) { try { stopFn(); } catch (e) {} stopFn = null; return; } // tap again to stop
-    btn.textContent = '⏹ Stop talking';
-    setStatus('Listening… talk through your session, tap again to stop');
-    window.SkipMic.record(fillForm, setStatus)
-      .then((fn) => { stopFn = fn; })
-      .catch(() => { btn.textContent = '🎙 Talk it out'; setStatus('Microphone blocked — allow mic access in Settings.'); });
-  });
-})();
-
 // Routine inline edit (Sep 23 2026)
 (function () {
   document.addEventListener('click', function (ev) {
@@ -860,5 +797,76 @@ window.SkipMic = (function () {
     btn.style.display = 'none';
     li.insertBefore(form, li.firstChild);
     form.querySelector('input[name="text"]').focus();
+  });
+})();
+
+// Check-in step 2: big mic + talking points + sort it out (Sep 23 2026)
+(function () {
+  const mic = document.getElementById('big-mic');
+  if (!mic) return;
+  const status = document.getElementById('talk-status');
+  const ta = document.getElementById('talk-text');
+  const sortBtn = document.getElementById('sort-it-out');
+  const fields = document.getElementById('talk-fields');
+  const setStatus = (t) => { if (status) { status.style.display = t ? 'block' : 'none'; status.textContent = t; } };
+  if (!window.SkipMic || !navigator.mediaDevices) { mic.style.display = 'none'; }
+
+  // Talking points: tap to append a starter to the text.
+  document.querySelectorAll('.talk-point').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      const starter = chip.getAttribute('data-point') || '';
+      ta.value = ta.value ? ta.value.replace(/\s+$/, '') + ' ' + starter : starter;
+      ta.focus();
+    });
+  });
+
+  // Big mic: record, transcribe into the textarea.
+  let stopFn = null;
+  mic.addEventListener('click', () => {
+    if (stopFn) { try { stopFn(); } catch (e) {} stopFn = null; return; }
+    mic.classList.add('listening');
+    setStatus('Listening… tap again to stop');
+    window.SkipMic.record((transcript) => {
+      mic.classList.remove('listening');
+      stopFn = null;
+      if (transcript) {
+        ta.value = ta.value ? ta.value.replace(/\s+$/, '') + ' ' + transcript : transcript;
+        setStatus('Got it — hit "Sort it out" or keep talking.');
+      } else {
+        setStatus('Didn\u2019t catch that — try again.');
+      }
+    }, setStatus).then((fn) => { stopFn = fn; })
+      .catch(() => { mic.classList.remove('listening'); setStatus('Microphone blocked — allow mic access in Settings.'); });
+  });
+
+  // Sort it out: parse the text into the 6 reflection fields.
+  sortBtn.addEventListener('click', () => {
+    const text = ta.value.trim();
+    if (!text) { setStatus('Talk or type something first.'); return; }
+    setStatus('Skip is sorting that out…');
+    fetch('/api/checkin/parse', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ transcript: text }),
+    })
+      .then((r) => r.json())
+      .then((d) => {
+        if (!d.ok || !d.fields) { setStatus('Couldn\u2019t sort that — just fill the fields in.'); fields.hidden = false; return; }
+        const f = d.fields;
+        const set = (name, val) => {
+          const el = document.querySelector(`[name="${name}"]`);
+          if (el && val) el.value = val;
+        };
+        set('main_focus', f.main_focus);
+        set('felt_good', f.felt_good);
+        set('biggest_struggle', f.biggest_struggle);
+        set('adjustment_helped', f.adjustment_helped);
+        set('learned', f.learned);
+        set('whats_next', f.whats_next);
+        fields.hidden = false;
+        setStatus('Done — check it over and hit submit.');
+        fields.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      })
+      .catch(() => { setStatus('Something went wrong — just fill the fields in.'); fields.hidden = false; });
   });
 })();

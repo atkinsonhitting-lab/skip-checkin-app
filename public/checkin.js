@@ -139,6 +139,8 @@ window.addEventListener('pageshow', function () {
   var INTENTS = ['light', 'medium', 'heavy'];
 
   var HEADLINES = {
+    hittingTaps: "Almost there — just tap what's missing:",
+    hittingTalk: "Your entry won't submit yet — here's what's missing:",
     hitting: "Your entry won't submit yet — here's what's missing:",
     pitching: "Your entry won't submit yet — here's what's missing:",
     combined: "Your entry won't submit yet — here's what's missing:",
@@ -193,7 +195,20 @@ window.addEventListener('pageshow', function () {
       }
     }
 
-    if (kind === 'hitting') {
+    if (kind === 'hittingTaps') {
+      var STYPES = ['game', 'cage', 'live_abs', 'team_practice'];
+      if (STYPES.indexOf(v.session_type) < 0) {
+        missing('session_type', 'What did you do today?',
+          'Game, cage, live ABs, or team practice.');
+      }
+      function badStar(s) { var n = parseInt(s, 10); return !(n >= 1 && n <= 5); }
+      if (badStar(v.swing_feel) || badStar(v.contact_quality) || badStar(v.approach_score)) {
+        missing('swing_feel', 'Rate your swing, contact, and approach',
+          'Tap the stars — 1 to 5 on each.');
+      }
+    } else if (kind === 'hittingTalk') {
+      // Step 2: taps are hidden fields (already validated); reflections optional.
+    } else if (kind === 'hitting') {
       if (ENVS.indexOf(v.environment) < 0) {
         missing('environment', 'Where were you?',
           'Skip needs to know what kind of day it was to make sense of your entry.');
@@ -237,6 +252,8 @@ window.addEventListener('pageshow', function () {
   function fieldAnchor(form, key) {
     var map = {
       environment: 'input[name="environment"]',
+      session_type: 'input[name="session_type"]',
+      swing_feel: 'input[name="swing_feel"]',
       drills_done: 'input[name="drills_done"]',
       did_hit: 'input[name="did_hit"]',
       pitch_session_type: 'input[name="pitch_session_type"]',
@@ -272,6 +289,10 @@ window.addEventListener('pageshow', function () {
     }
     return {
       environment: checkedVal('environment'),
+      session_type: checkedVal('session_type'),
+      swing_feel: checkedVal('swing_feel'),
+      contact_quality: checkedVal('contact_quality'),
+      approach_score: checkedVal('approach_score'),
       drills_done: fieldVal('drills_done'),
       did_hit: boxChecked('did_hit'),
       did_throw: boxChecked('did_throw'),

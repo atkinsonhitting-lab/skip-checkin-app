@@ -947,3 +947,25 @@ a.stat-card { padding: 14px 8px; }
 .routine-edit:hover { color: var(--text); }
 .routine-edit-form { display: flex; gap: 6px; flex: 1; }
 .routine-edit-form input { flex: 1; }
+
+/* Talk it out — big flashing mic + talking points (Sep 23 2026) */
+.big-mic {
+  width: 96px; height: 96px; border-radius: 50%;
+  font-size: 40px; border: none; cursor: pointer;
+  background: var(--red); color: #fff;
+  margin: 12px auto; display: block;
+  animation: mic-pulse 1.8s infinite;
+}
+.big-mic.listening { animation: none; background: #666; transform: scale(1.05); }
+@keyframes mic-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(225,6,0,.45); }
+  70% { box-shadow: 0 0 0 22px rgba(225,6,0,0); }
+  100% { box-shadow: 0 0 0 0 rgba(225,6,0,0); }
+}
+.talk-points { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 4px 0 8px; }
+.talk-point {
+  font-size: 13px; padding: 6px 12px; border-radius: 20px;
+  border: 1px solid var(--line); background: var(--bg2); color: var(--muted);
+  cursor: pointer;
+}
+.talk-point:active { border-color: var(--red); color: var(--text); }

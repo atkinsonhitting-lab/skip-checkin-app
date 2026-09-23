@@ -4377,13 +4377,39 @@ app.get('/checkin/score/:id', requireLogin, (req, res) => {
   res.send(views.scorePage(req.user, row));
 });
 
+// Bobby's check-in step 1 → step 2 (Sep 23 2026): validate the tap
+// questions, then render the talk-it-out page with taps as hidden fields.
+app.post('/checkin/taps', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.status(403).send('Forbidden');
+  if ((req.user.playerType || 'hitter') !== 'hitter') return res.redirect('/checkin');
+  const b = req.body;
+  const fail = (msg) => res.send(views.checkinForm(req.user, msg, b));
+  const sessionTypes = ['game', 'cage', 'live_abs', 'team_practice'];
+  const routineOpts = ['yes', 'mostly', 'no'];
+  const timingOpts = ['early', 'on_time', 'late', 'inconsistent'];
+  const star = (v) => { const n = parseInt(v, 10); return n >= 1 && n <= 5 ? n : null; };
+  if (!sessionTypes.includes(b.session_type)) return fail('Pick what you did today.');
+  if (star(b.swing_feel) === null || star(b.contact_quality) === null || star(b.approach_score) === null) {
+    return fail('Rate your swing, contact, and approach from 1 to 5 stars.');
+  }
+  const taps = {
+    session_type: b.session_type,
+    routine_followed: routineOpts.includes(b.routine_followed) ? b.routine_followed : '',
+    swing_feel: b.swing_feel,
+    timing: timingOpts.includes(b.timing) ? b.timing : '',
+    contact_quality: b.contact_quality,
+    approach_score: b.approach_score,
+  };
+  res.send(views.checkinTalkForm(req.user, taps, null, {}, b.edit_id || null));
+});
 app.post('/checkin', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.status(403).send('Forbidden');
   // The hitting form is for hitters; pitchers and two-ways have their own.
   if ((req.user.playerType || 'hitter') !== 'hitter') return res.redirect('/checkin');
   const b = req.body;
-  const fail = (msg) => res.send(views.checkinForm(req.user, msg, b, data.drillNames(), getRoutine(req.user.id), recentDrillGroups(req.user.id)));
-  // Bobby's 12-question form (Sep 23 2026)
+  const fail = (msg) => res.send(views.checkinForm(req.user, msg, b));
+  // Bobby's 12-question form (Sep 23 2026) — taps arrive as hidden fields
+  // from step 2, reflections from the talk-it-out form.
   const sessionTypes = ['game', 'cage', 'live_abs', 'team_practice'];
   const routineOpts = ['yes', 'mostly', 'no'];
   const timingOpts = ['early', 'on_time', 'late', 'inconsistent'];
