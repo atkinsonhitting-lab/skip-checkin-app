@@ -2247,7 +2247,7 @@ function coachComposePage(user, players, opts) {
     body: `<h1 class="page-title">New message</h1>
     <p class="hint"><a href="/coach/messages">← All messages</a></p>
     ${o.error ? `<p class="error">${esc(o.error)}</p>` : ''}
-    <form method="post" action="/coach/messages/new" class="cmp-card" id="cmp-form">
+    <form method="post" action="/coach/messages/new" class="cmp-card" id="cmp-form" enctype="multipart/form-data">
       <div class="cmp-seg">
         <button type="button" class="cmp-seg-btn on" data-mode="all">All my players <span class="cmp-count">${n}</span></button>
         <button type="button" class="cmp-seg-btn" data-mode="choose">Choose players</button>
@@ -2266,7 +2266,9 @@ function coachComposePage(user, players, opts) {
         <div id="cmp-ids" aria-hidden="true"></div>
       </div>
       <label class="cmp-label">Message <span class="hint-inline"><span id="char-count">0</span>/500</span></label>
-      <textarea name="body" id="compose-body" maxlength="500" required rows="4" class="cmp-textarea" placeholder="Write your message…"></textarea>
+      <textarea name="body" id="compose-body" maxlength="500" rows="4" class="cmp-textarea" placeholder="Write your message…"></textarea>
+      <label class="cmp-attach" aria-label="Attach a video or photo">📎 <span class="hint-inline">Attach video/photo</span>
+        <input type="file" name="attachment" accept="video/mp4,video/quicktime,video/webm,image/*" hidden></label>
       <button class="btn-primary cmp-send" type="submit"><span id="cmp-send-label">Send to all ${n} player${n === 1 ? '' : 's'}</span></button>
     </form>
     <script>

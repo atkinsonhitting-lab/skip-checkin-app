@@ -1554,6 +1554,9 @@ main.wrap { animation: pageIn 0.18s ease-out; }
 }
 .cmp-textarea:focus { border-color: #0a84ff; }
 .cmp-send { margin-top: 2px; width: 100%; font-size: 16px; padding: 13px; }
+/* Broadcast composer attachment (Sep 23 2026): video/photo picker row. */
+.cmp-attach { display: inline-flex; align-items: center; gap: 6px; margin: 10px 0 12px; padding: 10px 14px; border: 1px dashed #3a3a3e; border-radius: 12px; cursor: pointer; color: var(--text); font-size: 15px; }
+.cmp-attach:active { border-color: #0a84ff; }
 
 /* ---- "What DON'T you have?" dropdown + chips picker (intake, Sep 2026) ---- */
 .nohave { margin: 10px 0; }

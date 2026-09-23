@@ -6853,10 +6853,13 @@ app.get('/coach/messages/new', requireGlobalCoachAny, (req, res) => {
 // Send the broadcast (Sep 17 2026). Full-access coaches only: view-only
 // coaches get 403, same as every other coach mutation.
 app.post('/coach/messages/new', requireCoach, (req, res) => {
+  msgAttachmentUpload.single('attachment')(req, res, (err) => {
+  if (err) return res.redirect('/coach/messages/new?error=' + encodeURIComponent(err.message || 'Attachment failed.'));
   const me = realUser(req);
   const back = (q) => res.redirect('/coach/messages/new' + (q ? '?' + q : ''));
   const body = String(req.body.body || '').trim();
-  if (!body) return back('error=' + encodeURIComponent('Write a message first.'));
+  const file = req.file;
+  if (!body && !file) return back('error=' + encodeURIComponent('Write a message or attach a video/photo.'));
   if (body.length > 500) return back('error=' + encodeURIComponent('Keep it to 500 characters.'));
   // Never trust the form: recipients must actually be Bobby's remote players.
   const mine = new Set(coachUserStats(orgScope(req), { mineOnly: true }).filter((a) => a.isRemote).map((a) => String(a.id)));
@@ -6870,16 +6873,20 @@ app.post('/coach/messages/new', requireCoach, (req, res) => {
   }
   if (!targets.length) return back('error=' + encodeURIComponent('Pick at least one player.'));
   const msg = body.slice(0, 500);
+  const attachPath = file ? file.filename : '';
+  const attachType = file ? (file.mimetype.startsWith('video/') ? 'video' : 'image') : '';
   const now = new Date().toISOString();
   // Broadcast: recipient_id NULL, one recipient row per targeted player.
-  const info = db.prepare('INSERT INTO messages (sender_id, recipient_id, body, created_at) VALUES (?, NULL, ?, ?)').run(me.id, msg, now);
+  const info = db.prepare('INSERT INTO messages (sender_id, recipient_id, body, created_at, attachment_path, attachment_type) VALUES (?, NULL, ?, ?, ?, ?)').run(me.id, msg, now, attachPath, attachType);
   const addTarget = db.prepare('INSERT OR IGNORE INTO message_recipients (message_id, user_id) VALUES (?, ?)');
   for (const uid of targets) {
     addTarget.run(info.lastInsertRowid, Number(uid));
     // Fire-and-forget: a push failure must never break the redirect.
-    pushToUser(Number(uid), 'Message from Coach', msg.slice(0, 120), '/messages').catch((e) => console.warn('coach message push failed:', e.message));
+    const pushPreview = attachType === 'video' ? 'Sent a video' : (attachType === 'image' ? 'Sent a photo' : msg.slice(0, 120));
+    pushToUser(Number(uid), 'Message from Coach', pushPreview, '/messages').catch((e) => console.warn('coach message push failed:', e.message));
   }
   res.redirect('/coach/messages?sent=' + targets.length);
+  });
 });
 
 // Coach inbox (Sep 17 2026): one row per athlete with message traffic with
