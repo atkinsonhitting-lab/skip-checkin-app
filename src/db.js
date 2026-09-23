@@ -150,6 +150,13 @@ db.exec(`CREATE TABLE IF NOT EXISTS messages (
   body TEXT NOT NULL,
   created_at TEXT NOT NULL
 )`);
+// Video/photo attachments on messages (Sep 23 2026): remote guys send Bobby
+// swing clips through the app. Stored on disk for now; move to R2 when volume grows.
+{
+  const cols = db.prepare('PRAGMA table_info(messages)').all().map((c) => c.name);
+  if (!cols.includes('attachment_path')) db.exec(`ALTER TABLE messages ADD COLUMN attachment_path TEXT NOT NULL DEFAULT ''`);
+  if (!cols.includes('attachment_type')) db.exec(`ALTER TABLE messages ADD COLUMN attachment_type TEXT NOT NULL DEFAULT ''`);
+}
 db.exec(`CREATE TABLE IF NOT EXISTS message_recipients (
   message_id INTEGER NOT NULL,
   user_id INTEGER NOT NULL,

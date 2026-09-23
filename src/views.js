@@ -2001,10 +2001,18 @@ function coachHittersPage(user, userStats, opts) {
 // just sees their (empty) inbox.
 function playerMessagesPage(user, msgs, opts) {
   const o = opts || {};
+  const attachHtml = (m) => {
+    if (!m.attachment_path) return '';
+    const url = `/msg-attachments/${esc(m.attachment_path)}`;
+    if (m.attachment_type === 'video') {
+      return `<video src="${url}" controls playsinline preload="metadata" style="width:100%;border-radius:8px;margin-top:8px;max-height:320px;background:#000"></video>`;
+    }
+    return `<img src="${url}" alt="Attachment" style="width:100%;border-radius:8px;margin-top:8px">`;
+  };
   const cards = msgs
     .map((m) => {
       const mine = m.sender_id === user.id;
-      return `<div class="card"><p style="margin:0 0 6px"><strong>${mine ? 'You' : 'Coach'}</strong> <span class="hint-inline">${fmtDate(m.created_at)}</span></p><p style="margin:0">${linkify(m.body)}</p></div>`;
+      return `<div class="card"><p style="margin:0 0 6px"><strong>${mine ? 'You' : 'Coach'}</strong> <span class="hint-inline">${fmtDate(m.created_at)}</span></p>${m.body ? `<p style="margin:0">${linkify(m.body)}</p>` : ''}${attachHtml(m)}</div>`;
     })
     .join('');
   return layout({
@@ -2014,9 +2022,12 @@ function playerMessagesPage(user, msgs, opts) {
     body: `<h1 class="page-title">Messages</h1>
     ${o.nudge ? `<div class="card push-card"><p style="margin:0 0 10px"><strong>Turn on notifications</strong> <span class="hint">so you never miss a message from Coach.</span></p><p style="margin:0"><button type="button" class="btn-primary" id="push-enable-btn" style="margin-top:0">Turn on notifications</button></p></div>` : ''}
     ${o.error ? `<p class="error">${esc(o.error)}</p>` : ''}
-    ${o.canMessage ? `<div class="card"><form method="post" action="/messages/to-coach">
+    ${o.canMessage ? `<div class="card"><form method="post" action="/messages/to-coach" enctype="multipart/form-data">
       <label>Message Coach <span class="hint-inline">(500 characters max)</span>
-        <textarea name="body" maxlength="500" required rows="3" style="width:100%;box-sizing:border-box" placeholder="Ask Bobby anything…">${esc(o.prefill || '')}</textarea>
+        <textarea name="body" maxlength="500" rows="3" style="width:100%;box-sizing:border-box" placeholder="Ask Bobby anything…">${esc(o.prefill || '')}</textarea>
+      </label>
+      <label style="display:block;margin-top:8px">📎 Attach a swing video or photo
+        <input type="file" name="attachment" accept="video/mp4,video/quicktime,video/webm,image/*" style="margin-top:4px">
       </label>
       <button class="btn-primary" type="submit" style="margin-top:8px">Send</button>
     </form></div>` : ''}
@@ -2122,10 +2133,18 @@ function coachComposePage(user, players, opts) {
 function coachThreadPage(user, other, msgs, opts) {
   const o = opts || {};
   const canReply = user.canEdit !== false;
+  const attachHtml = (m) => {
+    if (!m.attachment_path) return '';
+    const url = `/msg-attachments/${esc(m.attachment_path)}`;
+    if (m.attachment_type === 'video') {
+      return `<video src="${url}" controls playsinline preload="metadata" style="width:100%;border-radius:8px;margin-top:8px;max-height:320px;background:#000"></video>`;
+    }
+    return `<img src="${url}" alt="Attachment" style="width:100%;border-radius:8px;margin-top:8px">`;
+  };
   const cards = msgs
     .map((m) => {
       const mine = m.sender_id === user.id;
-      return `<div class="card"><p style="margin:0 0 6px"><strong>${mine ? 'You' : esc(other.name)}</strong> <span class="hint-inline">${fmtDate(m.created_at)}</span></p><p style="margin:0">${linkify(m.body)}</p></div>`;
+      return `<div class="card"><p style="margin:0 0 6px"><strong>${mine ? 'You' : esc(other.name)}</strong> <span class="hint-inline">${fmtDate(m.created_at)}</span></p>${m.body ? `<p style="margin:0">${linkify(m.body)}</p>` : ''}${attachHtml(m)}</div>`;
     })
     .join('');
   return layout({
@@ -2136,9 +2155,12 @@ function coachThreadPage(user, other, msgs, opts) {
     <p class="hint"><a href="/coach/messages">← All messages</a></p>
     ${o.error ? `<p class="error">${esc(o.error)}</p>` : ''}
     ${cards || '<div class="card empty">No messages yet.</div>'}
-    ${canReply ? `<div class="card"><form method="post" action="/coach/messages/to/${other.id}">
+    ${canReply ? `<div class="card"><form method="post" action="/coach/messages/to/${other.id}" enctype="multipart/form-data">
       <label>Reply <span class="hint-inline">(500 characters max)</span>
-        <textarea name="body" maxlength="500" required rows="3" style="width:100%;box-sizing:border-box"></textarea>
+        <textarea name="body" maxlength="500" rows="3" style="width:100%;box-sizing:border-box"></textarea>
+      </label>
+      <label style="display:block;margin-top:8px">📎 Attach a video or photo
+        <input type="file" name="attachment" accept="video/mp4,video/quicktime,video/webm,image/*" style="margin-top:4px">
       </label>
       <button class="btn-primary" type="submit" style="margin-top:8px">Send</button>
     </form></div>` : ''}`,

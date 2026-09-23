@@ -222,6 +222,44 @@ const logoUpload = multer({
   limits: { fileSize: 2 * 1024 * 1024 },
 });
 
+// Message attachments (Sep 23 2026): remote guys send Bobby swing clips.
+// Videos up to 100MB, images up to 10MB. Disk for now, R2 later.
+const MSG_ATTACH_DIR = path.join(DATA_DIR, 'message-attachments');
+try { fs.mkdirSync(MSG_ATTACH_DIR, { recursive: true }); } catch (e) {}
+const msgAttachmentUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, MSG_ATTACH_DIR),
+    filename: (req, file, cb) => {
+      const exts = {
+        'video/mp4': 'mp4', 'video/quicktime': 'mov', 'video/webm': 'webm',
+        'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif', 'image/heic': 'heic',
+      };
+      const ext = exts[file.mimetype] || 'bin';
+      cb(null, `msg-${req.user.id}-${Date.now()}.${ext}`);
+    },
+  }),
+  fileFilter: (req, file, cb) => {
+    if (/^video\/(mp4|quicktime|webm)$/.test(file.mimetype)) return cb(null, true);
+    if (/^image\/(png|jpeg|webp|gif|heic)$/.test(file.mimetype)) return cb(null, true);
+    cb(new Error('Attach a video (MP4/MOV) or photo.'));
+  },
+  limits: { fileSize: 100 * 1024 * 1024 },
+});
+
+// Serve message attachments. Filename is validated to a flat safe pattern;
+// only the sender, the recipient, and coaches can fetch.
+app.get('/msg-attachments/:file', requireLogin, (req, res) => {
+  const f = String(req.params.file || '');
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*\.(mp4|mov|webm|png|jpg|jpeg|webp|gif|heic)$/i.test(f)) return res.status(404).end();
+  const row = db.prepare('SELECT sender_id, recipient_id FROM messages WHERE attachment_path = ?').get(f);
+  if (!row) return res.status(404).end();
+  const me = req.user.id;
+  const isCoach = req.user.role === 'coach';
+  const involved = row.sender_id === me || row.recipient_id === me;
+  if (!isCoach && !involved) return res.status(403).end();
+  res.sendFile(path.join(MSG_ATTACH_DIR, f));
+});
+
 // Serve uploaded logos. The filename is validated to a flat safe pattern so
 // no path traversal is possible; the row stores only the file name.
 app.get('/org-logos/:file', (req, res) => {
@@ -5501,7 +5539,7 @@ app.get('/coach/messages/:userId', requireGlobalCoachAny, (req, res) => {
   ).run(new Date().toISOString(), me.id, other.id);
   const msgs = db
     .prepare(
-      `SELECT m.id, m.sender_id, m.body, m.created_at FROM messages m
+      `SELECT m.id, m.sender_id, m.body, m.created_at, m.attachment_path, m.attachment_type FROM messages m
        WHERE (m.sender_id = ? AND EXISTS (SELECT 1 FROM message_recipients r WHERE r.message_id = m.id AND r.user_id = ?))
           OR (m.sender_id = ? AND EXISTS (SELECT 1 FROM message_recipients r WHERE r.message_id = m.id AND r.user_id = ?))
        ORDER BY m.created_at ASC`
@@ -5517,15 +5555,21 @@ app.post('/coach/messages/to/:userId', requireCoach, (req, res) => {
   const me = realUser(req);
   const other = db.prepare("SELECT id FROM users WHERE id = ? AND role = 'athlete'").get(req.params.userId);
   if (!other || !isMyProgramPlayer(other.id)) return res.status(403).send('Forbidden');
-  const body = String(req.body.body || '').trim();
-  if (!body || body.length > 500) {
-    return res.redirect('/coach/messages/' + other.id + '?error=' + encodeURIComponent('Write a message first (500 characters max).'));
-  }
-  const msg = body.slice(0, 500);
-  const info = db.prepare('INSERT INTO messages (sender_id, recipient_id, body, created_at) VALUES (?, ?, ?, ?)').run(me.id, other.id, msg, new Date().toISOString());
-  db.prepare('INSERT OR IGNORE INTO message_recipients (message_id, user_id) VALUES (?, ?)').run(info.lastInsertRowid, other.id);
-  pushToUser(other.id, 'Message from Coach', msg.slice(0, 120), '/messages').catch((e) => console.warn('coach reply push failed:', e.message));
-  res.redirect('/coach/messages/' + other.id);
+  msgAttachmentUpload.single('attachment')(req, res, (err) => {
+    if (err) return res.redirect('/coach/messages/' + other.id + '?error=' + encodeURIComponent(err.message || 'Attachment failed.'));
+    const body = String(req.body.body || '').trim();
+    const file = req.file;
+    if ((!body || body.length > 500) && !file) {
+      return res.redirect('/coach/messages/' + other.id + '?error=' + encodeURIComponent('Write a message or attach a video/photo.'));
+    }
+    const msg = body.slice(0, 500);
+    const attachPath = file ? file.filename : '';
+    const attachType = file ? (file.mimetype.startsWith('video/') ? 'video' : 'image') : '';
+    const info = db.prepare('INSERT INTO messages (sender_id, recipient_id, body, created_at, attachment_path, attachment_type) VALUES (?, ?, ?, ?, ?, ?)').run(me.id, other.id, msg, new Date().toISOString(), attachPath, attachType);
+    db.prepare('INSERT OR IGNORE INTO message_recipients (message_id, user_id) VALUES (?, ?)').run(info.lastInsertRowid, other.id);
+    pushToUser(other.id, 'Message from Coach', attachType === 'video' ? 'Sent a video' : msg.slice(0, 120), '/messages').catch((e) => console.warn('coach reply push failed:', e.message));
+    res.redirect('/coach/messages/' + other.id);
+  });
 });
 
 // Player inbox (Sep 17 2026): broadcasts + 1:1 with the coach, chronological.
@@ -5536,7 +5580,7 @@ app.get('/messages', requireLogin, (req, res) => {
   markMessagesRead(me.id);
   const msgs = db
     .prepare(
-      `SELECT m.id, m.sender_id, m.body, m.created_at FROM messages m
+      `SELECT m.id, m.sender_id, m.body, m.created_at, m.attachment_path, m.attachment_type FROM messages m
        WHERE EXISTS (SELECT 1 FROM message_recipients r WHERE r.message_id = m.id AND r.user_id = ?)
           OR m.sender_id = ?
        ORDER BY m.created_at ASC`
@@ -5557,21 +5601,27 @@ app.get('/messages', requireLogin, (req, res) => {
 // can") — everyone else gets 403. There is no other player messaging route,
 // so players can never message each other or arbitrary coaches.
 app.post('/messages/to-coach', requireLogin, (req, res) => {
-  const me = req.user;
-  if (me.role !== 'athlete' || !isMyProgramPlayer(me.id)) return res.status(403).send('Forbidden');
-  const body = String(req.body.body || '').trim();
-  if (!body || body.length > 500) {
-    return res.redirect('/messages?error=' + encodeURIComponent('Write a message first (500 characters max).'));
-  }
-  const coachId = coachForPlayer(me.id);
-  if (!coachId) return res.redirect('/messages?error=' + encodeURIComponent('No coach available right now.'));
-  const msg = body.slice(0, 500);
-  const info = db.prepare('INSERT INTO messages (sender_id, recipient_id, body, created_at) VALUES (?, ?, ?, ?)').run(me.id, coachId, msg, new Date().toISOString());
-  db.prepare('INSERT OR IGNORE INTO message_recipients (message_id, user_id) VALUES (?, ?)').run(info.lastInsertRowid, coachId);
-  pushToUser(coachId, `New message from ${me.displayName}`, msg.slice(0, 120), '/coach/messages/' + me.id).catch((e) =>
-    console.warn('player message push failed:', e.message)
-  );
-  res.redirect('/messages');
+  msgAttachmentUpload.single('attachment')(req, res, (err) => {
+    if (err) return res.redirect('/messages?error=' + encodeURIComponent(err.message || 'Attachment failed.'));
+    const me = req.user;
+    if (me.role !== 'athlete' || !isMyProgramPlayer(me.id)) return res.status(403).send('Forbidden');
+    const body = String(req.body.body || '').trim();
+    const file = req.file;
+    if ((!body || body.length > 500) && !file) {
+      return res.redirect('/messages?error=' + encodeURIComponent('Write a message or attach a video/photo.'));
+    }
+    const coachId = coachForPlayer(me.id);
+    if (!coachId) return res.redirect('/messages?error=' + encodeURIComponent('No coach available right now.'));
+    const msg = body.slice(0, 500);
+    const attachPath = file ? file.filename : '';
+    const attachType = file ? (file.mimetype.startsWith('video/') ? 'video' : 'image') : '';
+    const info = db.prepare('INSERT INTO messages (sender_id, recipient_id, body, created_at, attachment_path, attachment_type) VALUES (?, ?, ?, ?, ?, ?)').run(me.id, coachId, msg, new Date().toISOString(), attachPath, attachType);
+    db.prepare('INSERT OR IGNORE INTO message_recipients (message_id, user_id) VALUES (?, ?)').run(info.lastInsertRowid, coachId);
+    pushToUser(coachId, `New message from ${me.displayName}`, attachType === 'video' ? 'Sent a video' : msg.slice(0, 120), '/coach/messages/' + me.id).catch((e) =>
+      console.warn('player message push failed:', e.message)
+    );
+    res.redirect('/messages');
+  });
 });
 
 // Flip "My program" on an org (Bobby-only, same guard as the deal route):
