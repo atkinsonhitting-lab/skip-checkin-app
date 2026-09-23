@@ -578,6 +578,7 @@
         '<input name="lex_' + i + '_' + j + '_reps" placeholder="Reps" maxlength="24" class="num">' +
         '<select name="lex_' + i + '_' + j + '_trpe" title="Target RPE">' + rpe + '</select>' +
         '<input name="lex_' + i + '_' + j + '_notes" placeholder="Cue / note" maxlength="200" class="wide">' +
+        '<input name="lex_' + i + '_' + j + '_video" placeholder="YouTube link" maxlength="300" class="wide" inputmode="url">' +
         '<button type="button" class="btn btn-sm btn-danger" data-rmex>✕</button></div>';
     }
     function renumberDay(fs) {
@@ -648,6 +649,8 @@
           '<label class="lift-field">Day label <input name="lday_' + i + '_label" maxlength="40" placeholder="Day ' + String.fromCharCode(65 + i) + '"></label>' +
           '<label class="lift-field">Warm-up <span class="hint-inline">(one per line)</span>' +
           '<textarea name="lday_' + i + '_warmup" rows="3" style="width:100%;box-sizing:border-box"></textarea></label>' +
+          '<label class="lift-field">Speed — sprints first <span class="hint-inline">(one per line: Name | volume | notes)</span>' +
+          '<textarea name="lday_' + i + '_speed" rows="3" style="width:100%;box-sizing:border-box"></textarea></label>' +
           '<div class="lift-ex-list" data-exlist></div>' +
           '<div class="row-actions"><button type="button" class="btn small" data-addex="' + i + '">+ Exercise</button> ' +
           '<button type="button" class="btn btn-sm btn-danger" data-rmday>Remove day</button></div>';
