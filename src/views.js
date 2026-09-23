@@ -735,9 +735,14 @@ function checkinForm(user, error, values, drillNames, routine, recentGroups, act
     ).join('')}</div>`;
   const short = (name, label, val, placeholder) => `
     <label>${esc(label)}<span class="talk-wrap"><input type="text" id="${name}" name="${name}" value="${esc(val || '')}" placeholder="${esc(placeholder || '')}" maxlength="300"><button type="button" class="mic-btn" data-target="${name}" aria-label="Dictate instead of typing">🎙</button></span></label>`;
-  // Bobby's check-in (Sep 23 2026): taps up top, big mic below — one page.
-  const field = (name, label, val) => `
-    <label>${esc(label)}<input type="text" name="${name}" value="${esc(val || '')}" maxlength="300"></label>`;
+  // Bobby's check-in (Sep 23 2026): a few taps, big mic, Skip sorts it out.
+  // No reflection fields — the server parses the talk text into the summary.
+  // Condensed: sliders not stars, tight spacing.
+  const slider = (name, val) => `
+    <div class="feel-slider">
+      <input type="range" name="${name}" min="1" max="10" step="1" value="${val || 5}" id="slider-${name}">
+      <div class="feel-slider-labels"><span>Rough</span><span id="slider-${name}-val">${val || 5}</span><span>Locked in</span></div>
+    </div>`;
   return layout({
     title: 'Check In',
     user,
@@ -746,21 +751,15 @@ function checkinForm(user, error, values, drillNames, routine, recentGroups, act
     <div class="card">
     <form method="post" action="${isEdit ? esc(action) : '/checkin'}" class="form" data-validate="hitting12">
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
-      <div class="field-label">What did you do today?</div>
+      <div class="field-label compact">What did you do today?</div>
       ${pill('session_type', [['game', 'Game'], ['cage', 'Cage'], ['live_abs', 'Live ABs'], ['team_practice', 'Team Practice']], v.session_type)}
-      <div class="field-label">Did you follow your hitting routine? <a href="/routine" class="hint-inline">add/edit routine</a></div>
+      <div class="field-label compact">Follow your hitting routine? <a href="/routine" class="hint-inline">edit</a></div>
       ${pill('routine_followed', [['yes', 'Yes'], ['mostly', 'Mostly'], ['no', 'No']], v.routine_followed)}
-      <div class="field-label">How did your swing feel today?</div>
-      ${stars('swing_feel', v.swing_feel)}
-      <div class="field-label">How was your timing?</div>
-      ${pill('timing', [['early', 'Early'], ['on_time', 'On Time'], ['late', 'Late'], ['inconsistent', 'Inconsistent']], v.timing)}
-      <div class="field-label">How was your contact quality?</div>
-      ${stars('contact_quality', v.contact_quality)}
-      <div class="field-label">How was your approach & decision-making?</div>
-      ${stars('approach_score', v.approach_score)}
-      <hr style="margin:20px 0;border:none;border-top:1px solid var(--line)">
+      <div class="field-label compact">How did your swing feel?</div>
+      ${slider('swing_feel', v.swing_feel)}
+      <hr style="margin:14px 0;border:none;border-top:1px solid var(--line)">
       <div style="text-align:center">
-        <p class="hint" style="margin-top:0">Talk about your session — or type it below.</p>
+        <p class="hint compact" style="margin-top:0">Talk it out — tap a topic or hit the mic.</p>
         <div class="talk-points">
           <span class="talk-point" data-point="What felt good today was ">What felt good</span>
           <span class="talk-point" data-point="I struggled with ">What you struggled with</span>
@@ -773,16 +772,8 @@ function checkinForm(user, error, values, drillNames, routine, recentGroups, act
         <p class="hint" id="talk-status" style="display:none"></p>
       </div>
       <div style="text-align:left">
-        <label>Your words<textarea id="talk-text" name="talk_text" rows="4" placeholder="Or type it here — what happened today?">${esc(v.talk_text || '')}</textarea></label>
-        <button type="button" id="sort-it-out" class="btn" style="width:100%;margin:8px 0">✨ Sort it out</button>
-        <div id="talk-fields" ${v.main_focus || v.felt_good ? '' : 'hidden'}>
-          ${field('main_focus', 'What was your main focus today?', v.main_focus)}
-          ${field('felt_good', 'What felt good today?', v.felt_good)}
-          ${field('biggest_struggle', 'What did you struggle with?', v.biggest_struggle)}
-          ${field('adjustment_helped', 'What adjustment or feel helped the most?', v.adjustment_helped)}
-          ${field('learned', 'What did you learn about yourself as a hitter today?', v.learned)}
-          ${field('whats_next', 'What is your ONE focus for your next session/game?', v.whats_next)}
-        </div>
+        <label>Your words<textarea id="talk-text" name="talk_text" rows="4" placeholder="Or type it here — what happened today?">${esc(v.talk_text || v.session_notes || '')}</textarea></label>
+        <p class="hint">Skip sorts it out from here — your summary lands in your Notebook.</p>
       </div>
       <button type="submit" class="btn-primary">${isEdit ? 'Save changes' : 'Submit check-in'}</button>
     </form></div>`,

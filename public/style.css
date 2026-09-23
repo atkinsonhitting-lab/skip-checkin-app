@@ -1033,3 +1033,29 @@ a.stat-card { padding: 14px 8px; }
 .rp-btn-back { background: #1e1e22; color: #fff; flex: 0 0 72px; }
 .rp-btn:active { transform: scale(0.97); }
 .rp-done-icon { font-size: 64px; margin-bottom: 16px; }
+
+/* Check-in: condensed sliders (Sep 23 2026) */
+.field-label.compact { margin: 10px 0 6px; font-size: 14px; }
+.hint.compact { margin: 0 0 8px; font-size: 13px; }
+.feel-slider { padding: 4px 2px 0; }
+.feel-slider input[type="range"] {
+  width: 100%; -webkit-appearance: none; appearance: none;
+  height: 8px; border-radius: 4px; background: #2a2a2e; outline: none;
+}
+.feel-slider input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--red); border: 3px solid #fff;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4); cursor: pointer;
+}
+.feel-slider input[type="range"]::-moz-range-thumb {
+  width: 24px; height: 24px; border-radius: 50%;
+  background: var(--red); border: 3px solid #fff; cursor: pointer;
+}
+.feel-slider-labels {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 12px; color: var(--muted); margin-top: 4px;
+}
+.feel-slider-labels span:nth-child(2) {
+  font-size: 20px; font-weight: 800; color: var(--text);
+}

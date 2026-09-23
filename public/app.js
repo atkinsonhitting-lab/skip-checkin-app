@@ -960,3 +960,10 @@ window.SkipMic = (function () {
     });
   });
 })();
+
+// Check-in feel slider value display (Sep 23 2026)
+document.querySelectorAll('.feel-slider input[type="range"]').forEach((el) => {
+  const out = document.getElementById(el.id + '-val');
+  if (!out) return;
+  el.addEventListener('input', () => { out.textContent = el.value; });
+});

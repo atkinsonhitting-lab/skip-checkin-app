@@ -4469,37 +4469,56 @@ app.get('/checkin/score/:id', requireLogin, (req, res) => {
   res.send(views.scorePage(req.user, row));
 });
 
-app.post('/checkin', requireLogin, (req, res) => {
+app.post('/checkin', requireLogin, async (req, res) => {
   if (req.user.role === 'coach') return res.status(403).send('Forbidden');
   // The hitting form is for hitters; pitchers and two-ways have their own.
   if ((req.user.playerType || 'hitter') !== 'hitter') return res.redirect('/checkin');
   const b = req.body;
   const fail = (msg) => res.send(views.checkinForm(req.user, msg, b));
-  // Bobby's 12-question form (Sep 23 2026) — taps arrive as hidden fields
-  // from step 2, reflections from the talk-it-out form.
+  // Bobby's simplified check-in (Sep 23 2026): a few taps + mic. Swing feel
+  // is a 1-10 slider; Skip parses the talk text server-side into the summary.
   const sessionTypes = ['game', 'cage', 'live_abs', 'team_practice'];
   const routineOpts = ['yes', 'mostly', 'no'];
-  const timingOpts = ['early', 'on_time', 'late', 'inconsistent'];
   if (!sessionTypes.includes(b.session_type)) {
     return fail('Pick what you did today — game, cage, live ABs, or team practice.');
   }
-  const star = (v) => { const n = parseInt(v, 10); return n >= 1 && n <= 5 ? n : null; };
-  const swingFeel = star(b.swing_feel);
-  const contactQuality = star(b.contact_quality);
-  const approachScore = star(b.approach_score);
-  if (swingFeel === null || contactQuality === null || approachScore === null) {
-    return fail('Rate your swing, contact, and approach from 1 to 5 stars.');
+  const swingFeel = parseInt(b.swing_feel, 10);
+  if (!Number.isFinite(swingFeel) || swingFeel < 1 || swingFeel > 10) {
+    return fail('Move the slider to rate how your swing felt.');
   }
-  // Session score: avg of the three 1-5 stars, scaled to 1-10.
-  const sessionScore = Math.round(((swingFeel + contactQuality + approachScore) / 3) * 2 * 10) / 10;
+  const talkText = String(b.talk_text || '').trim().slice(0, 4000);
+  // Skip sorts it out: parse the talk text into the structured fields.
+  let parsed = {};
+  if (talkText) {
+    try {
+      const system = `You parse a hitter's spoken check-in into structured fields. Reply with ONLY a JSON object, no other text. Fields:
+timing: one of "early", "on_time", "late", "inconsistent" ("" if not mentioned)
+contact_quality: 1-5 integer ("" if not mentioned)
+approach_score: 1-5 integer (approach and decision-making, "" if not mentioned)
+main_focus: string (what they focused on, "" if not mentioned)
+felt_good: string (what felt good, "" if not mentioned)
+biggest_struggle: string (what they struggled with, "" if not mentioned)
+adjustment_helped: string (what adjustment or feel helped, "" if not mentioned)
+learned: string (what they learned about themselves, "" if not mentioned)
+whats_next: string (their one focus for next time, "" if not mentioned)
+Infer ratings from their words (e.g. "felt great" = 5, "terrible" = 1, "pretty good" = 4). Keep text fields to one or two sentences, in their voice.`;
+      const raw = await geminiText(system, talkText, 800);
+      parsed = JSON.parse(raw.replace(/^```json\s*|\s*```$/g, '').trim()) || {};
+    } catch (e) {
+      console.warn('checkin parse failed:', e.message);
+    }
+  }
+  const star = (v) => { const n = parseInt(v, 10); return n >= 1 && n <= 5 ? n : null; };
+  // Session score: the 1-10 swing feel is already on the 1-10 scale.
+  const sessionScore = swingFeel;
   const tier = scoreTier(sessionScore);
   const info = db
     .prepare(
       `INSERT INTO checkins
        (user_id, athlete_name, created_at, session_type, routine_followed, swing_feel, timing,
         contact_quality, approach_score, main_focus, felt_good, biggest_struggle,
-        adjustment_helped, learned, whats_next, session_score, score_tier)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        adjustment_helped, learned, whats_next, session_notes, session_score, score_tier)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       req.user.id,
@@ -4508,15 +4527,16 @@ app.post('/checkin', requireLogin, (req, res) => {
       b.session_type,
       routineOpts.includes(b.routine_followed) ? b.routine_followed : '',
       swingFeel,
-      timingOpts.includes(b.timing) ? b.timing : '',
-      contactQuality,
-      approachScore,
-      (b.main_focus || '').trim().slice(0, 300),
-      (b.felt_good || '').trim().slice(0, 300),
-      (b.biggest_struggle || '').trim().slice(0, 300),
-      (b.adjustment_helped || '').trim().slice(0, 300),
-      (b.learned || '').trim().slice(0, 300),
-      (b.whats_next || '').trim().slice(0, 300),
+      ['early', 'on_time', 'late', 'inconsistent'].includes(parsed.timing) ? parsed.timing : '',
+      star(parsed.contact_quality),
+      star(parsed.approach_score),
+      String(parsed.main_focus || '').trim().slice(0, 300),
+      String(parsed.felt_good || '').trim().slice(0, 300),
+      String(parsed.biggest_struggle || '').trim().slice(0, 300),
+      String(parsed.adjustment_helped || '').trim().slice(0, 300),
+      String(parsed.learned || '').trim().slice(0, 300),
+      String(parsed.whats_next || '').trim().slice(0, 300),
+      talkText,
       sessionScore,
       tier
     );
@@ -4761,7 +4781,7 @@ app.get('/checkin/:id/edit', requireLogin, (req, res) => {
   res.send(renderCheckinEdit(req.user, row, null, null));
 });
 
-app.post('/checkin/:id', requireLogin, (req, res) => {
+app.post('/checkin/:id', requireLogin, async (req, res) => {
   const row = ownedRow(req, res, 'checkins');
   if (!row) return;
   const b = req.body;
@@ -4775,30 +4795,49 @@ app.post('/checkin/:id', requireLogin, (req, res) => {
   // The session date (created_at) never changes; Skip's journal read, if any,
   // stays untouched. No "Session logged" push on edits — only on new check-ins.
   if (formKind === 'hitting') {
-    if (!ENVIRONMENTS.includes(b.environment)) return fail('Pick the environment you were in.');
-    const feel = parseRating(b.feel);
-    const confidence = parseRating(b.confidence);
-    const focus = parseRating(b.focus);
-    const difficulty = parseRating(b.difficulty);
-    if (feel === null || confidence === null || focus === null || difficulty === null) {
-      return fail('Rate feel, confidence, focus, and difficulty from 1 to 10.');
+    // Simplified check-in (Sep 23 2026): taps + mic. Matches POST /checkin.
+    const sessionTypes = ['game', 'cage', 'live_abs', 'team_practice'];
+    const routineOpts = ['yes', 'mostly', 'no'];
+    if (!sessionTypes.includes(b.session_type)) return fail('Pick what you did today.');
+    const swingFeel = parseInt(b.swing_feel, 10);
+    if (!Number.isFinite(swingFeel) || swingFeel < 1 || swingFeel > 10) {
+      return fail('Move the slider to rate how your swing felt.');
     }
-    if (!(b.session_notes || '').trim()) {
-      return fail('Write a few session notes \u2014 what you felt, what you saw, what was off.');
+    const talkText = String(b.talk_text || b.session_notes || '').trim().slice(0, 4000);
+    let parsed = {};
+    if (talkText) {
+      try {
+        const raw = await geminiText(
+          'You parse a hitter\'s spoken check-in into structured fields. Reply with ONLY a JSON object, no other text. Fields: timing ("early"|"on_time"|"late"|"inconsistent"|""), contact_quality (1-5|""), approach_score (1-5|""), main_focus, felt_good, biggest_struggle, adjustment_helped, learned, whats_next (strings, "" if not mentioned). Keep text fields to one or two sentences, in their voice.',
+          talkText, 800
+        );
+        parsed = JSON.parse(raw.replace(/^```json\s*|\s*```$/g, '').trim()) || {};
+      } catch (e) { console.warn('checkin edit parse failed:', e.message); }
     }
-    const drills = parseSectionDrills(b);
-    const sessionScore = scoreBreakdown(
-      feel, confidence, focus, difficulty,
-      `${b.session_notes || ''} ${b.what_worked || ''}`
-    ).total;
-    const tier = scoreTier(sessionScore);
+    const star = (v) => { const n = parseInt(v, 10); return n >= 1 && n <= 5 ? n : null; };
+    const tier = scoreTier(swingFeel);
     db.prepare(
-      `UPDATE checkins SET environment = ?, drills_done = ?, feel = ?, confidence = ?, focus = ?,
-        difficulty = ?, session_score = ?, score_tier = ?, session_notes = ?, what_worked = ?, whats_next = ?
+      `UPDATE checkins SET session_type = ?, routine_followed = ?, swing_feel = ?, timing = ?,
+        contact_quality = ?, approach_score = ?, main_focus = ?, felt_good = ?, biggest_struggle = ?,
+        adjustment_helped = ?, learned = ?, whats_next = ?, session_notes = ?,
+        session_score = ?, score_tier = ?
        WHERE id = ? AND user_id = ?`
     ).run(
-      b.environment, JSON.stringify(drills), feel, confidence, focus, difficulty, sessionScore, tier,
-      (b.session_notes || '').trim(), (b.what_worked || '').trim(), (b.whats_next || '').trim(),
+      b.session_type,
+      routineOpts.includes(b.routine_followed) ? b.routine_followed : '',
+      swingFeel,
+      ['early', 'on_time', 'late', 'inconsistent'].includes(parsed.timing) ? parsed.timing : '',
+      star(parsed.contact_quality),
+      star(parsed.approach_score),
+      String(parsed.main_focus || '').trim().slice(0, 300),
+      String(parsed.felt_good || '').trim().slice(0, 300),
+      String(parsed.biggest_struggle || '').trim().slice(0, 300),
+      String(parsed.adjustment_helped || '').trim().slice(0, 300),
+      String(parsed.learned || '').trim().slice(0, 300),
+      String(parsed.whats_next || '').trim().slice(0, 300),
+      talkText,
+      swingFeel,
+      tier,
       row.id, req.user.id
     );
     return res.redirect(`/checkin/score/${row.id}`);
