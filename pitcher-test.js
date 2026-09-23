@@ -216,7 +216,9 @@ async function main() {
     await req('POST', '/checkin/pitching', P({ pitch_session_type: 'no_throw', no_throw_note: 'lift day', feel: '7', focus: '7', confidence: '7', felt_good: 'x', what_was_working: 'y', biggest_struggle: 'z' }), 'st');
     run(`UPDATE checkins SET created_at=? WHERE user_id=?`, chiYesterday() + 'T12:00:00', uid('streak@test.com'));
     await req('POST', '/checkin/pitching', P({ pitch_session_type: 'bullpen', intent: 'light', pitch_count: '15', pitches_thrown: ['4-seam FB'], feel: '8', focus: '8', confidence: '8', command: '7', felt_good: 'x', what_was_working: 'y', biggest_struggle: 'z' }), 'st');
-    r = await req('GET', '/', null, 'st');
+    // Home (/) redirects athletes to Lock In since Sep 23 2026 — the streak
+    // card moved to the Notebook page in the same redesign.
+    r = await req('GET', '/notebook', null, 'st');
     check('no-throw day counts toward streak (2-day)', r.text.includes('streak-num">2<') && r.text.includes('day streak'));
 
     // ---- Skip glove avatar for pitchers ----
@@ -246,7 +248,9 @@ async function main() {
     // ---- Existing hitter regression ----
     r = await req('GET', '/notebook', null, 'hit');
     check('legacy hitter notebook renders', r.status === 200 && r.text.includes('good swings'));
-    r = await req('POST', '/checkin', P({ environment: 'Cage', feel: '8', confidence: '7', focus: '8', difficulty: '5', did_drills: 'no', session_notes: 'fine', what_worked: 'path', whats_next: '' }), 'hit');
+    // Check-in was simplified Sep 23 2026 (a few taps + mic) — legacy form
+    // fields are gone; a hitter submits with the new session_type + swing_feel.
+    r = await req('POST', '/checkin', P({ session_type: 'cage', swing_feel: '8', routine_followed: 'yes', talk_text: '' }), 'hit');
     check('legacy hitter check-in still submits', r.status === 302 && /^\/checkin\/score\//.test(r.loc || ''));
 
     console.log(failures === 0 ? '\nPITCHER SUITE OK' : `\n${failures} FAILURES`);

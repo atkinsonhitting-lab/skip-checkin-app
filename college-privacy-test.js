@@ -17,6 +17,9 @@ const run = (s, ...a) => { const d = new DatabaseSync(DB); try { return d.prepar
 const q = (s, ...a) => { const d = new DatabaseSync(DB); try { return d.prepare(s).get(...a); } finally { d.close(); } };
 
 async function main() {
+  // Re-runnable: drop the throwaway DB/data from any previous run first.
+  try { require('fs').rmSync(DB, { force: true }); } catch (e) {}
+  try { require('fs').rmSync(DATA_DIR, { recursive: true, force: true }); } catch (e) {}
   // ---- Boot 1: build the schema ----
   const { execSync } = require('node:child_process');
   execSync(`DATA_DIR=${DATA_DIR} DB_PATH=${DB} PORT=3498 SESSION_SECRET=t SKIP_API_KEY=t timeout 12 node src/server.js > /dev/null 2>&1 || true`,

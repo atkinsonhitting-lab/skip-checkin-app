@@ -1935,7 +1935,83 @@ function liftHistory(userId, itemKey, limit) {
     .all(userId, itemKey, limit || 8);
   for (const r of rows) r.sets = parseSets(r);
   return rows;
+}// Workout-mode day builder (Sep 23 2026): shapes one lifting day into
+// structured JSON for the guided session — Speed -> Med Ball -> Lifts.
+// Each item carries its checkoff key, prescription, video, last-time log,
+// and today's logged sets so the client can render without extra calls.
+function buildWorkoutDay(userId, lifting, ldayIdx, today) {
+  const days = (lifting && Array.isArray(lifting.days) ? lifting.days : [])
+    .filter((d) => (Array.isArray(d.exercises) ? d.exercises : []).some((ex) => String((ex && ex.name) || '').trim()));
+  const day = days[ldayIdx] || null;
+  if (!day) return { days: days.map((d) => d.label || ''), day: null };
+  const dayKey = String(day.label || '');
+  const checkoffs = getCheckoffs(userId, today);
+  const spd = (Array.isArray(day.speed) ? day.speed : [])
+    .filter((s) => String((s && s.name) || '').trim())
+    .map((s) => {
+      const key = `spd::lifting::${dayKey}::${s.name}`;
+      return {
+        type: 'speed', key, name: String(s.name || ''),
+        volume: String(s.volume || ''), notes: String(s.notes || ''), video: String(s.video || ''),
+        done: !!checkoffs[key],
+      };
+    });
+  const med = (Array.isArray(day.medball) ? day.medball : [])
+    .filter((s) => String((s && s.name) || '').trim())
+    .map((s) => {
+      const key = `med::lifting::${dayKey}::${s.name}`;
+      return {
+        type: 'medball', key, name: String(s.name || ''),
+        volume: String(s.volume || ''), notes: String(s.notes || ''), video: String(s.video || ''),
+        done: !!checkoffs[key],
+      };
+    });
+  const lifts = (Array.isArray(day.exercises) ? day.exercises : [])
+    .filter((ex) => String((ex && ex.name) || '').trim())
+    .map((ex) => {
+      const name = String(ex.name || '');
+      const key = `lift::${dayKey}::${name}`;
+      const row = checkoffs[key] || null;
+      const loggedSets = parseSets(row);
+      const info = {};
+      const last = lastLiftLog(userId, key, today);
+      const lastSets = last && Array.isArray(last.sets) ? last.sets : [];
+      const progSetCount = Math.max(1, Math.min(20, parseInt(ex.sets, 10) || 3));
+      const progReps = String(ex.reps || '').trim();
+      const dispSets = loggedSets.length
+        ? loggedSets
+        : Array.from({ length: progSetCount }, (_, k) => {
+            const prev = lastSets[k];
+            return {
+              w: prev && prev.w != null ? prev.w : null,
+              r: prev && prev.r != null ? prev.r : (progReps === '' ? null : parseInt(progReps, 10) || null),
+              done: 0,
+            };
+          });
+      const doneCount = dispSets.filter((s) => s.done).length;
+      return {
+        type: 'lift', key, name,
+        sets: String(ex.sets || ''), reps: String(ex.reps || ''),
+        target_rpe: String(ex.target_rpe || ''), notes: String(ex.notes || ''),
+        video: String(ex.video || ''),
+        suggested_weight: ex.suggested_weight != null ? String(ex.suggested_weight) : '',
+        rest: Math.max(15, Math.min(600, parseInt(ex.rest, 10) || 120)),
+        progSetCount, progReps,
+        dispSets, doneCount,
+        allDone: dispSets.length > 0 && doneCount === dispSets.length && loggedSets.length > 0,
+        lastSets, lastDay: last ? last.day : null,
+        lastWeight: last && last.weight != null ? last.weight : null,
+        lastRpe: last && last.rpe != null ? last.rpe : null,
+        rpe: row && row.rpe != null ? row.rpe : null,
+      };
+    });
+  return {
+    days: days.map((d) => d.label || ''),
+    day: { label: dayKey, warmup: views.normWarmup(day.warmup), speed: spd, medball: med, lifts },
+  };
 }
+
+
 // Find the remote program for a hitter's name, honoring aliases
 // ("Samuel Chapman" links to the "Sam Chapman" program).
 function remoteProgramForName(name) {
@@ -2020,6 +2096,26 @@ app.get('/program', requireLogin, requireWaiver, (req, res) => {
   }));
 });
 
+// Workout mode (Sep 23 2026): guided lifting session — one exercise at a
+// time, phone-first, AJAX logging, rest timer. ?lday=N picks the day.
+app.get('/program/workout', requireLogin, requireWaiver, (req, res) => {
+  if (req.user.role === 'coach') return res.redirect('/coach');
+  if (!req.user.remoteProgramId) return res.redirect('/');
+  if (req.user.viewAs) return res.redirect('/program');
+  const p = getProgram(req.user.remoteProgramId);
+  if (!p) return res.redirect('/');
+  const liftingId = db.prepare('SELECT lifting_program_id FROM remote_programs WHERE id = ?').get(p.id);
+  const lifting = getLifting(liftingId && liftingId.lifting_program_id);
+  if (!lifting) return res.redirect('/program?sub=lifting');
+  const today = chiToday();
+  const days = (Array.isArray(lifting.days) ? lifting.days : [])
+    .filter((d) => (Array.isArray(d.exercises) ? d.exercises : []).some((ex) => String((ex && ex.name) || '').trim()));
+  const ldayIdx = days.length ? Math.max(0, Math.min(days.length - 1, parseInt(req.query.lday, 10) || 0)) : 0;
+  const wd = buildWorkoutDay(req.user.id, lifting, ldayIdx, today);
+  if (!wd.day) return res.redirect('/program?sub=lifting');
+  res.send(views.workoutPage(req.user, p, wd, ldayIdx));
+});
+
 // Athlete (or Bobby via the program edit page) picks which runs first in a
 // session: hitting or lifting. Tabs reorder to match.
 app.post('/program/session-order', requireLogin, requireWaiver, (req, res) => {
@@ -2044,26 +2140,26 @@ function videoLibMap() {
 // Check off / log a program item. Posts from the athlete's Programs tab:
 // kind=hit|mob|med|lift, item_key, plus weight/rpe for lifts. Re-posting an
 // already-done item updates it (lift log); posting with no payload clears it.
-app.post('/program/check', requireLogin, requireWaiver, (req, res) => {
-  if (req.user.role === 'coach') return res.status(403).send('Coaches cannot log program work.');
-  if (!req.user.remoteProgramId) return res.status(403).send('No program assigned.');
-  if (req.user.viewAs) return res.status(403).send('View-as is read-only.');
-  const kind = String(req.body.kind || '').slice(0, 10);
-  const itemKey = String(req.body.item_key || '').slice(0, 300);
-  const sub = String(req.body.sub || 'hitting').slice(0, 20);
-  const day = String(req.body.day || '').slice(0, 30);
-  if (!kind || !itemKey) return res.redirect('/program');
+// Shared program-logging core (Sep 23 2026): the classic form POST
+// (/program/check, redirects back) and the workout-mode JSON API
+// (/api/program/log, no reload) run through this. Body fields: kind,
+// item_key, lift_op (set/unset/addset/rpe), set_idx, set_weight, set_reps,
+// prog_sets, prog_reps, weight, rpe.
+function applyProgramLog(userId, body) {
+  const kind = String(body.kind || '').slice(0, 10);
+  const itemKey = String(body.item_key || '').slice(0, 300);
+  if (!kind || !itemKey) return { ok: false, error: 'missing' };
   const today = chiToday();
   const existing = db
     .prepare('SELECT * FROM program_checkoffs WHERE user_id = ? AND day = ? AND item_key = ?')
-    .get(req.user.id, today, itemKey);
-  const weightRaw = String(req.body.weight || '').trim();
-  const rpeRaw = String(req.body.rpe || '').trim();
+    .get(userId, today, itemKey);
+  const weightRaw = String(body.weight || '').trim();
+  const rpeRaw = String(body.rpe || '').trim();
   const weight = weightRaw === '' ? null : Number(weightRaw);
   const rpe = rpeRaw === '' ? null : Math.max(1, Math.min(10, parseInt(rpeRaw, 10) || 0)) || null;
-  // Hevy-style per-set logging (Sep 2026): lift_op=set/unset/addset/rpe
-  // operate on the sets_json array [{w, r, done}] stored on the checkoff row.
-  const liftOp = String(req.body.lift_op || '').slice(0, 10);
+  // Per-set logging: lift_op=set/unset/addset/rpe operate on the sets_json
+  // array [{w, r, done}] stored on the checkoff row.
+  const liftOp = String(body.lift_op || '').slice(0, 10);
   const getSets = (row) => {
     try {
       const s = JSON.parse(row && row.sets_json ? row.sets_json : '[]');
@@ -2073,31 +2169,32 @@ app.post('/program/check', requireLogin, requireWaiver, (req, res) => {
   const saveSets = (rowId, sets) => {
     db.prepare('UPDATE program_checkoffs SET sets_json = ? WHERE id = ?').run(JSON.stringify(sets), rowId);
   };
+  let sets = null, checked = null, rowRpe = null;
   if (kind === 'lift' && liftOp) {
-    const setIdx = Math.max(0, parseInt(req.body.set_idx, 10) || 0);
+    const setIdx = Math.max(0, parseInt(body.set_idx, 10) || 0);
     let row = existing;
     if (!row) {
       const info = db.prepare(
         'INSERT INTO program_checkoffs (user_id, day, kind, item_key, created_at) VALUES (?, ?, ?, ?, ?)'
-      ).run(req.user.id, today, kind, itemKey, new Date().toISOString());
+      ).run(userId, today, kind, itemKey, new Date().toISOString());
       row = { id: info.lastInsertRowid, sets_json: null };
     }
-    const sets = getSets(row);
+    sets = getSets(row);
     // First touch on an exercise with no set array yet: seed the programmed
-    // sets (hidden prog_sets / prog_reps fields from the lift card) so a
-    // check tap on set 1 never lands on an empty row.
+    // sets so logging set 1 never lands on an empty row.
     const seedProgrammedSets = () => {
       if (sets.length) return;
-      const n = Math.max(1, Math.min(20, parseInt(req.body.prog_sets, 10) || 3));
-      const pr = String(req.body.prog_reps || '').trim();
+      const n = Math.max(1, Math.min(20, parseInt(body.prog_sets, 10) || 3));
+      const pr = String(body.prog_reps || '').trim();
       for (let i = 0; i < n; i++) sets.push({ w: null, r: pr === '' ? null : parseInt(pr, 10) || null, done: 0 });
     };
     if (liftOp === 'addset') {
-      const repsRaw = String(req.body.reps || '').trim();
+      const repsRaw = String(body.reps || '').trim();
       sets.push({ w: null, r: repsRaw === '' ? null : parseInt(repsRaw, 10) || null, done: 0 });
       saveSets(row.id, sets);
     } else if (liftOp === 'rpe') {
       db.prepare('UPDATE program_checkoffs SET rpe = ? WHERE id = ?').run(rpe, row.id);
+      rowRpe = rpe;
     } else if (liftOp === 'set' || liftOp === 'unset') {
       seedProgrammedSets();
       if (sets[setIdx]) {
@@ -2105,8 +2202,8 @@ app.post('/program/check', requireLogin, requireWaiver, (req, res) => {
           sets[setIdx].done = 0;
         } else {
           // set: record weight/reps and mark the set done.
-          const sw = String(req.body.set_weight || '').trim();
-          const sr = String(req.body.set_reps || '').trim();
+          const sw = String(body.set_weight || '').trim();
+          const sr = String(body.set_reps || '').trim();
           sets[setIdx].w = sw === '' ? sets[setIdx].w : Number(sw);
           sets[setIdx].r = sr === '' ? sets[setIdx].r : parseInt(sr, 10) || null;
           sets[setIdx].done = 1;
@@ -2114,18 +2211,33 @@ app.post('/program/check', requireLogin, requireWaiver, (req, res) => {
         saveSets(row.id, sets);
       }
     }
+    checked = sets.length > 0 && sets.every((s) => s.done);
   } else if (existing) {
     // Already done: with a lift log payload, update it; otherwise toggle off.
     if (kind === 'lift' && (weight !== null || rpe !== null)) {
       db.prepare('UPDATE program_checkoffs SET weight = ?, rpe = ? WHERE id = ?').run(weight, rpe, existing.id);
+      checked = true;
     } else {
       db.prepare('DELETE FROM program_checkoffs WHERE id = ?').run(existing.id);
+      checked = false;
     }
   } else {
     db.prepare(
       'INSERT INTO program_checkoffs (user_id, day, kind, item_key, weight, rpe, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).run(req.user.id, today, kind, itemKey, weight, rpe, new Date().toISOString());
+    ).run(userId, today, kind, itemKey, weight, rpe, new Date().toISOString());
+    checked = true;
   }
+  return { ok: true, sets, checked, rpe: rowRpe };
+}
+
+app.post('/program/check', requireLogin, requireWaiver, (req, res) => {
+  if (req.user.role === 'coach') return res.status(403).send('Coaches cannot log program work.');
+  if (!req.user.remoteProgramId) return res.status(403).send('No program assigned.');
+  if (req.user.viewAs) return res.status(403).send('View-as is read-only.');
+  const sub = String(req.body.sub || 'hitting').slice(0, 20);
+  const day = String(req.body.day || '').slice(0, 30);
+  const r = applyProgramLog(req.user.id, req.body);
+  if (!r.ok) return res.redirect('/program');
   const back =
     '/program?sub=' +
     encodeURIComponent(sub) +
@@ -2134,6 +2246,15 @@ app.post('/program/check', requireLogin, requireWaiver, (req, res) => {
       ? '&lday=' + encodeURIComponent(String(req.body.lday))
       : '');
   res.redirect(back);
+});
+
+// Workout-mode JSON logging (Sep 23 2026): same core as /program/check,
+// no page reload. JSON body: {kind, item_key, lift_op, ...}.
+app.post('/api/program/log', requireLogin, requireWaiver, (req, res) => {
+  if (req.user.role === 'coach') return res.status(403).json({ ok: false, error: 'coaches cannot log' });
+  if (!req.user.remoteProgramId) return res.status(403).json({ ok: false, error: 'no program' });
+  if (req.user.viewAs) return res.status(403).json({ ok: false, error: 'read-only' });
+  res.json(applyProgramLog(req.user.id, req.body || {}));
 });
 
 // ---- Athlete self-substitution (Sep 2026) ----
@@ -3260,9 +3381,19 @@ app.post('/coach/lifting/create', requireLiftingCoach, (req, res) => {
   const name = String(req.body.name || '').trim().slice(0, 80);
   if (!name) return res.redirect('/coach/lifting');
   const isTemplate = req.body.is_template ? 1 : 0;
+  // Program names are unique — re-render with an error instead of a 500.
+  const dup = db.prepare('SELECT id FROM lifting_programs WHERE name = ?').get(name);
+  if (dup) {
+    return res.send(views.liftingProgramsPage(req.user, {
+      templates: liftingProgramsList().filter((l) => l.is_template),
+      programs: liftingProgramsList().filter((l) => !l.is_template),
+      assignments: remoteProgramList(),
+      error: 'A program named \u201C' + name + '\u201D already exists — pick a different name.',
+    }));
+  }
   const info = db
     .prepare('INSERT INTO lifting_programs (name, is_template, program_json, updated_at) VALUES (?, ?, ?, ?)')
-    .run(name, JSON.stringify({ days: [{ label: 'Day A', exercises: [] }], notes: [] }), new Date().toISOString());
+    .run(name, isTemplate, JSON.stringify({ days: [{ label: 'Day A', exercises: [] }], notes: [] }), new Date().toISOString());
   res.redirect('/coach/lifting/' + info.lastInsertRowid + '/edit');
 });
 // Assign a template to an athlete: copies the template into a private,
@@ -3367,11 +3498,59 @@ app.get('/coach/lifting/:id/edit', requireLiftingCoach, (req, res) => {
   if (!lp) return res.redirect('/coach/lifting');
   res.send(views.liftingEditPage(req.user, lp));
 });
+// Sanitize the state-driven lifting editor's program JSON (Sep 23 2026).
+// Days carry label, warmup[], speed[]/medball[] ({name, volume, notes,
+// video}) and exercises[] ({name, sets, reps, target_rpe, rest, notes,
+// video}). Anything malformed is dropped, never trusted.
+function sanitizeLiftingDays(rawDays) {
+  const cleanUrl = (u) => {
+    const s = String(u || '').trim().slice(0, 300);
+    return /^https?:\/\//i.test(s) ? s : '';
+  };
+  const cleanBlock = (arr) => (Array.isArray(arr) ? arr : []).slice(0, 12)
+    .map((s) => ({
+      name: String((s && s.name) || '').trim().slice(0, 120),
+      volume: String((s && s.volume) || '').trim().slice(0, 60),
+      notes: String((s && s.notes) || '').trim().slice(0, 200),
+      video: cleanUrl(s && s.video),
+    }))
+    .filter((s) => s.name);
+  return (Array.isArray(rawDays) ? rawDays : []).slice(0, 14).map((d, i) => ({
+    label: String((d && d.label) || '').trim().slice(0, 40) || ('Day ' + String.fromCharCode(65 + i)),
+    warmup: views.normWarmup(d && d.warmup)
+      .map((w) => String(w).trim().slice(0, 200)).filter(Boolean).slice(0, 20),
+    speed: cleanBlock(d && d.speed),
+    medball: cleanBlock(d && d.medball),
+    exercises: (Array.isArray(d && d.exercises) ? d.exercises : []).slice(0, 40).map((e) => {
+      const trpe = Number(e && e.target_rpe);
+      return {
+        name: String((e && e.name) || '').trim().slice(0, 120),
+        sets: String((e && e.sets) || '').trim().slice(0, 12),
+        reps: String((e && e.reps) || '').trim().slice(0, 24),
+        target_rpe: trpe >= 1 && trpe <= 10 ? trpe : '',
+        rest: Math.max(15, Math.min(600, parseInt(e && e.rest, 10) || 120)),
+        notes: String((e && e.notes) || '').trim().slice(0, 200),
+        video: cleanUrl(e && e.video),
+      };
+    }).filter((e) => e.name),
+  }));
+}
+
 app.post('/coach/lifting/:id/save', requireLiftingCoach, (req, res) => {
   const lp = getLifting(req.params.id);
   if (!lp) return res.redirect('/coach/lifting');
   const name = String(req.body.name || '').trim().slice(0, 80) || lp.name;
-  const days = [];
+  // State-driven editor (Sep 23 2026) posts the whole program as JSON.
+  // Legacy per-field parsing remains as the fallback.
+  let days = null;
+  if (req.body.program_json) {
+    try {
+      const parsed = JSON.parse(req.body.program_json);
+      if (parsed && Array.isArray(parsed.days)) days = sanitizeLiftingDays(parsed.days);
+    } catch (e) { /* fall through to legacy parsing */ }
+  }
+  if (!days) {
+  days = [];
   for (let i = 0; i < 14; i++) {
     const label = String(req.body['lday_' + i + '_label'] || '').trim().slice(0, 40);
     const exCount = req.body['lday_' + i + '_excount'];
@@ -3405,10 +3584,18 @@ app.post('/coach/lifting/:id/save', requireLiftingCoach, (req, res) => {
     const medball = parseBlock('lday_' + i + '_medball');
     days.push({ label: label || ('Day ' + String.fromCharCode(65 + i)), warmup, speed, medball, exercises });
   }
+  }
+  const finalName = name.replace(/\s*\(DRAFT\)\s*$/i, '').trim() || name;
+  // Renaming onto an existing program name would 500 on the UNIQUE index —
+  // re-render the editor with the clash flagged so nothing is lost.
+  const clash = db.prepare('SELECT id FROM lifting_programs WHERE name = ? AND id != ?').get(finalName, lp.id);
+  if (clash) {
+    return res.send(views.liftingEditPage(req.user, { ...lp, name, days }, { error: 'A program named \u201C' + finalName + '\u201D already exists — pick a different name.' }));
+  }
   db.prepare('UPDATE lifting_programs SET name = ?, program_json = ?, updated_at = ? WHERE id = ?').run(
     // Saving clears the intake-draft marker — Bobby has reviewed the program.
     // Other JSON fields (progression read, block index) are preserved.
-    name.replace(/\s*\(DRAFT\)\s*$/i, '').trim() || name,
+    finalName,
     JSON.stringify({ ...lp, days, notes: lp.notes, draft: false }),
     new Date().toISOString(),
     lp.id
@@ -3882,12 +4069,18 @@ function buildLiftingDraft(a, opts) {
       days.push(d);
     }
   } else {
-    // Upper/lower split, 4 days: lower strength / upper strength / lower explosive / upper explosive.
+    // Kelly's 4-day offseason split (evidenced from @kelly.training, all 404 reels).
+    // Day 4 = Unilateral Lower ALONE ON PURPOSE: "every swing, every sprint, every
+    // throw happens from a single-leg stance. If you never train that leg alone under
+    // heavy load, you are leaving the most important position in the game completely untrained."
+    // Session order every day: power (rotational/jump, max intent) -> strength mains ->
+    // rotational accessories -> brakes. (Jenkins/Miller: trap-bar jumps @50% BW, drop-catch
+    // split jumps, ISO->explosive potentiation, cable rotations, DB trunk rotations.)
     const plans = [
-      ['Lower — Strength', [['rotational', 'power'], ['squat', 'main'], ['unilateral', 'main'], ['hinge', 'acc'], ['core', 'acc']]],
-      ['Upper — Strength', [['rotational', 'power'], ['push_h', 'main'], ['pull_h', 'main'], ['push_v', 'acc'], ['pull_v', 'acc']]],
-      ['Lower — Explosive', [['jump', 'power'], ['hinge', 'main'], ['unilateral', 'acc'], ['squat', 'acc'], ['core', 'acc']]],
-      ['Upper — Explosive', [['rotational', 'power'], ['push_v', 'main'], ['pull_v', 'main'], ['push_h', 'acc'], ['core', 'acc']]],
+      ['Upper — Horizontal Press + Vertical Pull', [['rotational', 'power'], ['push_h', 'main'], ['pull_v', 'main'], ['push_h', 'acc'], ['rotational', 'acc']]],
+      ['Lower — Bilateral', [['jump', 'power'], ['squat', 'main'], ['hinge', 'main'], ['unilateral', 'acc'], ['core', 'acc']]],
+      ['Upper — Horizontal Pull + Vertical Press', [['rotational', 'power'], ['pull_h', 'main'], ['push_v', 'main'], ['pull_h', 'acc'], ['core', 'acc']]],
+      ['Lower — Unilateral (single-leg stance)', [['jump', 'power'], ['unilateral', 'main'], ['unilateral', 'main'], ['hinge', 'acc'], ['core', 'acc']]],
     ];
     for (let i = 0; i < n; i++) {
       const [label, plan] = plans[i % plans.length];
@@ -5731,20 +5924,33 @@ app.get('/coach', requireCoachAny, (req, res) => {
   setApprovalCount(req);
   const scope = orgScope(req);
   const sp = scopeParams(scope);
+  const me = realUser(req);
+  const isGlobal = !me.organizationId;
   const stats = coachUserStats(scope);
-  const quiet = coachQuietHitters(stats);
+  // Bobby's dashboard is manage-first and short (Sep 23 2026): his own
+  // programs only — Remote program first, then in-person. No everyone feed.
+  const myStats = isGlobal ? coachUserStats(scope, { mineOnly: true }) : stats;
+  const quiet = coachQuietHitters(isGlobal ? myStats : stats);
   const latest = db
     .prepare(
       `SELECT c.*, u.email AS athlete_email, u.organization_id, o.is_mine AS org_is_mine
        FROM checkins c JOIN users u ON u.id = c.user_id LEFT JOIN organizations o ON o.id = u.organization_id
        WHERE (? IS NULL OR u.organization_id = ?) AND (? IS NULL OR u.team_id = ?)
-       ORDER BY c.created_at DESC LIMIT 8`
+       ${isGlobal ? 'AND o.is_mine = 1' : ''}
+       ORDER BY c.created_at DESC LIMIT 6`
     )
     .all(...sp)
     .map((r) => ({ ...r, coachRestricted: viewerIsOrgCoach(req) && orgIsRestricted(r.organization_id, r.org_is_mine) }));
   const pending = pendingList(scope);
-  const me = realUser(req);
   const analytics = coachAnalytics(scope, stats);
+  // Bobby's programs, split for the manage-first dashboard.
+  // checkedToday powers the green status dot on each row.
+  const todayStr = chiToday();
+  const withToday = (p) => ({ ...p, checkedToday: !!p.last && (() => { try { return chiDay(p.last) === todayStr; } catch (e) { return false; } })() });
+  const myGuys = isGlobal ? {
+    remote: myStats.filter((p) => p.orgName === 'Atkinson Hitter Development System').map(withToday),
+    inPerson: myStats.filter((p) => p.orgName === 'Atkinson Hitting').map(withToday),
+  } : null;
   // Website application leads: global coaches only (Bobby's business).
   // invite_token = an unused questionnaire link already made for this lead.
   let leads = [];
@@ -5754,7 +5960,7 @@ app.get('/coach', requireCoachAny, (req, res) => {
       FROM leads l ORDER BY submitted_at DESC LIMIT 25`).all();
   }
   res.send(
-    views.coachHomePage(me, quiet, latest, pending, userPushSubscriptions(req.user.id).length > 0, analytics, leads)
+    views.coachHomePage(me, quiet, latest, pending, userPushSubscriptions(req.user.id).length > 0, analytics, leads, myGuys)
   );
 });
 

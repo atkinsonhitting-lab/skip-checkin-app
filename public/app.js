@@ -1208,7 +1208,7 @@ document.querySelectorAll('.feel-slider input[type="range"]').forEach((el) => {
     const c = cta();
     done(c.href || null);
   });
-  skipBtn.addEventListener('click', done);
+  skipBtn.addEventListener('click', () => done(null));
   // Swipe support.
   let sx = null;
   ov.addEventListener('touchstart', (e) => { sx = e.touches[0].clientX; }, { passive: true });
@@ -1224,4 +1224,23 @@ document.querySelectorAll('.feel-slider input[type="range"]').forEach((el) => {
   const unhide = () => { document.body.style.overflow = ''; };
   nextBtn.addEventListener('click', unhide, { once: true });
   skipBtn.addEventListener('click', unhide, { once: true });
+})();
+
+// Questionnaire submit (Bobby, Sep 23 2026): plan generation takes ~30s on
+// the server — show a loading state so it never looks frozen.
+(function () {
+  const form = document.getElementById('questionnaire-form');
+  if (!form) return;
+  form.addEventListener('submit', () => {
+    const btn = form.querySelector('button[type="submit"]');
+    if (btn) { btn.disabled = true; btn.textContent = 'Building your plan…'; }
+    let ov = document.getElementById('submit-loading');
+    if (!ov) {
+      ov = document.createElement('div');
+      ov.id = 'submit-loading';
+      document.body.appendChild(ov);
+    }
+    ov.innerHTML = '<div class="submit-loading-card"><div class="spinner"></div><p>Building your plan…</p><p class="hint">This takes about 30 seconds.</p></div>';
+    ov.hidden = false;
+  });
 })();

@@ -129,7 +129,9 @@ async function main() {
     // ---- Branded page rendering (athlete in branded org) ----
     // Re-set branding for the render check (colors only, no logo now).
     await postMp('coach', { primary_color: '#5E0009', accent_color: '#EB002B' }, []);
-    r = await req('GET', '/', null, 'bear');
+    // Athletes are redirected off / to Lock In since Sep 23 2026 — check the
+    // branded topbar on the landing page instead.
+    r = await req('GET', '/mental-game', null, 'bear');
     check('athlete home 200', r.status === 200);
     check('branded topbar shows org name', r.text.includes('Missouri State'));
     check('brand CSS var injected', r.text.includes('--red:#5E0009'));

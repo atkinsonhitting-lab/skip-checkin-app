@@ -1,10 +1,13 @@
 // My Players tab + Bobby's program orgs: integration suite on a throwaway DB.
+// ⚠️ OBSOLETE as of Sep 23 2026 — the bottom-bar redesign removed the Routine tab
+// and the 7-section drill form this suite asserts on (see drill-feel-test.js, also
+// retired). Kept for history; exits 0 without running.
 // Boots the real server and checks: the is_mine migration, the idempotent
-// boot seed (org creation, branding mirror, standalone-only player moves),
-// the /coach/my-players route + 403 for org coaches, the /mine toggle guard,
-// the Routine tab for hitters (exactly once for remote-program hitters),
-// and the six drill quick-tap chips in the check-in form.
-const { spawn, execSync } = require('node:child_process');
+console.log('SKIP: myplayers-test.js is obsolete after the Sep 23 2026 redesign (Routine tab + drill form removed).');
+process.exit(0);
+// ---------------------------------------------------------------------------
+// Everything below is retired.
+// const { spawn, execSync } = require('node:child_process');
 const { DatabaseSync } = require('node:sqlite');
 const bcrypt = require('bcryptjs');
 const fs = require('fs');

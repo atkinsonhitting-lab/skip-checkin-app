@@ -12,6 +12,14 @@ const ASSET_V = (() => {
   } catch (e) { return 'dev'; }
 })();
 
+// Warm-up normalization (Sep 23 2026): legacy programs store warmup as a plain
+// string; the editor saves an array of lines. Normalize both to string[].
+function normWarmup(w) {
+  if (Array.isArray(w)) return w.map((x) => String(x || '').trim()).filter(Boolean);
+  if (typeof w === 'string') return w.split('\n').map((x) => x.trim()).filter(Boolean);
+  return [];
+}
+
 function esc(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;')
@@ -789,7 +797,7 @@ function combinedCheckinForm(user, error, values, action) {
       <label>What felt good?<span class="talk-wrap"><textarea id="felt_good" name="felt_good" rows="2" placeholder="What clicked today, hitting or throwing?">${esc(v.felt_good || '')}</textarea>${mic('felt_good')}</span></label>
       <label>What was working?<span class="talk-wrap"><textarea id="what_was_working" name="what_was_working" rows="2" placeholder="Which feel, which pitch, which cue?">${esc(v.what_was_working || '')}</textarea>${mic('what_was_working')}</span></label>
       <label>What was your biggest struggle?<span class="talk-wrap"><textarea id="biggest_struggle" name="biggest_struggle" rows="2" placeholder="Be honest — that's what makes the read useful.">${esc(v.biggest_struggle || '')}</textarea>${mic('biggest_struggle')}</span></label>
-      <script src="/checkin.js"></script>
+      <script src="/checkin.js?v=${ASSET_V}"></script>
       <button type="submit" class="btn-primary">${isEdit ? 'Save changes' : 'Submit check-in'}</button>
     </form></div>`,
   });
@@ -866,7 +874,7 @@ function pitchingCheckinForm(user, error, values, action) {
       <label>What felt good?<span class="talk-wrap"><textarea id="felt_good" name="felt_good" rows="2" placeholder="What clicked physically?">${esc(v.felt_good || '')}</textarea>${mic('felt_good')}</span></label>
       <label>What was working?<span class="talk-wrap"><textarea id="what_was_working" name="what_was_working" rows="2" placeholder="Which pitch, which feel, which sequence?">${esc(v.what_was_working || '')}</textarea>${mic('what_was_working')}</span></label>
       <label>What was your biggest struggle?<span class="talk-wrap"><textarea id="biggest_struggle" name="biggest_struggle" rows="2" placeholder="Be honest — that's what makes the read useful.">${esc(v.biggest_struggle || '')}</textarea>${mic('biggest_struggle')}</span></label>
-      <script src="/checkin.js"></script>
+      <script src="/checkin.js?v=${ASSET_V}"></script>
       <button type="submit" class="btn-primary">${isEdit ? 'Save changes' : 'Submit check-in'}</button>
     </form></div>`,
   });
@@ -920,7 +928,7 @@ function preCheckinPage(user, kind, error, v) {
     <form method="post" action="/precheckin" class="form" data-validate="pre">
       <input type="hidden" name="kind" value="${k}">
       ${error ? `<div class="error">${esc(error)}</div>` : ''}
-      <script src="/checkin.js"></script>
+      <script src="/checkin.js?v=${ASSET_V}"></script>
       ${fields}
       <button type="submit" class="btn-primary">Lock it in</button>
     </form></div>`,
@@ -970,20 +978,6 @@ function routinePage(user, drills, error, drillNames, stations) {
 }
 
 const LEARN_CATEGORIES = ['Mechanics', 'Mental', 'Approach', 'Drills', 'Other'];
-
-function sparkline(checkins) {
-  // Bobby, Sep 23 2026: 30-day score trend — the kid sees his arc, not just today.
-  const pts = (checkins || []).filter((c) => c.session_score != null).slice(0, 30).reverse();
-  if (pts.length < 2) return '';
-  const w = 300, h = 64, pad = 6;
-  const step = pts.length > 1 ? (w - pad * 2) / (pts.length - 1) : 0;
-  const y = (v) => h - pad - ((Math.max(1, Math.min(10, v)) - 1) / 9) * (h - pad * 2);
-  const d = pts.map((c, i) => `${i === 0 ? 'M' : 'L'}${(pad + i * step).toFixed(1)},${y(c.session_score).toFixed(1)}`).join(' ');
-  const first = pts[0].session_score, last = pts[pts.length - 1].session_score;
-  const color = last > first ? '#4ade80' : last < first ? '#f87171' : '#fbbf24';
-  const trend = last > first ? 'trending up' : last < first ? 'trending down' : 'holding steady';
-  return `<div class="card spark-card"><div class="spark-head"><span class="spark-label">Last ${pts.length} sessions</span><span class="hint-inline">${trend}</span></div><svg viewBox="0 0 ${w} ${h}" class="sparkline" preserveAspectRatio="none" aria-hidden="true"><path d="${d}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>`;
-}
 
 function notebookPage(user, checkins, notes, players, justSubmitted, filter, extras) {
   const streak = (extras && extras.streak) || null;
@@ -1062,7 +1056,6 @@ function notebookPage(user, checkins, notes, players, justSubmitted, filter, ext
     <div class="subnav"><a href="#checkins">Check-ins</a><a href="#notes">Notes</a></div>
     ${justSubmitted ? `<div class="success">Check-in saved. Good work.</div>` : ''}
     ${streakCard}
-    ${sparkline(checkins)}
     <div id="skips-read" class="skips-read" hidden>
       <div class="skips-read-head"><span class="skips-read-title">👀 Skip's read</span><span class="hint-inline">patterns from your check-ins</span></div>
       <div id="skips-read-body"><p class="hint">Reading your check-ins…</p></div>
@@ -1806,7 +1799,101 @@ function coachOrganizationsPage(user, organizations, error, addedId) {
 
 // Coach Home: "needs your attention" — approvals waiting, hitters gone
 // quiet (no check-in in 3+ Chicago days), and the compact latest feed.
-function coachHomePage(user, quiet, latest, pending, pushOn, analytics, leads) {
+// Coach dashboard for Bobby (Sep 23 2026): manage-first and SHORT.
+// Remote program first, then in-person hitters, then latest check-ins.
+// Nothing else lives on this page — analytics, orgs, and applications
+// sit behind links. Org coaches keep the existing dashboard below.
+function coachHomeManage(user, quiet, latest, pending, pushOn, leads, myGuys) {
+  const g = myGuys || { remote: [], inPerson: [] };
+  const lastTxt = (p) => {
+    if (p.checkedToday) return 'checked in today';
+    if (!p.last) return 'no check-ins yet';
+    const d = Math.max(0, Math.round((Date.now() - new Date(p.last).getTime()) / 864e5));
+    return d <= 1 ? 'last check-in yesterday' : `last check-in ${d}d ago`;
+  };
+  const playerRow = (p) => `<a class="ppl-row" href="/coach/user/${encodeURIComponent(p.email)}">
+      <span class="ppl-dot${p.checkedToday ? ' on' : ''}" aria-hidden="true"></span>
+      <span class="ppl-main"><strong>${esc(p.name)}</strong>
+        <span class="hint-inline">${p.streak ? p.streak + '-day streak · ' : ''}${esc(lastTxt(p))}</span></span>
+      <span class="org-chev" aria-hidden="true">›</span></a>`;
+  const guySection = (title, list) => {
+    if (!list.length) return '';
+    return `<div class="dash-sec-head"><h2 class="section-head" style="margin:0">${title}</h2>
+      <a class="hint-inline" href="/coach/my-players">Manage →</a></div>
+      <div class="card ppl-list">${list.map(playerRow).join('')}</div>`;
+  };
+  const pendingRow = pending && pending.length
+    ? `<a class="ppl-row" href="/coach/approvals"><span class="ppl-dot warn" aria-hidden="true"></span>
+       <span class="ppl-main"><strong>${pending.length} waiting for approval</strong>
+       <span class="hint-inline">tap to review</span></span>
+       <span class="org-chev" aria-hidden="true">›</span></a>` : '';
+  const quietRows = (quiet || []).slice(0, 4).map((a) =>
+    `<a class="ppl-row" href="/coach/user/${encodeURIComponent(a.email)}">
+      <span class="ppl-dot" aria-hidden="true"></span>
+      <span class="ppl-main"><strong>${esc(a.name)}</strong>
+      <span class="hint-inline">gone quiet · ${a.daysAgo}d</span></span>
+      <span class="org-chev" aria-hidden="true">›</span></a>`).join('');
+  const attention = (pendingRow || quietRows)
+    ? `<h2 class="section-head">Needs attention</h2><div class="card ppl-list">${pendingRow}${quietRows}</div>` : '';
+  const checkRows = (latest || []).map((c) =>
+    `<a class="ppl-row" href="${c.athlete_email ? '/coach/user/' + encodeURIComponent(c.athlete_email) : '/coach/hitters'}">
+      <span class="ppl-main"><strong>${esc(c.athlete_name || c.athlete_email || 'Check-in')}</strong>
+      <span class="hint-inline">${esc(fmtDate(c.created_at))}</span></span>
+      ${c.score != null ? `<span class="score-chip">${esc(String(c.score))}</span>` : ''}</a>`).join('');
+  const newLeads = (leads || []).filter((l) => l.status === 'new').length;
+  const canEdit = user.role === 'coach' && user.canEdit !== false;
+  const leadStatusPill = (s) => {
+    const cls = s === 'new' ? 'warn' : s === 'contacted' ? '' : s === 'enrolled' ? 'ok' : 'quiet';
+    return `<span class="badge ${cls}">${esc(s)}</span>`;
+  };
+  const leadCards = (leads || []).map((l) => {
+    const tel = String(l.phone || '').replace(/[^\d+]/g, '');
+    const statusOpts = ['new', 'contacted', 'enrolled', 'archived']
+      .map((s) => `<option value="${s}"${l.status === s ? ' selected' : ''}>${s}</option>`).join('');
+    return `<div class="card athlete-card">
+      <div class="athlete-card-name">${esc(l.name)} ${leadStatusPill(l.status || 'new')}</div>
+      <div class="athlete-card-meta">${l.age_level ? `${esc(l.age_level)} · ` : ''}applied ${fmtDate(l.submitted_at)}</div>
+      ${l.goals ? `<div class="hint" style="margin-top:4px">${esc(l.goals)}</div>` : ''}
+      <div style="display:flex;gap:8px;margin:8px 0 0;flex-wrap:wrap;align-items:center">
+        ${tel ? `<a class="btn-small" href="tel:${esc(tel)}">Call</a><a class="btn-small btn-quiet" href="sms:${esc(tel)}">Text</a>` : ''}
+        ${canEdit ? `<form method="post" action="/coach/leads/${l.id}/questionnaire" style="margin:0">
+          <button class="btn-small" type="submit">${l.invite_token ? 'Questionnaire link' : 'Send questionnaire'}</button>
+        </form>` : ''}
+        ${canEdit ? `<form method="post" action="/coach/leads/${l.id}/status" style="margin:0;display:flex;gap:6px;align-items:center">
+          <select name="status" aria-label="Lead status">${statusOpts}</select>
+          <button class="btn-small btn-quiet" type="submit">Update</button>
+        </form>` : ''}
+      </div></div>`;
+  }).join('');
+  return layout({
+    title: 'Coach Dashboard',
+    user,
+    tabs: coachTabs('home', user.approvalCount, user),
+    body: `<h1 class="page-title">Coach Dashboard</h1>
+    ${pushOn ? '' : '<div class="card push-card"><p style="margin:0 0 10px"><strong>Turn on notifications</strong> <span class="hint">so you never miss an approval, a check-in, or a message.</span></p><p style="margin:0"><button type="button" class="btn-primary" id="push-enable-btn" style="margin-top:0">Turn on notifications</button></p></div>'}
+    ${attention}
+    ${guySection('Remote program', g.remote)}
+    ${guySection('In-person hitters', g.inPerson)}
+    ${checkRows ? `<h2 class="section-head">Latest check-ins</h2><div class="card ppl-list">${checkRows}</div>` : ''}
+    <h2 class="section-head">More</h2>
+    <div class="card ppl-list">
+      <details class="more-leads"><summary class="ppl-row" style="cursor:pointer;list-style:none">
+        <span class="ppl-main"><strong>Website applications</strong>
+        <span class="hint-inline">${newLeads ? newLeads + ' new' : 'none new'}</span></span>
+        <span class="org-chev" aria-hidden="true">›</span></summary>
+        <div class="more-leads-body">${leadCards || '<p class="hint">No applications yet.</p>'}</div>
+      </details>
+      <a class="ppl-row" href="/coach/organizations"><span class="ppl-main"><strong>Organizations</strong></span><span class="org-chev" aria-hidden="true">›</span></a>
+      <a class="ppl-row" href="/coach/lifting"><span class="ppl-main"><strong>Lifting programs</strong></span><span class="org-chev" aria-hidden="true">›</span></a>
+      <a class="ppl-row" href="/coach/messages"><span class="ppl-main"><strong>Messages</strong>${user.unreadMessages ? ` <span class="tab-badge">${esc(String(user.unreadMessages))}</span>` : ''}</span><span class="org-chev" aria-hidden="true">›</span></a>
+    </div>`,
+  });
+}
+
+function coachHomePage(user, quiet, latest, pending, pushOn, analytics, leads, myGuys) {
+  // Bobby's manage-first dashboard (Sep 23 2026): short page, his programs
+  // only. Org coaches keep the full dashboard below.
+  if (myGuys && !user.organizationId) return coachHomeManage(user, quiet, latest, pending, pushOn, leads, myGuys);
   const canEdit = user.role === 'coach' && user.canEdit !== false;
   // Organization coaches see which program (and team) they're scoped to.
   const orgBanner = user.role === 'coach' && user.organizationName
@@ -1895,7 +1982,7 @@ function coachHomePage(user, quiet, latest, pending, pushOn, analytics, leads) {
             <button class="btn-small btn-quiet" type="submit">Update</button>
           </form>` : ''}
         </div>
-      </div>`;
+      </details>`;
     })
     .join('');
   const leadsSection = isGlobal
@@ -1997,39 +2084,74 @@ function coachHittersPage(user, userStats, opts) {
 // Player inbox (Sep 17 2026): broadcasts + 1:1 with the coach, chronological.
 // The "Message Coach" box only renders for Bobby's own players; everyone else
 // just sees their (empty) inbox.
+// iMessage-style messaging (Sep 23 2026, Bobby): blue sent bubbles,
+// gray received bubbles, day dividers, sticky input bar. Shared by the
+// athlete thread and the coach 1:1 thread.
+function imsgInitials(name) {
+  const parts = String(name || '?').trim().split(/\s+/);
+  return ((parts[0] || '?')[0] + ((parts[1] || '')[0] || '')).toUpperCase();
+}
+function imsgDayLabel(iso) {
+  try {
+    const tz = 'America/Chicago';
+    const key = new Date(iso).toLocaleDateString('en-CA', { timeZone: tz });
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: tz });
+    const yest = new Date(Date.now() - 864e5).toLocaleDateString('en-CA', { timeZone: tz });
+    if (key === today) return 'Today';
+    if (key === yest) return 'Yesterday';
+    return new Date(iso).toLocaleDateString('en-US', { timeZone: tz, weekday: 'short', month: 'short', day: 'numeric' });
+  } catch (e) { return ''; }
+}
+function imsgTime(iso) {
+  try {
+    return new Date(iso).toLocaleTimeString('en-US', { timeZone: 'America/Chicago', hour: 'numeric', minute: '2-digit' });
+  } catch (e) { return ''; }
+}
+function imsgAttach(m) {
+  if (!m.attachment_path) return '';
+  const url = `/msg-attachments/${esc(m.attachment_path)}`;
+  if (m.attachment_type === 'video') {
+    return `<video src="${url}" controls playsinline preload="metadata" class="imsg-media"></video>`;
+  }
+  return `<img src="${url}" alt="Attachment" class="imsg-media" loading="lazy">`;
+}
+function imsgBubbles(meId, msgs) {
+  let lastDay = '';
+  return (msgs || []).map((m) => {
+    const mine = m.sender_id === meId;
+    let day = '';
+    try {
+      const k = new Date(m.created_at).toLocaleDateString('en-CA', { timeZone: 'America/Chicago' });
+      if (k !== lastDay) { lastDay = k; day = `<div class="imsg-day"><span>${esc(imsgDayLabel(m.created_at))}</span></div>`; }
+    } catch (e) {}
+    const inner = `${m.body ? `<div class="imsg-text">${linkify(m.body)}</div>` : ''}${imsgAttach(m)}`;
+    if (!inner) return day;
+    return `${day}<div class="imsg-row${mine ? ' mine' : ''}">
+      <div class="imsg-bubble">${inner}</div></div>
+      <div class="imsg-ts${mine ? ' mine' : ''}">${esc(imsgTime(m.created_at))}</div>`;
+  }).join('');
+}
+
 function playerMessagesPage(user, msgs, opts) {
   const o = opts || {};
-  const attachHtml = (m) => {
-    if (!m.attachment_path) return '';
-    const url = `/msg-attachments/${esc(m.attachment_path)}`;
-    if (m.attachment_type === 'video') {
-      return `<video src="${url}" controls playsinline preload="metadata" style="width:100%;border-radius:8px;margin-top:8px;max-height:320px;background:#000"></video>`;
-    }
-    return `<img src="${url}" alt="Attachment" style="width:100%;border-radius:8px;margin-top:8px">`;
-  };
-  const cards = msgs
-    .map((m) => {
-      const mine = m.sender_id === user.id;
-      return `<div class="card"><p style="margin:0 0 6px"><strong>${mine ? 'You' : 'Coach'}</strong> <span class="hint-inline">${fmtDate(m.created_at)}</span></p>${m.body ? `<p style="margin:0">${linkify(m.body)}</p>` : ''}${attachHtml(m)}</div>`;
-    })
-    .join('');
   return layout({
     title: 'Messages',
     user,
     tabs: userTabs('messages', user),
-    body: `<h1 class="page-title">Messages</h1>
-    ${o.nudge ? `<div class="card push-card"><p style="margin:0 0 10px"><strong>Turn on notifications</strong> <span class="hint">so you never miss a message from Coach.</span></p><p style="margin:0"><button type="button" class="btn-primary" id="push-enable-btn" style="margin-top:0">Turn on notifications</button></p></div>` : ''}
-    ${o.error ? `<p class="error">${esc(o.error)}</p>` : ''}
-    ${o.canMessage ? `<div class="card"><form method="post" action="/messages/to-coach" enctype="multipart/form-data">
-      <label>Message Coach <span class="hint-inline">(500 characters max)</span>
-        <textarea name="body" maxlength="500" rows="3" style="width:100%;box-sizing:border-box" placeholder="Ask Bobby anything…">${esc(o.prefill || '')}</textarea>
-      </label>
-      <label style="display:block;margin-top:8px">📎 Attach a swing video or photo
-        <input type="file" name="attachment" accept="video/mp4,video/quicktime,video/webm,image/*" style="margin-top:4px">
-      </label>
-      <button class="btn-primary" type="submit" style="margin-top:8px">Send</button>
-    </form></div>` : ''}
-    ${cards || '<div class="card empty">No messages yet.</div>'}`,
+    body: `<div class="imsg">
+    <div class="imsg-head"><span class="imsg-avatar">${esc(imsgInitials('Coach'))}</span>
+      <strong>Coach</strong></div>
+    ${o.nudge ? `<div class="card push-card" style="margin:10px 14px 0"><p style="margin:0 0 10px"><strong>Turn on notifications</strong> <span class="hint">so you never miss a message from Coach.</span></p><p style="margin:0"><button type="button" class="btn-primary" id="push-enable-btn" style="margin-top:0">Turn on notifications</button></p></div>` : ''}
+    ${o.error ? `<p class="error" style="margin:10px 14px 0">${esc(o.error)}</p>` : ''}
+    <div class="imsg-list" id="imsg-list">${imsgBubbles(user.id, msgs) || '<div class="imsg-empty">No messages yet — say hey to Coach.</div>'}</div>
+    ${o.canMessage ? `<form class="imsg-bar" method="post" action="/messages/to-coach" enctype="multipart/form-data">
+      <label class="imsg-clip" aria-label="Attach a video or photo">📎
+        <input type="file" name="attachment" accept="video/mp4,video/quicktime,video/webm,image/*" hidden></label>
+      <input class="imsg-input" name="body" maxlength="500" placeholder="Message Coach" autocomplete="off" value="${esc(o.prefill || '')}">
+      <button class="imsg-send" type="submit" aria-label="Send">↑</button>
+    </form>` : ''}
+    </div>
+    <script>(function(){var l=document.getElementById('imsg-list');if(l)l.scrollTop=l.scrollHeight;})();</script>`,
   });
 }
 
@@ -2039,13 +2161,14 @@ function coachMessagesPage(user, threads, opts) {
   const o = opts || {};
   const rows = threads
     .map(
-      (t) => `<a href="/coach/messages/${t.id}" class="card" style="display:block;color:inherit;text-decoration:none">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
-          <strong>${esc(t.name)}</strong>
-          ${t.unread ? `<span class="tab-badge">${t.unread}</span>` : ''}
-        </div>
-        <p class="hint" style="margin:6px 0 0">${esc(t.last.body.slice(0, 80))}${t.last.body.length > 80 ? '…' : ''} <span class="hint-inline">· ${fmtDate(t.last.created_at)}</span></p>
-      </a>`
+      (t) => `<a href="/coach/messages/${t.id}" class="imsg-thread-row">
+        <span class="imsg-avatar">${esc(imsgInitials(t.name))}</span>
+        <span class="imsg-thread-main">
+          <span class="imsg-thread-top"><strong>${esc(t.name)}</strong>
+            <span class="hint-inline">${esc(imsgTime(t.last.created_at))}</span></span>
+          <span class="imsg-thread-sub"><span>${t.last.attachment_type === 'video' ? '🎥 Video' : esc(t.last.body.slice(0, 60))}${t.last.body.length > 60 ? '…' : ''}</span>
+            ${t.unread ? `<span class="imsg-unread">${t.unread}</span>` : ''}</span>
+        </span></a>`
     )
     .join('');
   return layout({
@@ -2055,13 +2178,10 @@ function coachMessagesPage(user, threads, opts) {
     body: `<h1 class="page-title">Messages</h1>
     <p style="margin:0 0 14px"><a class="btn-primary" href="/coach/messages/new" style="text-decoration:none;display:inline-block">New message</a></p>
     ${o.sent ? `<p class="notice"><strong>Sent</strong> to ${esc(String(o.sent))} player${String(o.sent) === '1' ? '' : 's'}.</p>` : ''}
-    ${rows || '<div class="card empty">No message threads yet. Tap New message to start one.</div>'}`,
+    <div class="card imsg-thread-list">${rows || '<div class="card empty">No message threads yet. Tap New message to start one.</div>'}</div>`,
   });
 }
 
-// Coach compose (Sep 17 2026, redesign): clean "New message" screen. Bobby
-// picks "All my players" (one tap) or "Choose players" — a compact
-// searchable checkbox list in a scrollable box with Select all / Clear.
 function coachComposePage(user, players, opts) {
   const o = opts || {};
   const list = (players || [])
@@ -2131,41 +2251,27 @@ function coachComposePage(user, players, opts) {
 function coachThreadPage(user, other, msgs, opts) {
   const o = opts || {};
   const canReply = user.canEdit !== false;
-  const attachHtml = (m) => {
-    if (!m.attachment_path) return '';
-    const url = `/msg-attachments/${esc(m.attachment_path)}`;
-    if (m.attachment_type === 'video') {
-      return `<video src="${url}" controls playsinline preload="metadata" style="width:100%;border-radius:8px;margin-top:8px;max-height:320px;background:#000"></video>`;
-    }
-    return `<img src="${url}" alt="Attachment" style="width:100%;border-radius:8px;margin-top:8px">`;
-  };
-  const cards = msgs
-    .map((m) => {
-      const mine = m.sender_id === user.id;
-      return `<div class="card"><p style="margin:0 0 6px"><strong>${mine ? 'You' : esc(other.name)}</strong> <span class="hint-inline">${fmtDate(m.created_at)}</span></p>${m.body ? `<p style="margin:0">${linkify(m.body)}</p>` : ''}${attachHtml(m)}</div>`;
-    })
-    .join('');
   return layout({
     title: 'Messages',
     user,
     tabs: coachTabs('messages', user.approvalCount, user),
-    body: `<h1 class="page-title">${esc(other.name)}</h1>
-    <p class="hint"><a href="/coach/messages">← All messages</a></p>
-    ${o.error ? `<p class="error">${esc(o.error)}</p>` : ''}
-    ${cards || '<div class="card empty">No messages yet.</div>'}
-    ${canReply ? `<div class="card"><form method="post" action="/coach/messages/to/${other.id}" enctype="multipart/form-data">
-      <label>Reply <span class="hint-inline">(500 characters max)</span>
-        <textarea name="body" maxlength="500" rows="3" style="width:100%;box-sizing:border-box"></textarea>
-      </label>
-      <label style="display:block;margin-top:8px">📎 Attach a video or photo
-        <input type="file" name="attachment" accept="video/mp4,video/quicktime,video/webm,image/*" style="margin-top:4px">
-      </label>
-      <button class="btn-primary" type="submit" style="margin-top:8px">Send</button>
-    </form></div>` : ''}`,
+    body: `<div class="imsg">
+    <div class="imsg-head"><a class="imsg-back" href="/coach/messages" aria-label="Back to messages">‹</a>
+      <span class="imsg-avatar">${esc(imsgInitials(other.name))}</span>
+      <strong>${esc(other.name)}</strong></div>
+    ${o.error ? `<p class="error" style="margin:10px 14px 0">${esc(o.error)}</p>` : ''}
+    <div class="imsg-list" id="imsg-list">${imsgBubbles(user.id, msgs) || '<div class="imsg-empty">No messages yet.</div>'}</div>
+    ${canReply ? `<form class="imsg-bar" method="post" action="/coach/messages/to/${other.id}" enctype="multipart/form-data">
+      <label class="imsg-clip" aria-label="Attach a video or photo">📎
+        <input type="file" name="attachment" accept="video/mp4,video/quicktime,video/webm,image/*" hidden></label>
+      <input class="imsg-input" name="body" maxlength="500" placeholder="Message" autocomplete="off">
+      <button class="imsg-send" type="submit" aria-label="Send">↑</button>
+    </form>` : ''}
+    </div>
+    <script>(function(){var l=document.getElementById('imsg-list');if(l)l.scrollTop=l.scrollHeight;})();</script>`,
   });
 }
 
-// Coach Programs tab: the remote program list.
 function coachProgramsPage(user, remotePrograms, intake) {
   const canEdit = user.role === 'coach' && user.canEdit !== false;
   return layout({
@@ -2201,7 +2307,7 @@ function intakeSection(intake, canEdit) {
           <a class="btn btn-sm" href="/coach/intake/${r.id}">View answers</a>
           ${r.remote_program_id ? `<a class="btn btn-sm" href="/coach/program/${r.remote_program_id}/edit">Edit draft</a>` : ''}
         </div>
-      </div>`;
+      </details>`;
     })
     .join('');
   return `<h2 class="section-head">New athlete intake</h2>
@@ -2484,7 +2590,7 @@ function programPage(user, p, opts) {
       ? `<h3 class="prog-h3"><span class="flow-num">1</span> Speed — sprints first</h3>\n` +
         (daySpeed.length
           ? `<div class="card routine-group">${daySpeed.map((s) =>
-              checkRow('spd', `spd::${dayScope || ''}::${curDay.label || ''}::${s.name}`, s.name,
+              checkRow('spd', `spd::::${curDay.label || ''}::${s.name}`, s.name,
                 [s.volume, s.notes].filter(Boolean).join(' — '), s.video, ldayExtra)
             ).join('')}</div>`
           : '') +
@@ -2500,7 +2606,7 @@ function programPage(user, p, opts) {
       ? `<h3 class="prog-h3"><span class="flow-num">2</span> Power — med ball</h3>\n` +
         (dayMedball.length
           ? `<div class="card routine-group">${dayMedball.map((s) =>
-              checkRow('med', `med::${dayScope || ''}::${curDay.label || ''}::${s.name}`, s.name,
+              checkRow('med', `med::::${curDay.label || ''}::${s.name}`, s.name,
                 [s.volume, s.notes].filter(Boolean).join(' — '), s.video, ldayExtra)
             ).join('')}</div>`
           : '') +
@@ -2560,6 +2666,56 @@ function programPage(user, p, opts) {
   });
 }
 
+// Workout mode (Sep 23 2026): guided lifting session. One movement at a
+// time — Speed → Med Ball → Lifts — big inputs, one-tap set logging,
+// rest timer, no page reloads. The day JSON rides in window.WO_DAY;
+// /workout.js renders and runs the session.
+function workoutPage(user, program, wd, ldayIdx) {
+  const dayJson = JSON.stringify(wd).replace(/</g, '\\u003c');
+  const lday = Number(ldayIdx) || 0;
+  return layout({
+    title: wd.day.label + ' · Workout',
+    user,
+    tabs: [],
+    body: `<div class="wo">
+      <div class="wo-top">
+        <a class="wo-end" href="/program?sub=lifting&lday=${lday}">✕ End</a>
+        <div class="wo-prog"><div class="wo-bar"><div class="wo-fill" id="wo-fill"></div></div>
+        <div class="wo-count" id="wo-count"></div></div>
+        <div class="wo-day">${esc(wd.day.label)}</div>
+      </div>
+      <div class="wo-seq" id="wo-seq"></div>
+      <main class="wo-body" id="wo-body"></main>
+      <nav class="wo-nav">
+        <button type="button" class="wo-navbtn" id="wo-prev">‹ Prev</button>
+        <button type="button" class="wo-navbtn primary" id="wo-next">Next ›</button>
+      </nav>
+      <div class="wo-rest" id="wo-rest" hidden>
+        <div class="wo-rest-card">
+          <div class="wo-rest-label">Rest</div>
+          <div class="wo-rest-time" id="wo-rest-time">2:00</div>
+          <div class="wo-rest-next" id="wo-rest-next"></div>
+          <div class="wo-rest-btns">
+            <button type="button" class="wo-chipbtn" id="wo-rest-less">−15s</button>
+            <button type="button" class="wo-chipbtn primary" id="wo-rest-skip">Skip</button>
+            <button type="button" class="wo-chipbtn" id="wo-rest-more">+15s</button>
+          </div>
+        </div>
+      </div>
+      <div class="wo-finish" id="wo-finish" hidden>
+        <div class="wo-finish-card">
+          <div class="wo-finish-emoji">🔒</div>
+          <h2>Workout complete</h2>
+          <p class="hint" id="wo-finish-stats"></p>
+          <a class="btn-primary" href="/program?sub=lifting&lday=${lday}" style="display:block;text-align:center;text-decoration:none">Back to program</a>
+        </div>
+      </div>
+    </div>
+    <script>window.WO_DAY = ${dayJson};</script>
+    <script src="/workout.js?v=${ASSET_V}"></script>`,
+  });
+}
+
 // LIFTING sub-tab: day pills, per-exercise check-off + weight/RPE log,
 // target RPE chip, "last time" line, and a compact history view.
 // Warm-up rows render first as their own block (no logging on them).
@@ -2595,12 +2751,13 @@ function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftDat
       return Array.isArray(s) ? s : [];
     } catch (e) { return []; }
   };
-  const warmup = Array.isArray(day.warmup) ? day.warmup : [];
+  const warmup = normWarmup(day.warmup);
   const warmupHtml = warmup.length
     ? `<details class="card warmup-block" open><summary class="routine-summary"><span class="routine-station">Warm-up — do this first</span></summary>
       <ol class="warmup-list">${warmup.map((w) => `<li>${esc(w)}</li>`).join('')}</ol></details>`
     : '';
-  const exRows = realExercises(day.exercises)
+  const realEx = realExercises(day.exercises);
+  const exRows = realEx
     .map((ex) => {
       const name = String(ex.name || '');
       const key = `lift::${dayKey}::${name}`;
@@ -2746,10 +2903,20 @@ function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftDat
       const progressHtml = dispSets.length
         ? `<div class="hint-inline set-progress">${doneSets}/${dispSets.length} sets</div>`
         : '';
-      return `<div class="lift-ex${done ? ' done' : ''}">
+      const sumSub = [sr ? esc(sr) : '', ex.target_rpe ? 'RPE ' + esc(String(ex.target_rpe)) : '',
+        lastSummary ? 'Last: ' + lastSummary : ''].filter(Boolean).join(' · ');
+      return `<details class="lift-ex${done ? ' done' : ''}">
+        <summary class="lift-sum">
+          <span class="lift-dot" aria-hidden="true">${done ? '✓' : '○'}</span>
+          <span class="lift-sum-main">
+            <span class="lift-name">${esc(shown)}</span>
+            ${sumSub ? `<span class="lift-sum-sub">${sumSub}</span>` : ''}
+          </span>
+          ${ex.video ? `<a class="watch-link" href="${esc(ex.video)}" target="_blank" rel="noopener" aria-label="Watch video" onclick="event.stopPropagation()">&#9654;</a>` : ''}
+        </summary>
         <div class="lift-main">
           <div class="lift-name-row">
-            <div class="lift-name">${esc(shown)}${sr ? ` <span class="hint-inline">${esc(sr)}</span>` : ''} ${trpe}${ex.video ? ` <a class="watch-link" href="${esc(ex.video)}" target="_blank" rel="noopener" aria-label="Watch video">&#9654; <span>Watch</span></a>` : ''}</div>
+            <div class="lift-name">${sr ? `<span class="hint-inline">${esc(sr)}</span>` : ''} ${trpe}</div>
             ${progressHtml}
           </div>
           ${subBadge ? `<div class="hint-inline">${subBadge}</div>` : ''}
@@ -2763,11 +2930,18 @@ function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftDat
           <div class="set-actions">${addSetHtml}${rpeHtml}</div>
           <details class="lift-hist"><summary>History</summary>${histHtml}</details>
         </div>
-      </div>`;
+      </details>`;
     })
     .join('');
+  const totalSets = realEx.length;
+  const doneEx = (exRows.match(/<details class="lift-ex done"/g) || []).length;
+  const startBtn = readOnly ? '' : `<a class="start-workout" href="/program/workout?lday=${ldayIdx}">
+    <span class="start-workout-play">▶</span>
+    <span class="start-workout-text"><strong>Start Workout</strong>
+    <span>${doneEx}/${totalSets} exercises done</span></span></a>`;
   return `<div class="day-pills">${pills}</div>
     <h3 class="prog-h3">${esc(dayKey)}</h3>
+    ${startBtn}
     ${warmupHtml}
     ${readOnly ? '<p class="hint">Preview — logging is disabled.</p>' : ''}
     ${exRows || '<div class="card empty">No exercises on this day yet — your coach can add them.</div>'}`;
@@ -2775,7 +2949,7 @@ function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftDat
 
 // Coach: lifting programs overview — templates + per-athlete assignments.
 function liftingProgramsPage(user, data) {
-  const { templates, programs, assignments } = data;
+  const { templates, programs, assignments, error } = data;
   const tplCards = templates
     .map(
       (t) => `<div class="card lift-tpl">
@@ -2817,7 +2991,7 @@ function liftingProgramsPage(user, data) {
                  <button type="submit" class="btn btn-sm">Assign</button>
                </form>`}
         </div>
-      </div>`;
+      </details>`;
     })
     .join('');
   return layout({
@@ -2827,6 +3001,7 @@ function liftingProgramsPage(user, data) {
     body: `<h1 class="page-title">Lifting Programs</h1>
     <p class="lede">Templates are starters — assigning one makes a private copy for that athlete, so tweaks never touch the template or another guy's program.</p>
     <div class="card"><h3 style="margin-top:0">New ${templates.length || programs.length ? 'program' : 'program'}</h3>
+      ${error ? `<p class="error" style="margin:0 0 10px">${esc(error)}</p>` : ''}
       <form method="post" action="/coach/lifting/create" class="inline-form">
         <input name="name" placeholder="Program name" required maxlength="80" style="min-width:200px">
         <label class="hint-inline"><input type="checkbox" name="is_template" value="1"> Save as template</label>
@@ -2893,61 +3068,61 @@ function coachMentalQuestionsPage(user, questions) {
   });
 }
 
-function liftingEditPage(user, lp) {
-  const days = Array.isArray(lp.days) ? lp.days : [];
-  const rpeOpts = (sel) =>
-    `<option value="">—</option>` +
-    Array.from({ length: 10 }, (_, i) => {
-      const v = i + 1;
-      return `<option value="${v}"${String(sel) === String(v) ? ' selected' : ''}>${v}</option>`;
-    }).join('');
-  const dayCards = days
-    .map(
-      (d, i) => `<fieldset class="card lift-day" data-lift-day="${i}">
-        <legend class="lift-day-legend">Day ${i + 1}</legend>
-        <input type="hidden" name="lday_${i}_excount" value="${(d.exercises || []).length}" data-excount>
-        <label class="lift-field">Day label <input name="lday_${i}_label" value="${esc(d.label || '')}" maxlength="40"></label>
-        <label class="lift-field">Warm-up <span class="hint-inline">(one per line — renders first on the day, no logging)</span>
-          <textarea name="lday_${i}_warmup" rows="3" style="width:100%;box-sizing:border-box" placeholder="Jump rope — 2 min&#10;Leg swings — 10 each leg">${esc((d.warmup || []).join('\n'))}</textarea></label>
-        <label class="lift-field">Speed — sprints first <span class="hint-inline">(one per line: Name | volume | notes — the day's opening block)</span>
-          <textarea name="lday_${i}_speed" rows="3" style="width:100%;box-sizing:border-box" placeholder="Build-Up Sprints | 6 x 40 yd | Walk-back recovery">${esc((d.speed || []).map((s) => [s.name, s.volume, s.notes].filter(Boolean).join(' | ')).join('\n'))}</textarea></label>
-        <label class="lift-field">Med ball — power <span class="hint-inline">(one per line: Name | volume | notes — throws after sprints)</span>
-          <textarea name="lday_${i}_medball" rows="3" style="width:100%;box-sizing:border-box" placeholder="Rotational Throw | 3 x 6 each side | Explode through the hips">${esc((d.medball || []).map((s) => [s.name, s.volume, s.notes].filter(Boolean).join(' | ')).join('\n'))}</textarea></label>
-        <div class="lift-ex-list" data-exlist>
-        ${(d.exercises || [])
-          .map(
-            (ex, j) => `<div class="lift-ex-edit" data-exrow>
-              <input name="lex_${i}_${j}_name" value="${esc(ex.name || '')}" placeholder="Exercise" maxlength="120" required>
-              <input name="lex_${i}_${j}_sets" value="${esc(ex.sets || '')}" placeholder="Sets" maxlength="12" class="num">
-              <input name="lex_${i}_${j}_reps" value="${esc(ex.reps || '')}" placeholder="Reps" maxlength="24" class="num">
-              <select name="lex_${i}_${j}_trpe" title="Target RPE">${rpeOpts(ex.target_rpe)}</select>
-              <input name="lex_${i}_${j}_notes" value="${esc(ex.notes || '')}" placeholder="Cue / note" maxlength="200" class="wide">
-              <input name="lex_${i}_${j}_video" value="${esc(ex.video || '')}" placeholder="YouTube link" maxlength="300" class="wide" inputmode="url">
-              <button type="button" class="btn btn-sm btn-danger" data-rmex>✕</button>
-            </div>`
-          )
-          .join('')}
-        </div>
-        <div class="row-actions"><button type="button" class="btn btn-sm" data-addex="${i}">+ Exercise</button>
-        <button type="button" class="btn btn-sm btn-danger" data-rmday>Remove day</button></div>
-      </fieldset>`
-    )
-    .join('');
+// Lifting program editor (Sep 23 2026 rebuild, Bobby): state-driven,
+// one day at a time. Day tabs, structured Speed/Med Ball rows (no pipe
+// syntax), labeled exercise cards with reorder + duplicate + video
+// thumbnails, athlete preview, sticky save bar. State posts as JSON.
+function liftingEditPage(user, lp, opts) {
+  const error = (opts && opts.error) || '';
+  const state = {
+    id: lp.id,
+    name: lp.name || '',
+    is_template: !!lp.is_template,
+    days: (Array.isArray(lp.days) ? lp.days : []).map((d) => ({
+      label: d.label || '',
+      warmup: normWarmup(d.warmup),
+      speed: (Array.isArray(d.speed) ? d.speed : []).map((s) => ({
+        name: s.name || '', volume: s.volume || '', notes: s.notes || '', video: s.video || '',
+      })),
+      medball: (Array.isArray(d.medball) ? d.medball : []).map((s) => ({
+        name: s.name || '', volume: s.volume || '', notes: s.notes || '', video: s.video || '',
+      })),
+      exercises: (Array.isArray(d.exercises) ? d.exercises : []).map((e) => ({
+        name: e.name || '', sets: e.sets || '', reps: e.reps || '',
+        target_rpe: e.target_rpe || '', rest: e.rest || 120,
+        notes: e.notes || '', video: e.video || '',
+      })),
+    })),
+  };
+  const stateJson = JSON.stringify(state).replace(/</g, '\\u003c');
   return layout({
-    title: 'Edit ' + lp.name,
+    title: 'Edit ' + (lp.name || 'program'),
     user,
     tabs: coachTabs('lifting', 0, user),
-    body: `<h1 class="page-title">${lp.is_template ? 'Template' : 'Lifting program'}: ${esc(lp.name)}</h1>
-    <form method="post" action="/coach/lifting/${lp.id}/save" id="lift-form">
-      <div class="card"><label class="lift-field">Program name <input name="name" value="${esc(lp.name)}" maxlength="80" required></label></div>
-      <div id="lift-days">${dayCards}</div>
-      <div class="row-actions" style="margin:12px 0">
-        <button type="button" class="btn" id="lift-add-day">+ Add day</button>
-        <button type="submit" class="btn primary">Save lifting program</button>
-        <a class="btn" href="/coach/lifting">Cancel</a>
+    body: `<h1 class="page-title">${lp.is_template ? 'Template' : 'Lifting program'}</h1>
+    ${error ? `<p class="error" style="margin:0 0 12px">${esc(error)}</p>` : ''}
+    <div class="card le-name"><label>Program name
+      <input id="le-name" value="${esc(lp.name || '')}" maxlength="80" style="width:100%;box-sizing:border-box"></label></div>
+    <div class="le-tabs" id="le-tabs"></div>
+    <div id="le-day"></div>
+    <div class="le-savebar">
+      <a class="btn" href="/coach/lifting">Cancel</a>
+      <button type="button" class="btn" id="le-preview">Preview</button>
+      <button type="button" class="btn primary" id="le-save">Save program</button>
+    </div>
+    <div class="le-preview" id="le-preview-ov" hidden>
+      <div class="le-preview-card">
+        <div class="le-preview-head"><strong>Athlete preview</strong>
+          <button type="button" class="btn btn-sm" id="le-preview-close">Close</button></div>
+        <div id="le-preview-body"></div>
       </div>
+    </div>
+    <form method="post" action="/coach/lifting/${lp.id}/save" id="le-form" hidden>
+      <input type="hidden" name="name" id="le-form-name">
+      <input type="hidden" name="program_json" id="le-form-json">
     </form>
-    <script>window.__liftEditDays = ${days.length};</script>`,
+    <script>window.LIFT_EDIT = ${stateJson};</script>
+    <script src="/lift-editor.js?v=${ASSET_V}"></script>`,
   });
 }
 // Hitter-facing: their daily routine — the every-day blocks of their program.
@@ -3053,7 +3228,7 @@ function mentalGamePage(user, data) {
     </label>`;
   };
   const questionnaireHtml = showQuestionnaire ? `
-    <form method="post" action="/mental-game/save" class="form">
+    <form method="post" action="/mental-game/save" class="form" id="questionnaire-form">
       <div class="card" style="border:2px solid var(--accent)">
         <h2 class="routine-station">Where's your head at?</h2>
         <p class="hint">Answer honestly — Skip builds your personal plan from this.</p>
@@ -4520,6 +4695,7 @@ module.exports = {
   forgotPasswordPage,
   resetPasswordPage,
   programPage,
+  workoutPage,
   programRoutinePage,
   mentalGamePage,
   programEditPage,
@@ -4531,6 +4707,7 @@ module.exports = {
   coachLibraryPage,
   esc,
   linkify,
+  normWarmup,
   settingsPage,
   DRILL_SECTIONS,
   intakeFormPage,
