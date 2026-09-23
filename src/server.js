@@ -1559,8 +1559,9 @@ function showBiblePopupFor(user, bibleStudy) {
 
 app.get('/', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
-  // Athletes land on Mental Game (Sep 23 2026) — it's the hub: today's
-  // exercise, the verse, check-in. Home tab is gone.
+  // Remote hitters land on Programs (Bobby Sep 23 2026) — it's their first
+  // tab. Everyone else lands on Lock In.
+  if (req.user.remoteProgramId) return res.redirect('/program');
   res.redirect('/mental-game');
 });
 

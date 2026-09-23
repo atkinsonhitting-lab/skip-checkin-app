@@ -35,12 +35,12 @@ function fmtDate(iso) {
 // Talk to Skip — one thumb-tap away for hitters. The hamburger drawer keeps
 // every tab (Mental Game, Program, Routine, Videos, Settings); the bar is
 // additive, hitter-only, hidden on desktop where the drawer is the nav.
-const TABBAR_HREFS = ['/', '/checkin', '/messages', '/notebook', '/chat'];
+const TABBAR_HREFS = ['/mental-game', '/checkin', '/messages', '/notebook', '/chat'];
 // Remote-program players already work from their program: the tab bar shows
 // Program in the Messages slot. Messages stays in their sidebar drawer.
 // Bottom tab bar for Bobby's remote hitters only (mobile). Program comes
 // before Check In — the program is the point of the app for these guys.
-const REMOTE_TABBAR_HREFS = ['/', '/program', '/checkin', '/notebook', '/chat'];
+const REMOTE_TABBAR_HREFS = ['/program', '/mental-game', '/checkin', '/notebook', '/chat'];
 // Coach tab bar (Sep 2026, Bobby: Messages in the tab bar instead of Train
 // Skip): Bobby's coaching loop — Home (attention), My Players, Approvals
 // (badge), Messages (badge). Train Skip, Programs, Videos, Finances, and
