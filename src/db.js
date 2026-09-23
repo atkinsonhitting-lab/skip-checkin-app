@@ -1229,6 +1229,72 @@ CREATE TABLE IF NOT EXISTS settings (
       console.log(`Lifting rebuild v3: removed ${removed} generic template(s), added ${added} method template(s).`);
     }
   }
+
+  // Lifting rebuild v4 (Sep 23 2026, Bobby: "make this a real legit lifting
+  // program"). v3 was one flat program; v4 is the full Different Animal
+  // system: monthly triphasic blocks M1 Absorb / M2 Produce / M3 Express on
+  // Kelly's 4-day offseason split, plus the 3-day in-season program.
+  // Five-section session flow (Speed → Power → Strength → Rotational →
+  // Brakes), max-intent markers, contrast pairings with 3-min rest.
+  // Replaces only byte-identical v3 templates; Bobby's customizations and
+  // every athlete's custom program stay untouched.
+  {
+    const done = db.prepare("SELECT value FROM settings WHERE key = 'lifting_rebuild_v4'").get();
+    if (!done) {
+      const { YT_V4, buildPrograms } = require('./lifting_v4');
+      Object.assign(YT, YT_V4);
+      const programs = buildPrograms(YT);
+      const now = new Date().toISOString();
+      let removed = 0;
+      for (const old of LIFTING_TEMPLATES_V3) {
+        const row = db.prepare('SELECT * FROM lifting_programs WHERE name = ? AND is_template = 1').get(old.name);
+        if (!row) continue;
+        let cur = null;
+        try { cur = JSON.parse(row.program_json || '{}'); } catch (e) {}
+        const curDays = cur && Array.isArray(cur.days) ? cur.days : null;
+        if (curDays && JSON.stringify(curDays) === JSON.stringify(old.days) &&
+            JSON.stringify(cur.notes || []) === JSON.stringify(old.notes || [])) {
+          db.prepare('DELETE FROM lifting_programs WHERE id = ?').run(row.id);
+          removed++;
+        }
+      }
+      let added = 0;
+      const ids = {};
+      for (const p of programs) {
+        const exists = db.prepare('SELECT id FROM lifting_programs WHERE name = ? AND is_template = 1').get(p.name);
+        if (!exists) {
+          const r = db.prepare('INSERT INTO lifting_programs (name, is_template, program_json, updated_at) VALUES (?, 1, ?, ?)')
+            .run(p.name, JSON.stringify({ days: p.days, notes: p.notes }), now);
+          ids[p.name] = Number(r.lastInsertRowid);
+          added++;
+        } else { ids[p.name] = exists.id; }
+      }
+      // Point remote athletes at M1 (Absorb) when they have no lifting program
+      // or their program row is gone (replaced template). Custom programs are
+      // never touched.
+      const m1Id = ids['Different Animal — Offseason M1 (Absorb)'];
+      let assigned = 0, kept = 0;
+      if (m1Id) {
+        const today = new Date().toISOString().slice(0, 10);
+        const athletes = db.prepare(
+          `SELECT rp.id AS rp_id, rp.lifting_program_id FROM remote_programs rp
+           JOIN users u ON u.remote_program_id = rp.id`).all();
+        for (const a of athletes) {
+          const cur = a.lifting_program_id
+            ? db.prepare('SELECT id FROM lifting_programs WHERE id = ?').get(a.lifting_program_id)
+            : null;
+          if (!cur) {
+            db.prepare(`UPDATE remote_programs SET lifting_program_id = ?, block_start = ?, block_number = 1,
+                        next_lifting_id = NULL, next_block_start = '' WHERE id = ?`)
+              .run(m1Id, today, a.rp_id);
+            assigned++;
+          } else { kept++; }
+        }
+      }
+      db.prepare("INSERT INTO settings (key, value) VALUES ('lifting_rebuild_v4', '1')").run();
+      console.log(`Lifting rebuild v4: removed ${removed} v3 template(s), added ${added} system template(s), assigned M1 to ${assigned} athlete(s), kept ${kept} custom.`);
+    }
+  }
 }
 
 // One-time cleanup (Sep 15 2026): Bobby asked to remove ALL test accounts

@@ -43,8 +43,8 @@ const DEMO_VIDEOS = [
   function blankDay(label) {
     return { label: label || 'Day ' + (S.days.length + 1), warmup: [], speed: [], medball: [], exercises: [] };
   }
-  function blankSpeed() { return { name: '', volume: '', notes: '', video: '' }; }
-  function blankLift() { return { name: '', sets: '', reps: '', target_rpe: '', rest: 120, notes: '', video: '' }; }
+  function blankSpeed() { return { name: '', volume: '', notes: '', video: '', intent: '' }; }
+  function blankLift() { return { name: '', sets: '', reps: '', target_rpe: '', rest: 120, notes: '', video: '', section: 'strength', intent: '' }; }
   function normDay(d) {
     d = d || {};
     if (!Array.isArray(d.warmup)) d.warmup = [];
@@ -163,7 +163,12 @@ const DEMO_VIDEOS = [
   }
 
   // ---- movement rows ----
+  function intentCheck(obj) {
+    return '<label class="le-f le-check"><input type="checkbox" data-f="intent" value="max"' +
+      (obj.intent === 'max' ? ' checked' : '') + '> <span>⚡ Max intent</span></label>';
+  }
   function speedRow(obj, section) {
+    obj.intent = obj.intent || '';
     var wrap = document.createElement('div');
     wrap.className = 'le-row';
     wrap.innerHTML =
@@ -171,7 +176,8 @@ const DEMO_VIDEOS = [
       '<label class="le-f le-vol">Volume<input data-f="volume" value="' + esc(obj.volume) + '" placeholder="4×10y"></label>' +
       '<button type="button" class="le-x" aria-label="Remove">×</button>' +
       '<label class="le-f le-full">Notes<input data-f="notes" value="' + esc(obj.notes) + '" placeholder="Walk-back recovery…"></label>' +
-      '<div class="le-f le-full">' + videoField(obj, 'Demo video') + '</div>';
+      '<div class="le-f le-full">' + videoField(obj, 'Demo video') + '</div>' +
+      intentCheck(obj);
     bindRow(wrap, obj, section);
     return wrap;
   }
@@ -180,6 +186,13 @@ const DEMO_VIDEOS = [
     for (var i = 0; i < inputs.length; i++) {
       (function (inp) {
         if (inp.getAttribute('data-f') === 'video') obj.inputEl = inp;
+        if (inp.type === 'checkbox' && inp.getAttribute('data-f') === 'intent') {
+          inp.addEventListener('change', function () {
+            obj.intent = inp.checked ? 'max' : '';
+            changed();
+          });
+          return;
+        }
         inp.addEventListener('input', function () {
           obj[inp.getAttribute('data-f')] = inp.value;
           if (inp.getAttribute('data-f') === 'name') {
@@ -222,6 +235,12 @@ const DEMO_VIDEOS = [
   }
 
   function liftCard(obj) {
+    obj.section = obj.section || 'strength';
+    obj.intent = obj.intent || '';
+    var secOpts = ['strength', 'rotational', 'brakes'].map(function (s) {
+      return '<option value="' + s + '"' + (obj.section === s ? ' selected' : '') + '>' +
+        s.charAt(0).toUpperCase() + s.slice(1) + '</option>';
+    }).join('');
     var wrap = document.createElement('div');
     wrap.className = 'le-lift';
     wrap.innerHTML =
@@ -233,10 +252,12 @@ const DEMO_VIDEOS = [
       '<button type="button" data-t="del" aria-label="Remove">×</button></span></div>' +
       '<div class="le-grid">' +
       '<label class="le-f">Exercise<input data-f="name" value="' + esc(obj.name) + '" placeholder="Trap Bar Deadlift"></label>' +
+      '<label class="le-f">Section<select data-f="section">' + secOpts + '</select></label>' +
       '<label class="le-f">Sets<input data-f="sets" value="' + esc(obj.sets) + '" placeholder="4" inputmode="numeric"></label>' +
       '<label class="le-f">Reps<input data-f="reps" value="' + esc(obj.reps) + '" placeholder="6"></label>' +
       '<label class="le-f">Target RPE <span class="hint-inline">1–10</span><input data-f="target_rpe" value="' + esc(obj.target_rpe) + '" placeholder="8" inputmode="decimal"></label>' +
       '<label class="le-f">Rest <span class="hint-inline">sec</span><input data-f="rest" value="' + esc(obj.rest) + '" placeholder="120" inputmode="numeric"></label>' +
+      intentCheck(obj) +
       '<label class="le-f le-full">Coaching notes<textarea data-f="notes" rows="2" placeholder="Chest up, push the floor away…">' + esc(obj.notes) + '</textarea></label>' +
       '<div class="le-f le-full">' + videoField(obj, 'Demo video') + '</div>' +
       '</div>';
@@ -244,6 +265,13 @@ const DEMO_VIDEOS = [
     for (var i = 0; i < inputs.length; i++) {
       (function (inp) {
         if (inp.getAttribute('data-f') === 'video') obj.inputEl = inp;
+        if (inp.type === 'checkbox' && inp.getAttribute('data-f') === 'intent') {
+          inp.addEventListener('change', function () {
+            obj.intent = inp.checked ? 'max' : '';
+            changed();
+          });
+          return;
+        }
         inp.addEventListener('input', function () {
           obj[inp.getAttribute('data-f')] = inp.value;
           if (inp.getAttribute('data-f') === 'name') {

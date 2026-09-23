@@ -206,10 +206,18 @@
   function kicker(it) {
     var parts = [];
     if (it.compIcon) parts.push(it.compIcon);
-    parts.push(it.section || it.compLabel || '');
+    var sec = it.section || it.compLabel || '';
+    if (it.type === 'lift' && (sec === 'strength' || sec === 'rotational' || sec === 'brakes')) {
+      sec = sec.charAt(0).toUpperCase() + sec.slice(1);
+    }
+    parts.push(sec);
     var n = 0, total = 0;
     items.forEach(function (x) { if (x.comp === it.comp) { total++; if (itemDone(x)) n++; } });
     return esc(parts.join(' ')) + ' <span class="hint-inline">' + n + '/' + total + '</span>';
+  }
+
+  function intentBadge(it) {
+    return it.intent === 'max' ? ' <span class="intent-badge">⚡ MAX INTENT</span>' : '';
   }
 
   function blockHtml(it) {
@@ -219,7 +227,7 @@
     return '<div class="wo-card' + (it.done ? ' done' : '') + '">' +
       '<div class="wo-kicker">' + kicker(it) + '</div>' +
       (it.block ? '<p class="hint-inline" style="margin:0 0 4px">' + esc(it.block) + '</p>' : '') +
-      '<h2 class="wo-name">' + esc(it.name) + '</h2>' +
+      '<h2 class="wo-name">' + esc(it.name) + intentBadge(it) + '</h2>' +
       (meta ? '<p class="wo-meta">' + esc(meta) + '</p>' : '') +
       (it.notes ? '<p class="wo-notes">' + esc(it.notes) + '</p>' : '') +
       swap + videoHtml(it) +
@@ -264,7 +272,7 @@
     var li = lifts.indexOf(it);
     return '<div class="wo-card">' +
       '<div class="wo-kicker">' + kicker(it) + ' · Lift ' + (li + 1) + ' of ' + lifts.length + '</div>' +
-      '<h2 class="wo-name">' + esc(it.name) + '</h2>' +
+      '<h2 class="wo-name">' + esc(it.name) + intentBadge(it) + '</h2>' +
       (rx ? '<p class="wo-meta">' + esc(rx) + '</p>' : '') +
       (it.notes ? '<p class="wo-notes">' + esc(it.notes) + '</p>' : '') +
       lastLine + videoHtml(it) +

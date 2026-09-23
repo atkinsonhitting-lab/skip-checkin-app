@@ -33,6 +33,34 @@ function esc(s) {
     .replace(/"/g, '&quot;');
 }
 
+// Different Animal v4 (Sep 23 2026): max-intent marker + inline YouTube demos,
+// shared by the program page and the lifting sub-tab renderer.
+function ytIdOf(url) {
+  const m = /^(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?v=|shorts\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})/.exec(String(url || '').trim());
+  return m ? m[1] : '';
+}
+function intentBadgeHtml(intent) {
+  return String(intent || '').toLowerCase() === 'max' ? ' <span class="intent-badge">⚡ MAX INTENT</span>' : '';
+}
+// Lifting video control: YouTube demos expand inline (tap ▶, plays in page);
+// anything else falls back to the plain watch link.
+function liftVideoHtml(video, watchLink) {
+  const id = ytIdOf(video);
+  if (!id) return watchLink(video);
+  return ` <button type="button" class="watch-link yt-toggle" data-yt="${esc(id)}" aria-label="Watch video">&#9654; <span>Watch</span></button>`;
+}
+const YT_TOGGLE_SCRIPT = `<script>(function(){document.addEventListener('click',function(e){
+  var b=e.target.closest?e.target.closest('.yt-toggle'):null;if(!b)return;
+  var host=b.closest('.lift-ex')||b.closest('.spd-row')||b.closest('form');if(!host)return;
+  var open=host.querySelector('.yt-embed');
+  if(open){open.remove();b.classList.remove('open');return;}
+  if(host.tagName==='DETAILS'&&!host.open)host.open=true;
+  var inner=host.querySelector('.lift-main')||host;
+  var d=document.createElement('div');d.className='yt-embed';
+  d.innerHTML='<iframe src="https://www.youtube.com/embed/'+b.getAttribute('data-yt')+'?rel=0" title="Demo video" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>';
+  inner.appendChild(d);b.classList.add('open');
+});})();</script>`;
+
 // Message bodies: escape HTML, then make http(s) URLs tappable links
 // (Bobby, Sep 17 2026 — booking links in messages must be clickable).
 function linkify(text) {
@@ -2514,6 +2542,8 @@ function programPage(user, p, opts) {
     const ext = /^https?:\/\//i.test(href);
     return ` <a class="watch-link" href="${esc(href)}"${ext ? ' target="_blank" rel="noopener"' : ''} aria-label="Watch video">&#9654; <span>Watch</span></a>`;
   };
+  // (yt helpers live at module scope: ytIdOf, intentBadgeHtml, liftVideoHtml, YT_TOGGLE_SCRIPT)
+
 
   const grades = prog.grades && typeof prog.grades === 'object' ? prog.grades : {};
   const gradeChips = Object.entries(grades)
@@ -2623,7 +2653,7 @@ function programPage(user, p, opts) {
   };
 
   // One check-off row (hitting / mobility / med ball / prep).
-  const checkRow = (kind, key, drill, volume, video, extra) => {
+  const checkRow = (kind, key, drill, volume, video, extra, badge) => {
     const done = !!checkoffs[key];
     const swapped = (o.subs || {})[key];
     const shown = swapped ? String(swapped.sub_name || drill) : drill;
@@ -2639,7 +2669,7 @@ function programPage(user, p, opts) {
       ${extra || ''}
       <input type="hidden" name="item_key" value="${esc(key)}">
       <button type="submit" class="checkbtn" aria-label="${done ? 'Mark not done' : 'Mark done'}">${done ? '☑' : '☐'}</button>
-      <span class="routine-name">${esc(shown || '')}</span>${volume ? `<span class="hint-inline">${esc(volume)}</span>` : ''}${watchLink(video)}${subBadge}
+      <span class="routine-name">${esc(shown || '')}</span>${badge || ''}${volume ? `<span class="hint-inline">${esc(volume)}</span>` : ''}${watchLink(video)}${subBadge}
     </form>`;
   };
   const blockCard = (cat, items, kind, dayScope, extra, guide) => {
@@ -2674,20 +2704,25 @@ function programPage(user, p, opts) {
         : '<div class="card empty">No med ball work in your program.</div>')}`;
   } else if (sub === 'lifting' && lifting) {
     const days = (Array.isArray(lifting.days) ? lifting.days : []).filter((d) => realExercises(d.exercises).length);
-    // Bobby's session order (Sep 2026): 1. SPEED (sprints first) → 2. POWER
-    // (med ball) → 3. LIFTS. No standalone Metabolic tab — speed lives here.
-    // Legacy 'Metabolic' blocks in old programs fold into the Speed section.
+    // Different Animal v4 (Sep 2026): 1. SPEED → 2. POWER (jumps + med ball) →
+    // 3. STRENGTH → 4. ROTATIONAL → 5. BRAKES. No standalone Metabolic tab —
+    // speed lives here; legacy 'Metabolic' blocks fold into Speed.
     const lday = o.ldayIdx || 0;
-    const ldayExtra = `<input type="hidden" name="lday" value="${lday}">`;
+    const ldayExtra = `<input type=\"hidden\" name=\"lday\" value=\"${lday}\">`;
     const curDay = days[lday] || {};
+    const phaseBanner = (Array.isArray(lifting.notes) && lifting.notes.length)
+      ? `<div class=\"card phase-banner\">${lifting.notes.map((n) => `<p>${esc(n)}</p>`).join('')}</div>`
+      : '';
     const daySpeed = Array.isArray(curDay.speed) ? curDay.speed.filter((s) => String(s && s.name || '').trim()) : [];
     const metBlocks = routine.filter((c) => kindOf(c.category) === 'metabolic' && realItems(c.items).length);
     const speedHtml = (daySpeed.length || metBlocks.length)
-      ? `<h3 class="prog-h3"><span class="flow-num">1</span> Speed — sprints first</h3>\n` +
+      ? `<h3 class=\"prog-h3\"><span class=\"flow-num\">1</span> ⚡ Speed — sprints first</h3>\n` +
         (daySpeed.length
-          ? `<div class="card routine-group">${daySpeed.map((s) =>
+          ? `<div class=\"card routine-group\">${daySpeed.map((s) =>
+              `<div class=\"spd-row\">` +
               checkRow('spd', `spd::::${curDay.label || ''}::${s.name}`, s.name,
-                [s.volume, s.notes].filter(Boolean).join(' — '), s.video, ldayExtra)
+                [s.volume, s.notes].filter(Boolean).join(' — '), null, ldayExtra, intentBadgeHtml(s.intent)) +
+              liftVideoHtml(s.video, watchLink) + `</div>`
             ).join('')}</div>`
           : '') +
         metBlocks.map((c) => blockCard(c.category, c.items, 'spd', dayPrefix(c.category), ldayExtra)).join('')
@@ -2695,26 +2730,29 @@ function programPage(user, p, opts) {
     const medBlocks = routine.filter((c) => kindOf(c.category) === 'medball' && realItems(c.items).length);
     const mbToday = day ? medBlocks.filter((c) => inDay(c.category, day)) : medBlocks;
     const mbOthers = day ? medBlocks.filter((c) => !inDay(c.category, day)) : [];
-    // Lifting-day med ball (Sep 23 2026 rebuild): the day's own throws render
-    // first, then any routine med-ball blocks.
+    // Lifting-day power work renders first, then any routine med-ball blocks.
     const dayMedball = Array.isArray(curDay.medball) ? curDay.medball.filter((s) => String(s && s.name || '').trim()) : [];
     const medHtml = (dayMedball.length || mbToday.length || mbOthers.length)
-      ? `<h3 class="prog-h3"><span class="flow-num">2</span> Power — med ball</h3>\n` +
+      ? `<h3 class=\"prog-h3\"><span class=\"flow-num\">2</span> 💥 Power — jumps & med ball</h3>\n` +
         (dayMedball.length
-          ? `<div class="card routine-group">${dayMedball.map((s) =>
+          ? `<div class=\"card routine-group\">${dayMedball.map((s) =>
+              `<div class=\"spd-row\">` +
               checkRow('med', `med::::${curDay.label || ''}::${s.name}`, s.name,
-                [s.volume, s.notes].filter(Boolean).join(' — '), s.video, ldayExtra)
+                [s.volume, s.notes].filter(Boolean).join(' — '), null, ldayExtra, intentBadgeHtml(s.intent)) +
+              liftVideoHtml(s.video, watchLink) + `</div>`
             ).join('')}</div>`
           : '') +
         mbToday.map((c) => blockCard(c.category, c.items, 'med', dayPrefix(c.category), ldayExtra)).join('') +
         (mbOthers.length
-          ? `<details class="card"><summary class="routine-summary"><span class="routine-station">Other days</span></summary>` +
+          ? `<details class=\"card\"><summary class=\"routine-summary\"><span class=\"routine-station\">Other days</span></summary>` +
             mbOthers.map((c) => blockCard(c.category, c.items, 'med', dayPrefix(c.category), ldayExtra)).join('') +
             `</details>`
           : '')
       : '';
-    const liftsHead = (daySpeed.length || metBlocks.length || medBlocks.length) ? `<h3 class="prog-h3"><span class="flow-num">3</span> Lifts</h3>\n` : '';
-    content = `${liftPrimer}${sessionOrder === 'hitting_first' ? `<p class="hint">Hit first, then lift — you're warm, go straight to speed work. Ramp-up sets on main lifts still apply. Lifting-only day? Full Mobility tab first.</p>` : ''}${speedHtml}${medHtml}${liftsHead}${liftSubTab(user, lifting, days, lday, sub, checkoffs, today, o.liftData || {}, o.subs || {})}`;
+    // Section flow numbers continue after speed/power (liftSubTab renders
+    // Strength / Rotational / Brakes groups).
+    const secBase = (daySpeed.length || metBlocks.length ? 1 : 0) + (dayMedball.length || mbToday.length || mbOthers.length ? 1 : 0);
+    content = `${phaseBanner}${liftPrimer}${sessionOrder === 'hitting_first' ? `<p class=\"hint\">Hit first, then lift — you're warm, go straight to speed work. Ramp-up sets on main lifts still apply. Lifting-only day? Full Mobility tab first.</p>` : ''}${speedHtml}${medHtml}${liftSubTab(user, lifting, days, lday, sub, checkoffs, today, o.liftData || {}, o.subs || {}, secBase)}${YT_TOGGLE_SCRIPT}`;
   } else {
     // HITTING (default): today's plan first — prep for the day + the day's
     // hitting blocks. Then pregame, then Focus/Grades/Strengths/Notes.
@@ -2943,7 +2981,7 @@ function sessionPage(user, s) {
 // Warm-up rows render first as their own block (no logging on them).
 // Each exercise gets a mid-workout "Substitute" link; today's swaps are
 // pulled from opts.subs and shown with a marker.
-function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftData, subs) {
+function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftData, subs, secBase) {
   const day = days[ldayIdx] || { label: '', exercises: [] };
   const dayKey = String(day.label || '');
   const subsMap = subs || {};
@@ -2979,8 +3017,13 @@ function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftDat
       <ol class="warmup-list">${warmup.map((w) => `<li>${esc(w)}</li>`).join('')}</ol></details>`
     : '';
   const realEx = realExercises(day.exercises);
-  const exRows = realEx
-    .map((ex) => {
+  // Different Animal v4: exercises carry section ('strength' | 'rotational' |
+  // 'brakes') and intent ('max'). Group the day into its sections.
+  const secOf = (e) => {
+    const s = String((e && e.section) || 'strength').toLowerCase();
+    return s === 'rotational' || s === 'brakes' ? s : 'strength';
+  };
+  const exRow = (ex) => {
       const name = String(ex.name || '');
       const key = `lift::${dayKey}::${name}`;
       const swapped = subsMap[key];
@@ -3131,10 +3174,10 @@ function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftDat
         <summary class="lift-sum">
           <span class="lift-dot" aria-hidden="true">${done ? '✓' : '○'}</span>
           <span class="lift-sum-main">
-            <span class="lift-name">${esc(shown)}</span>
+            <span class="lift-name">${esc(shown)}${intentBadgeHtml(ex.intent)}</span>
             ${sumSub ? `<span class="lift-sum-sub">${sumSub}</span>` : ''}
           </span>
-          ${ex.video ? `<a class="watch-link" href="${esc(ex.video)}" target="_blank" rel="noopener" aria-label="Watch video" onclick="event.stopPropagation()">&#9654;</a>` : ''}
+          ${(() => { const id = ytIdOf(ex.video); return id ? `<button type="button" class="watch-link yt-toggle" data-yt="${esc(id)}" aria-label="Watch video" onclick="event.stopPropagation()">&#9654;</button>` : (ex.video ? `<a class="watch-link" href="${esc(ex.video)}" target="_blank" rel="noopener" aria-label="Watch video" onclick="event.stopPropagation()">&#9654;</a>` : ''); })()}
         </summary>
         <div class="lift-main">
           <div class="lift-name-row">
@@ -3153,8 +3196,19 @@ function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftDat
           <details class="lift-hist"><summary>History</summary>${histHtml}</details>
         </div>
       </details>`;
-    })
-    .join('');
+    };
+  const SEC_META = [
+    ['strength', '🏋️ Strength'],
+    ['rotational', '🔄 Rotational'],
+    ['brakes', '🛑 Brakes'],
+  ];
+  let secNum = Number(secBase) || 0;
+  const exRows = SEC_META.map(([secId, secLabel]) => {
+    const rows = realEx.filter((e) => secOf(e) === secId).map(exRow).join('');
+    if (!rows) return '';
+    secNum += 1;
+    return `<h3 class="prog-h3"><span class="flow-num">${secNum}</span> ${secLabel}</h3>\n` + rows;
+  }).join('');
   const totalSets = realEx.length;
   const doneEx = (exRows.match(/<details class="lift-ex done"/g) || []).length;
   const startBtn = readOnly ? '' : `<a class="start-workout" href="/program/workout?lday=${ldayIdx}">
@@ -3305,14 +3359,17 @@ function liftingEditPage(user, lp, opts) {
       warmup: normWarmup(d.warmup),
       speed: (Array.isArray(d.speed) ? d.speed : []).map((s) => ({
         name: s.name || '', volume: s.volume || '', notes: s.notes || '', video: s.video || '',
+        intent: s.intent || '',
       })),
       medball: (Array.isArray(d.medball) ? d.medball : []).map((s) => ({
         name: s.name || '', volume: s.volume || '', notes: s.notes || '', video: s.video || '',
+        intent: s.intent || '',
       })),
       exercises: (Array.isArray(d.exercises) ? d.exercises : []).map((e) => ({
         name: e.name || '', sets: e.sets || '', reps: e.reps || '',
         target_rpe: e.target_rpe || '', rest: e.rest || 120,
         notes: e.notes || '', video: e.video || '',
+        section: e.section || 'strength', intent: e.intent || '',
       })),
     })),
   };

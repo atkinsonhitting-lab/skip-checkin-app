@@ -117,12 +117,22 @@
     window.scrollTo(0, 0);
   }
 
+  function intentBadge(it) {
+    return it.intent === 'max' ? ' <span class="intent-badge">⚡ MAX INTENT</span>' : '';
+  }
+
+  function secLabel(it) {
+    var s = it.section;
+    return s === 'strength' || s === 'rotational' || s === 'brakes'
+      ? s.charAt(0).toUpperCase() + s.slice(1) : '';
+  }
+
   function blockHtml(it) {
     var kindLabel = it.type === 'speed' ? 'Speed' : 'Med Ball';
     var meta = [it.volume, it.notes].filter(Boolean).join(' · ');
     return '<div class="wo-card' + (it.done ? ' done' : '') + '">' +
       '<div class="wo-kicker">' + kindLabel + '</div>' +
-      '<h2 class="wo-name">' + esc(it.name) + '</h2>' +
+      '<h2 class="wo-name">' + esc(it.name) + intentBadge(it) + '</h2>' +
       (meta ? '<p class="wo-meta">' + esc(meta) + '</p>' : '') +
       videoHtml(it) +
       '<button type="button" class="wo-bigbtn' + (it.done ? ' done' : '') + '" id="wo-block-done">' +
@@ -163,8 +173,8 @@
         '" data-rpe="' + r + '">' + r + '</button>';
     }
     return '<div class="wo-card">' +
-      '<div class="wo-kicker">Lift ' + (liftIndex(it) + 1) + ' of ' + items.filter(function (x) { return x.type === 'lift'; }).length + '</div>' +
-      '<h2 class="wo-name">' + esc(it.name) + '</h2>' +
+      '<div class="wo-kicker">' + (secLabel(it) ? secLabel(it) + ' · ' : '') + 'Lift ' + (liftIndex(it) + 1) + ' of ' + items.filter(function (x) { return x.type === 'lift'; }).length + '</div>' +
+      '<h2 class="wo-name">' + esc(it.name) + intentBadge(it) + '</h2>' +
       (rx ? '<p class="wo-meta">' + esc(rx) + '</p>' : '') +
       (it.notes ? '<p class="wo-notes">' + esc(it.notes) + '</p>' : '') +
       lastLine +

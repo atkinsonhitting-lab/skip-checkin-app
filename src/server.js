@@ -1953,7 +1953,7 @@ function buildWorkoutDay(userId, lifting, ldayIdx, today) {
       return {
         type: 'speed', key, name: String(s.name || ''),
         volume: String(s.volume || ''), notes: String(s.notes || ''), video: String(s.video || ''),
-        done: !!checkoffs[key],
+        intent: String(s.intent || ''), done: !!checkoffs[key],
       };
     });
   const med = (Array.isArray(day.medball) ? day.medball : [])
@@ -1963,7 +1963,7 @@ function buildWorkoutDay(userId, lifting, ldayIdx, today) {
       return {
         type: 'medball', key, name: String(s.name || ''),
         volume: String(s.volume || ''), notes: String(s.notes || ''), video: String(s.video || ''),
-        done: !!checkoffs[key],
+        intent: String(s.intent || ''), done: !!checkoffs[key],
       };
     });
   const lifts = (Array.isArray(day.exercises) ? day.exercises : [])
@@ -1994,6 +1994,7 @@ function buildWorkoutDay(userId, lifting, ldayIdx, today) {
         sets: String(ex.sets || ''), reps: String(ex.reps || ''),
         target_rpe: String(ex.target_rpe || ''), notes: String(ex.notes || ''),
         video: String(ex.video || ''),
+        section: String(ex.section || 'strength'), intent: String(ex.intent || ''),
         suggested_weight: ex.suggested_weight != null ? String(ex.suggested_weight) : '',
         rest: Math.max(15, Math.min(600, parseInt(ex.rest, 10) || 120)),
         progSetCount, progReps,
@@ -3682,12 +3683,18 @@ function sanitizeLiftingDays(rawDays) {
     const s = String(u || '').trim().slice(0, 300);
     return /^https?:\/\//i.test(s) ? s : '';
   };
+  const cleanIntent = (v) => String(v || '').toLowerCase() === 'max' ? 'max' : '';
+  const cleanSection = (v) => {
+    const s = String(v || '').toLowerCase();
+    return s === 'rotational' || s === 'brakes' ? s : 'strength';
+  };
   const cleanBlock = (arr) => (Array.isArray(arr) ? arr : []).slice(0, 12)
     .map((s) => ({
       name: String((s && s.name) || '').trim().slice(0, 120),
       volume: String((s && s.volume) || '').trim().slice(0, 60),
       notes: String((s && s.notes) || '').trim().slice(0, 200),
       video: cleanUrl(s && s.video),
+      intent: cleanIntent(s && s.intent),
     }))
     .filter((s) => s.name);
   return (Array.isArray(rawDays) ? rawDays : []).slice(0, 14).map((d, i) => ({
@@ -3706,6 +3713,8 @@ function sanitizeLiftingDays(rawDays) {
         rest: Math.max(15, Math.min(600, parseInt(e && e.rest, 10) || 120)),
         notes: String((e && e.notes) || '').trim().slice(0, 200),
         video: cleanUrl(e && e.video),
+        section: cleanSection(e && e.section),
+        intent: cleanIntent(e && e.intent),
       };
     }).filter((e) => e.name),
   }));
