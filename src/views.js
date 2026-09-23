@@ -2991,10 +2991,34 @@ function mentalGamePage(user, data) {
             </form></li>`).join('')}</ul>`
         : `<p class="hint">Nothing saved yet.</p>`}
     </div>
+    <div class="card">
+      <p style="margin:0">Feeling sped up or rushing in a game? <a href="/chat">Talk to Coach Skip →</a> — he'll give you one thing to lock back in.</p>
+    </div>
+    <p style="text-align:center;margin-top:24px"><a href="/mental-game/questionnaire" class="hint">Retake the questionnaire</a></p>`,
+  });
+}
+
+// Questionnaire page — separate from the Lock In tab (Sep 23 2026). Bobby's
+// rule: no flashing, no forcing. Small link at the bottom of Lock In to redo it.
+function questionnairePage(user, b, saved, planFailed) {
+  const radio = (name, options) => `
+    <div class="radio-group">${options.map(([val, label]) => `
+      <label class="radio"><input type="radio" name="${name}" value="${val}"${b[name] === val ? ' checked' : ''}> ${esc(label)}</label>`).join('')}
+    </div>`;
+  const fld = (name, label, hint, val) => `
+    <label class="fld">${esc(label)}<span class="hint">${esc(hint)}</span>
+      <textarea name="${name}" rows="2" maxlength="600" placeholder="${esc(hint)}">${esc(val || '')}</textarea>
+    </label>`;
+  return layout({
+    title: 'Questionnaire',
+    user,
+    tabs: userTabs('mental', user),
+    body: `<h1 class="page-title">Where's your head at?</h1>
+    <p class="hint">Answer honestly — it builds your plan from this.</p>
+    ${saved ? '<div class="notice">Saved — your plan is on the Lock In tab.</div>' : ''}
+    ${planFailed ? '<div class="notice">Baseline saved, but the plan didn\u2019t come through — tap the button again.</div>' : ''}
     <form method="post" action="/mental-game/save" class="form">
       <div class="card">
-        <h2 class="routine-station">Where's your head at?</h2>
-        <p class="hint">Answer honestly — it builds your plan from this.</p>
         <p class="field-label">In games, what color are you usually? (Ravizza's signal lights)</p>
         ${radio('signal_light', [['green', 'Green — calm, focused'], ['yellow', 'Yellow — tension creeping in'], ['red', 'Red — emotional, rushed']])}
         <p class="field-label">What's the worst thing you say to yourself when it's going bad? (write the actual sentence)</p>
@@ -3007,12 +3031,23 @@ function mentalGamePage(user, data) {
         ${fld('hard_voice', 'The voice when it gets hard', 'What does it tell you?', b.hard_voice)}
         <p class="field-label">Do you have a routine you actually trust?</p>
         ${radio('has_routine', [['yes', 'Yes — it\u2019s automatic'], ['sortof', 'Sort of — sometimes'], ['no', 'No routine yet']])}
+        <p class="field-label">Between pitches — what do you actually do? (Ravizza: the 15 seconds between pitches is the game)</p>
+        ${fld('between_pitches', 'Between pitches', 'Step out? Breathe? Nothing?', b.between_pitches)}
+        <p class="field-label">Do you have a reset word — one word that locks you back in?</p>
+        ${fld('keyword', 'Your keyword', 'One word. Yours, not someone else\u2019s.', b.keyword)}
+        <p class="field-label">Your best game ever — what were you thinking and feeling? (be specific)</p>
+        ${fld('best_game', 'Best game', 'What was going through your head?', b.best_game)}
+        <p class="field-label">Do you picture success before games — see yourself getting hits?</p>
+        ${radio('visualization', [['yes', 'Yes — every game'], ['sometimes', 'Sometimes'], ['no', 'No, never tried it']])}
+        <p class="field-label">Where does your confidence come from?</p>
+        ${radio('confidence_source', [['preparation', 'My preparation — I know I put the work in'], ['past_success', 'Past success — I know I\u2019ve done it before'], ['disappears', 'Honestly it disappears when I struggle']])}
+        <p class="field-label">After a bad game, what do you do?</p>
+        ${radio('post_game', [['replay', 'Replay the mistakes over and over'], ['forget', 'Try to forget it'], ['review', 'Review what happened, then move on'], ['beat_up', 'Beat myself up']])}
+        <p class="field-label">What pulls your focus during games? (crowd, scouts, parents, last at-bat...)</p>
+        ${fld('focus_pull', 'Focus pull', 'What gets in your head?', b.focus_pull)}
       </div>
       <p><button type="submit" class="btn btn-primary">Save & build my plan</button></p>
-    </form>
-    <div class="card">
-      <p style="margin:0">Feeling sped up or rushing in a game? <a href="/chat">Talk to Coach Skip →</a> — he'll give you one thing to lock back in.</p>
-    </div>`,
+    </form>`,
   });
 }
 
@@ -4224,6 +4259,7 @@ module.exports = {
   programPage,
   programRoutinePage,
   mentalGamePage,
+  questionnairePage,
   programEditPage,
   liftingProgramsPage,
   liftingEditPage,

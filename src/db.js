@@ -963,6 +963,13 @@ CREATE TABLE IF NOT EXISTS mental_baseline (
   for (const c of ['signal_light', 'worst_self_talk', 'struggle_pattern', 'big_moment_mode', 'hard_voice']) {
     if (!cols.includes(c)) db.exec(`ALTER TABLE mental_baseline ADD COLUMN ${c} TEXT NOT NULL DEFAULT '';`);
   }
+  // Individualization fields (Sep 23 2026): between_pitches (Ravizza 15 sec),
+  // keyword (Mack reset word), best_game (Goggins cookie jar evidence),
+  // visualization (Mack/Holiday picturing), confidence_source (Dorfman),
+  // post_game (Goggins AAR pattern), focus_pull (distractions).
+  for (const c of ['between_pitches', 'keyword', 'best_game', 'visualization', 'confidence_source', 'post_game', 'focus_pull']) {
+    if (!cols.includes(c)) db.exec(`ALTER TABLE mental_baseline ADD COLUMN ${c} TEXT NOT NULL DEFAULT '';`);
+  }
 }
 // Daily mental exercise completions (Sep 23 2026): one concrete exercise per
 // day from the book frameworks. exercise_key like '2026-09-23:good-wolf'.
