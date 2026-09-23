@@ -625,14 +625,17 @@ details[open] > .routine-summary::after { content: '\25B4'; }
 #tabbar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
   display: flex;
+  overflow-x: auto; -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
   background: rgba(14, 14, 16, 0.97);
   -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
   border-top: 1px solid var(--line);
   padding-bottom: env(safe-area-inset-bottom);
 }
+#tabbar::-webkit-scrollbar { display: none; }
 .tabbar-link {
-  flex: 1 1 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 3px; padding: 9px 4px 7px; min-height: 58px; position: relative;
+  flex: 0 0 auto; min-width: 76px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 3px; padding: 9px 10px 7px; min-height: 58px; position: relative;
   color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: 0.02em;
 }
 .tabbar-badge {

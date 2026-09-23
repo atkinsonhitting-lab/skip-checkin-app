@@ -137,33 +137,17 @@ ${user && user.role === 'coach' && user.canEdit === false ? '<div class="viewonl
 }
 
 function userTabs(active, user) {
+  // Bobby (Sep 23 2026): bottom bar is exactly these 5, in this order.
+  // Remote athletes get Program first — they open the app to train.
   const isRemote = !!(user && user.remoteProgramId);
-  // Mental Game is the landing tab (Sep 23 2026) — Home is gone. Athletes
-  // open the app to today's exercise, the verse, and check-in.
-  const tabs = [
-    { href: '/mental-game', label: 'Lock In', active: active === 'mental' },
-  ];
-  // Program-first for athletes with an assigned remote/hybrid program:
-  // Programs comes before Check In; everyone else keeps the old layout.
+  const tabs = [];
   if (isRemote) tabs.push({ href: '/program', label: 'Program', active: active === 'program' });
-  tabs.push({ href: '/checkin', label: 'Check In', active: active === 'checkin' });
-  // Messaging tab is for organization players only (Bobby's rule) — standalone
-  // athletes don't get the tab at all.
-  if (user && user.organizationId) {
-    tabs.push({ href: '/messages', label: 'Messages', active: active === 'messages', badge: user.unreadMessages > 0 ? String(user.unreadMessages) : null });
-  }
-  // Bobby's remote hitters only — nobody else ever sees these tabs.
-  if (isRemote) {
-    tabs.push({ href: '/program/routine', label: 'Routine', active: active === 'routine' });
-    tabs.push({ href: '/videos', label: 'Remote Library', active: active === 'videos' });
-  } else {
-    // Personal routine editor for every other hitter — one Routine tab, never two.
-    tabs.push({ href: '/routine', label: 'Routine', active: active === 'routine' });
-  }
   tabs.push(
+    { href: '/mental-game', label: 'Lock In', active: active === 'mental' },
+    { href: '/checkin', label: 'Check In', active: active === 'checkin' },
     { href: '/notebook', label: 'Notebook', active: active === 'notebook' },
     { href: '/chat', label: 'Talk to Skip', sub: 'your personally trained coach', active: active === 'chat' },
-    { href: '/settings', label: 'Settings', active: active === 'settings' },
+    { href: '/messages', label: 'Messages', active: active === 'messages', badge: user && user.unreadMessages > 0 ? String(user.unreadMessages) : null },
   );
   // Organizations can turn Talk to Skip off for their players: no tab, no FAB,
   // no bottom-bar icon (all three key off this tab list).
