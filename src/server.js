@@ -45,7 +45,8 @@ app.use(helmet({
       // App uses inline <script> for bootstrapping page data (WO_DAY, etc.).
       'script-src': ["'self'", "'unsafe-inline'"],
       // Video library embeds Google Drive previews in an iframe.
-      'frame-src': ["'self'", 'https://drive.google.com'],
+      // Workout demo videos embed YouTube.
+      'frame-src': ["'self'", 'https://drive.google.com', 'https://www.youtube.com', 'https://www.youtube-nocookie.com'],
     },
   },
 }));
