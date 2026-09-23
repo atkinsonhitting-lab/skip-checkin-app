@@ -1803,8 +1803,8 @@ function buildHittingPlan(prog) {
   const warmup = [];
   const drills = [];
   const medball = [];
-  // Bobby (Sep 23 2026): mobility lives in lifting now — hitting plan warmup is prep work only.
-  const isWarmupCat = (c) => /prep|daily|warm/i.test(c || '') && !/mobility/i.test(c || '');
+  // Bobby (Sep 23 2026): warmup is Prep Work ONLY — not Daily Routine, not generic warm, not mobility.
+  const isWarmupCat = (c) => /prep/i.test(c || '') && !/mobility/i.test(c || '');
   const isMedballCat = (c) => /med\s*ball/i.test(c || '');
   // Map category → training environment for the drill progression
   const envOf = (c) => {
@@ -3632,11 +3632,15 @@ app.post('/coach/program/:id/save', requireCoach, (req, res) => {
   prog.adjustment = String(b.adjustment || '').trim().slice(0, 500);
   prog.mental_framework = String(b.mental_framework || '').trim().slice(0, 200);
   const grades = {};
+  const gradeWhys = {};
   for (const g of PROGRAM_GRADES) {
     const v = String(b['grade_' + g.replace(/ /g, '_')] || '').trim().slice(0, 4);
     if (v) grades[g] = v;
+    const why = String(b['grade_why_' + g.replace(/ /g, '_')] || '').trim().slice(0, 200);
+    if (why) gradeWhys[g] = why;
   }
   prog.grades = grades;
+  prog.grade_whys = gradeWhys;
   prog.strengths = String(b.strengths || '')
     .split('\n')
     .map((x) => x.trim())

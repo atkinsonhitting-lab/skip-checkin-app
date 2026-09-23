@@ -5069,78 +5069,55 @@ function hittingPlanPage(user, p) {
   const plan = prog.hitting_plan || {};
   const athleteName = (p && p.athlete_name) || prog.athlete || 'Hitter';
 
-  // Grading sheet — the athlete's grades with why explanations
+  // === Grades (compact) ===
   const grades = prog.grades && typeof prog.grades === 'object' ? prog.grades : {};
   const gradeWhys = prog.grade_whys && typeof prog.grade_whys === 'object' ? prog.grade_whys : {};
   const gradeEntries = Object.entries(grades).filter(([k, v]) => v && String(v).trim());
   const gradesHtml = gradeEntries.length
-    ? `<table class="doc-table grades-table">
-        <thead><tr><th>Category</th><th>Grade</th><th>Why</th></tr></thead>
-        <tbody>${gradeEntries.map(([k, v]) => `<tr>
-          <td><strong>${esc(k)}</strong></td>
-          <td class="grade-val">${esc(String(v))}</td>
-          <td>${esc(gradeWhys[k] || '')}</td>
-        </tr>`).join('')}</tbody>
-      </table>`
+    ? `<div class="grade-grid">${gradeEntries.map(([k, v]) => `
+        <div class="grade-card">
+          <div class="grade-cat">${esc(k)}</div>
+          <div class="grade-val">${esc(String(v))}</div>
+          ${gradeWhys[k] ? `<div class="grade-why">${esc(gradeWhys[k])}</div>` : ''}
+        </div>`).join('')}</div>`
     : '';
 
-  // Program details — strengths, adjustment, cues, mental framework
-  const strengths = Array.isArray(prog.strengths) ? prog.strengths.filter(Boolean) : [];
-  const strengthsHtml = strengths.length
-    ? `<ul class="doc-list">${strengths.map((s) => `<li>${esc(s)}</li>`).join('')}</ul>` : '';
-  const cues = prog.cues && typeof prog.cues === 'object' ? prog.cues : {};
-  const cueEntries = Object.entries(cues).filter(([k, v]) => v && String(v).trim());
-  const cuesHtml = cueEntries.length
-    ? `<ul class="doc-list">${cueEntries.map(([k, v]) => `<li><strong>${esc(k)}:</strong> ${esc(String(v))}</li>`).join('')}</ul>` : '';
-  const adjustmentHtml = prog.adjustment ? `<p>${esc(prog.adjustment)}</p>` : '';
-  const mentalHtml = prog.mental_framework ? `<p><strong>${esc(prog.mental_framework)}</strong></p>` : '';
-  const phaseHtml = prog.phase_emphasis ? `<p>${esc(prog.phase_emphasis)}</p>` : '';
+  // === Where you're at: phase + adjustment (combined, compact) ===
+  const phaseHtml = prog.phase_emphasis ? `<p><strong>Phase focus:</strong> ${esc(prog.phase_emphasis)}</p>` : '';
+  const adjustmentHtml = prog.adjustment ? `<p><strong>The adjustment:</strong> ${esc(prog.adjustment)}</p>` : '';
+  const whereHtml = (gradesHtml || phaseHtml || adjustmentHtml)
+    ? `<section class="doc-section"><h2>Where You're At</h2>${gradesHtml}${phaseHtml}${adjustmentHtml}</section>`
+    : '';
 
-  // Weekly schedule/calendar
+  // === Weekly schedule (compact table) ===
   const schedule = Array.isArray(prog.schedule) ? prog.schedule : [];
   const scheduleHtml = schedule.length
-    ? `<table class="doc-table schedule-table"><thead><tr><th>Day</th><th>Work</th></tr></thead><tbody>${schedule.map((s) => {
+    ? `<section class="doc-section"><h2>Weekly Schedule</h2>
+       <table class="doc-table"><tbody>${schedule.map((s) => {
         const day = s.day || s.label || '';
         const work = s.work || s.blocks || s.type || '';
         const workStr = Array.isArray(work) ? work.join(', ') : String(work);
-        return `<tr><td><strong>${esc(day)}</strong></td><td>${esc(workStr)}</td></tr>`;
-      }).join('')}</tbody></table>`
+        return `<tr><td class="sched-day">${esc(day)}</td><td>${esc(workStr)}</td></tr>`;
+      }).join('')}</tbody></table></section>`
     : '';
 
-  // Med ball — for guys without lifting (Bobby, Sep 23 2026)
+  // === Prep work (compact list) ===
+  const warmup = Array.isArray(plan.warmup) ? plan.warmup : [];
+  const warmupHtml = warmup.length
+    ? `<section class="doc-section"><h2>Prep Work</h2>
+       <ul class="compact-list">${warmup.map((w) => `<li><strong>${esc(w.name || '')}</strong>${w.detail ? ` <span class="dim">— ${esc(w.detail)}</span>` : ''}</li>`).join('')}</ul>
+       <p class="doc-note">Demos in the Remote library (Videos tab).</p></section>`
+    : '';
+
+  // === Med ball (non-lifters only, compact) ===
   const medball = Array.isArray(plan.medball) ? plan.medball : [];
   const hasLifting = !!(p && p.lifting_program_id);
   const medballHtml = (!hasLifting && medball.length)
-    ? `<table class="doc-table">
-        <thead><tr><th>Throw</th><th>Volume</th><th>Cues</th></tr></thead>
-        <tbody>${medball.map((m) => `<tr>
-          <td><strong>${esc(m.name || '')}</strong></td>
-          <td>${esc(m.volume || '')}</td>
-          <td>${esc(m.cues || '')}</td>
-        </tr>`).join('')}</tbody>
-      </table>`
+    ? `<section class="doc-section"><h2>Med Ball</h2>
+       <ul class="compact-list">${medball.map((m) => `<li><strong>${esc(m.name || '')}</strong>${m.volume ? ` <span class="dim">— ${esc(m.volume)}</span>` : ''}${m.cues ? `<br><span class="cue">${esc(m.cues)}</span>` : ''}</li>`).join('')}</ul></section>`
     : '';
 
-  // Training environments explainer
-  const defaultEnvironments = `<p>Do your work across all <strong>training environments</strong>. Each one trains something different:</p>
-<ul>
-<li><strong>Tee</strong> — most controlled. Feel the move, own your positions. This is where the pattern gets built.</li>
-<li><strong>Toss</strong> (side flips) — the ball's moving now, short distance. Blend what you felt off the tee into timing.</li>
-<li><strong>Front Toss</strong> — coming at you now. Timing starts to matter.</li>
-<li><strong>BP</strong> — full distance, moderate speed. Timing, direction, and barrel accuracy.</li>
-<li><strong>Machine</strong> — full speed. Execute under pressure. This is where it has to show up.</li>
-</ul>
-<p>Don't count a rep unless it's flush. It doesn't need to be hard — it needs to be right.</p>`;
-  const environmentsHtml = plan.environments_note || defaultEnvironments;
-
-  // Warmup — Bobby's prep work
-  const warmup = Array.isArray(plan.warmup) ? plan.warmup : [];
-  const warmupHtml = warmup.length
-    ? `<ul class="doc-list">${warmup.map((w) => `<li><strong>${esc(w.name || '')}</strong>${w.detail ? ` — ${esc(w.detail)}` : ''}</li>`).join('')}</ul>
-       <p class="doc-note">Demos for all prep work are in the Remote library (Videos tab).</p>`
-    : '<p class="doc-note">Your coach will add your prep work here.</p>';
-
-  // Drills grouped by training environment in progression order
+  // === Drills by environment (the core — clean, scannable) ===
   const ENV_ORDER = ['Tee', 'Toss', 'Front Toss', 'BP', 'Machine', 'Game'];
   const drills = Array.isArray(plan.drills) ? plan.drills : [];
   const byEnv = {};
@@ -5150,28 +5127,33 @@ function hittingPlanPage(user, p) {
     byEnv[env].push(d);
   }
   const drillsHtml = drills.length
-    ? ENV_ORDER.filter((env) => byEnv[env] && byEnv[env].length).map((env) => `
-      <h3 class="doc-env">${esc(env)}</h3>
-      <table class="doc-table">
-        <thead><tr><th>Drill</th><th>Volume</th><th>Cues</th><th>Why?</th></tr></thead>
-        <tbody>${byEnv[env].map((d) => `<tr>
-          <td><strong>${esc(d.name || '')}</strong></td>
-          <td>${esc(d.volume || '')}</td>
-          <td>${esc(d.cues || '')}</td>
-          <td>${esc(d.why || '')}</td>
-        </tr>`).join('')}</tbody>
-      </table>`).join('')
-      + `<p class="doc-note">Drill demos are all in the Remote library (Videos tab).</p>`
-    : '<p class="doc-note">Your coach will add your drills here.</p>';
+    ? `<section class="doc-section"><h2>The Work</h2>
+       ${ENV_ORDER.filter((env) => byEnv[env] && byEnv[env].length).map((env) => `
+        <h3 class="doc-env">${esc(env)}</h3>
+        <ul class="compact-list">${byEnv[env].map((d) => `<li>
+          <strong>${esc(d.name || '')}</strong>${d.volume ? ` <span class="dim">— ${esc(d.volume)}</span>` : ''}
+          ${d.cues ? `<br><span class="cue">${esc(d.cues)}</span>` : ''}
+          ${d.why ? `<br><span class="why">${esc(d.why)}</span>` : ''}
+        </li>`).join('')}</ul>`).join('')}
+       <p class="doc-note">Drill demos in the Remote library (Videos tab).</p></section>`
+    : '';
 
-  // Training environment variations (open angle, breaking balls, velo, etc.)
-  const defaultVariations = `<p>Mix these into your environments to make the work game-like:</p>
-<ul>
-<li><strong>Open angle</strong> — open up the front side, work the other way</li>
-<li><strong>Breaking balls</strong> — recognize spin, stay on the ball</li>
-<li><strong>Velo</strong> — turn the machine up, be on time for heat</li>
-</ul>`;
-  const variationsHtml = plan.env_variations || defaultVariations;
+  // === Your keys: strengths + cues + mental (combined) ===
+  const strengths = Array.isArray(prog.strengths) ? prog.strengths.filter(Boolean) : [];
+  const cues = prog.cues && typeof prog.cues === 'object' ? prog.cues : {};
+  const cueEntries = Object.entries(cues).filter(([k, v]) => v && String(v).trim());
+  const keysParts = [];
+  if (strengths.length) keysParts.push(`<p><strong>Strengths:</strong> ${strengths.map(esc).join(' · ')}</p>`);
+  if (cueEntries.length) keysParts.push(`<ul class="compact-list">${cueEntries.map(([k, v]) => `<li><strong>${esc(k)}:</strong> ${esc(String(v))}</li>`).join('')}</ul>`);
+  if (prog.mental_framework) keysParts.push(`<p class="mental">${esc(prog.mental_framework)}</p>`);
+  const keysHtml = keysParts.length
+    ? `<section class="doc-section"><h2>Your Keys</h2>${keysParts.join('')}</section>`
+    : '';
+
+  // === Variations (brief) ===
+  const variationsHtml = plan.env_variations
+    ? `<section class="doc-section"><h2>Make It Game-Like</h2><p>${esc(plan.env_variations)}</p></section>`
+    : '';
 
   const footer = plan.footer ? `<div class="doc-footer">${esc(plan.footer)}</div>` : '';
 
@@ -5190,76 +5172,64 @@ function hittingPlanPage(user, p) {
       <h1 class="doc-title">Hitting Program</h1>
       <p class="doc-athlete">${esc(athleteName)}</p>
       <hr class="doc-rule">
-      ${gradesHtml ? `<section class="doc-section"><h2>Grades — Where You're At</h2>${gradesHtml}</section>` : ''}
-      ${phaseHtml ? `<section class="doc-section"><h2>Phase Focus</h2>${phaseHtml}</section>` : ''}
-      ${adjustmentHtml ? `<section class="doc-section"><h2>The Adjustment</h2>${adjustmentHtml}</section>` : ''}
-      ${strengthsHtml ? `<section class="doc-section"><h2>Strengths</h2>${strengthsHtml}</section>` : ''}
-      ${cuesHtml ? `<section class="doc-section"><h2>Your Cues</h2>${cuesHtml}</section>` : ''}
-      ${mentalHtml ? `<section class="doc-section"><h2>Mental Framework</h2>${mentalHtml}</section>` : ''}
-      ${scheduleHtml ? `<section class="doc-section"><h2>Weekly Schedule</h2>${scheduleHtml}</section>` : ''}
-      <section class="doc-section">
-        <h2>Training Environments</h2>
-        ${environmentsHtml}
-      </section>
-      <section class="doc-section">
-        <h2>Warmup — Prep Work</h2>
-        ${warmupHtml}
-      </section>
-      ${medballHtml ? `<section class="doc-section"><h2>Med Ball</h2>${medballHtml}<p class="doc-note">Med ball demos are in the Remote library (Videos tab).</p></section>` : ''}
-      <section class="doc-section">
-        <h2>The Work — Drill Progression</h2>
-        ${drillsHtml}
-      </section>
-      <section class="doc-section">
-        <h2>Environment Variations</h2>
-        ${variationsHtml}
-      </section>
+      ${whereHtml}
+      ${scheduleHtml}
+      ${warmupHtml}
+      ${medballHtml}
+      ${drillsHtml}
+      ${keysHtml}
+      ${variationsHtml}
       ${footer}
     </div>
     <style>
-      .doc-page { max-width: 760px; margin: 0 auto; background: #ffffff; color: #1a1a1a;
-        padding: 40px 36px; border-radius: 4px; box-shadow: 0 2px 12px rgba(0,0,0,0.12);
-        font-family: Georgia, 'Times New Roman', serif; line-height: 1.6; }
-      .doc-brand { display: flex; align-items: center; gap: 14px; margin-bottom: 8px; }
-      .doc-brand-mark { width: 52px; height: 52px; border-radius: 50%; background: #111; color: #fff;
-        display: flex; align-items: center; justify-content: center;
-        font-family: -apple-system, Helvetica, Arial, sans-serif; font-weight: 800; font-size: 20px; letter-spacing: 1px; }
-      .doc-brand-name { font-family: -apple-system, Helvetica, Arial, sans-serif; font-weight: 800;
-        font-size: 18px; letter-spacing: 2px; color: #111; }
-      .doc-brand-sub { font-family: -apple-system, Helvetica, Arial, sans-serif; font-size: 12px;
-        letter-spacing: 3px; text-transform: uppercase; color: #666; }
-      .doc-title { font-size: 32px; margin: 18px 0 0; color: #111; font-weight: 700; }
-      .doc-athlete { font-size: 20px; color: #444; margin: 4px 0 0; font-style: italic; }
-      .doc-rule { border: none; border-top: 3px solid #111; margin: 18px 0 24px; }
-      .doc-section { margin: 28px 0; }
-      .doc-section h2 { font-size: 20px; color: #111; border-bottom: 1px solid #ddd;
-        padding-bottom: 6px; margin: 0 0 12px; font-family: -apple-system, Helvetica, Arial, sans-serif; }
-      .doc-section p, .doc-section li { color: #222; font-size: 16px; }
-      .doc-env { font-size: 17px; color: #111; margin: 20px 0 8px;
-        font-family: -apple-system, Helvetica, Arial, sans-serif; }
-      .doc-list { padding-left: 22px; }
-      .doc-list li { margin: 6px 0; }
-      .doc-note { font-size: 14px; color: #666; font-style: italic;
-        font-family: -apple-system, Helvetica, Arial, sans-serif; }
-      .doc-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 15px;
-        font-family: -apple-system, Helvetica, Arial, sans-serif; }
-      .doc-table th { background: #111; color: #fff; padding: 10px 12px; text-align: left; font-weight: 600; }
-      .doc-table td { padding: 10px 12px; border-bottom: 1px solid #e0e0e0; color: #222; vertical-align: top; }
-      .doc-table tr:nth-child(even) td { background: #f7f7f7; }
-      .grades-table th { background: #333; }
-      .grade-val { font-size: 22px; font-weight: 700; text-align: center; }
-      .doc-footer { margin-top: 24px; padding: 14px 16px; background: #fffbe6;
-        border-left: 4px solid #e6a800; font-style: italic; color: #333; font-size: 15px; }
-      .doc-back { max-width: 760px; margin: 16px auto 0; }
-      @media (max-width: 600px) { .doc-page { padding: 24px 18px; } .doc-title { font-size: 26px; } }
+      .doc-page { max-width: 700px; margin: 0 auto; background: #fff; color: #1a1a1a;
+        padding: 32px 28px; border-radius: 6px; box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+        font-family: -apple-system, Helvetica, Arial, sans-serif; line-height: 1.5; }
+      .doc-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+      .doc-brand-mark { width: 44px; height: 44px; border-radius: 50%; background: #111; color: #fff;
+        display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 18px; }
+      .doc-brand-name { font-weight: 800; font-size: 16px; letter-spacing: 1.5px; color: #111; }
+      .doc-brand-sub { font-size: 11px; letter-spacing: 2.5px; text-transform: uppercase; color: #666; }
+      .doc-title { font-size: 28px; margin: 14px 0 0; color: #111; }
+      .doc-athlete { font-size: 18px; color: #555; margin: 2px 0 0; }
+      .doc-rule { border: none; border-top: 3px solid #111; margin: 14px 0 20px; }
+      .doc-section { margin: 22px 0; }
+      .doc-section h2 { font-size: 18px; color: #111; border-bottom: 2px solid #111;
+        padding-bottom: 5px; margin: 0 0 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+      .doc-section p { color: #222; font-size: 15px; margin: 8px 0; }
+      .doc-env { font-size: 16px; color: #fff; background: #111; display: inline-block;
+        padding: 4px 12px; border-radius: 4px; margin: 14px 0 8px; }
+      .compact-list { list-style: none; padding: 0; margin: 0; }
+      .compact-list li { padding: 8px 0; border-bottom: 1px solid #eee; font-size: 15px; color: #222; }
+      .compact-list li:last-child { border-bottom: none; }
+      .dim { color: #666; }
+      .cue { color: #0066cc; font-size: 14px; }
+      .why { color: #666; font-size: 14px; font-style: italic; }
+      .mental { background: #f0f4ff; padding: 10px 12px; border-radius: 4px; border-left: 3px solid #0066cc; }
+      .grade-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin: 10px 0; }
+      .grade-card { background: #f8f8f8; border-radius: 6px; padding: 10px; text-align: center; }
+      .grade-cat { font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
+      .grade-val { font-size: 24px; font-weight: 800; color: #111; margin: 4px 0; }
+      .grade-why { font-size: 12px; color: #555; line-height: 1.4; }
+      .doc-table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 14px; }
+      .doc-table td { padding: 8px 10px; border-bottom: 1px solid #e8e8e8; color: #222; vertical-align: top; }
+      .sched-day { font-weight: 700; white-space: nowrap; width: 90px; }
+      .doc-note { font-size: 13px; color: #888; font-style: italic; margin: 8px 0 0; }
+      .doc-footer { margin-top: 20px; padding: 12px 14px; background: #fffbe6;
+        border-left: 4px solid #e6a800; font-style: italic; color: #333; font-size: 14px; border-radius: 0 4px 4px 0; }
+      @media (max-width: 600px) {
+        .doc-page { padding: 20px 16px; margin: 0 -8px; border-radius: 0; box-shadow: none; }
+        .doc-title { font-size: 24px; }
+        .grade-grid { grid-template-columns: repeat(2, 1fr); }
+      }
       @media print {
         .doc-page { box-shadow: none; padding: 0; max-width: none; }
-        .doc-back { display: none; }
         .doc-section { break-inside: avoid; }
       }
     </style>`,
   });
 }
+
 
 
 
