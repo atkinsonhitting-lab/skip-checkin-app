@@ -659,3 +659,32 @@
       });
     }
   })();
+
+// Bible study opt-in popup (Sep 23 2026): the popup HTML is server-rendered
+// on athlete home when unanswered. Handlers live here (not inline) because
+// the Content-Security-Policy blocks inline scripts.
+(function () {
+  var overlay = document.getElementById('bible-popup-overlay');
+  if (!overlay) return;
+  var yes = document.getElementById('bible-yes');
+  var no = document.getElementById('bible-no');
+  if (!yes || !no) return;
+  function choose(v) {
+    yes.disabled = true;
+    no.disabled = true;
+    fetch('/api/bible-study-choice', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ choice: v })
+    }).then(function (r) {
+      if (!r.ok) throw 0;
+      overlay.remove();
+    }).catch(function () {
+      yes.disabled = false;
+      no.disabled = false;
+    });
+  }
+  yes.addEventListener('click', function () { choose(1); });
+  no.addEventListener('click', function () { choose(0); });
+})();
