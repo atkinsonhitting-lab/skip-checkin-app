@@ -158,10 +158,11 @@ function onboardingOverlay(user) {
     { icon: '🔒', title: 'Lock In first', text: 'Before you train: run your morning routine, read today\u2019s verse, and do the daily mental exercise. Show up locked in.' },
     { icon: '✅', title: 'Check in after', text: 'Three taps and talk. Tell Skip how the session went \u2014 he sorts it out and scores your day.' },
     { icon: '💬', title: 'Talk to Skip anytime', text: 'Struggling? Skip has seen every session you\u2019ve logged. He\u2019ll point you back to what works for YOU.' },
+    { icon: '🧠', title: 'New: your questionnaire', text: 'Everything\u2019s fresh in here. Fill out the new mental-game questionnaire so Skip can build your plan.', cta: 'Fill it out →', href: '/mental-game/questionnaire' },
   ];
   return `<div id="onboard" hidden>
     <div class="onboard-card">
-      <div class="onboard-slides">${slides.map((s, i) => `<div class="onboard-slide" data-slide="${i}"${i ? ' hidden' : ''}><div class="onboard-icon">${s.icon}</div><h2>${s.title}</h2><p>${s.text}</p></div>`).join('')}</div>
+      <div class="onboard-slides">${slides.map((s, i) => `<div class="onboard-slide" data-slide="${i}"${s.cta ? ` data-cta="${esc(s.cta)}" data-href="${esc(s.href)}"` : ''}${i ? ' hidden' : ''}><div class="onboard-icon">${s.icon}</div><h2>${s.title}</h2><p>${s.text}</p></div>`).join('')}</div>
       <div class="onboard-dots">${slides.map((_, i) => `<span class="onboard-dot${i ? '' : ' active'}" data-dot="${i}"></span>`).join('')}</div>
       <div class="onboard-nav"><button type="button" id="onboard-skip" class="btn-ghost">Skip</button><button type="button" id="onboard-next" class="btn-primary">Next</button></div>
     </div>
@@ -3004,7 +3005,8 @@ function biblePopupHtml() {
     <div id="bible-popup-overlay" class="modal-overlay">
       <div class="card modal-card" role="dialog" aria-modal="true" aria-labelledby="bible-popup-title">
         <h2 id="bible-popup-title" style="margin-top:0">New: Daily Bible Study</h2>
-        <p>We&apos;re adding an optional daily Bible study &mdash; a verse plus a short breakdown in the Lock In tab. Only for guys who want it.</p>
+        <p>We&apos;re adding an optional daily Bible study &mdash; a fresh verse plus a short breakdown every morning. Only for guys who want it.</p>
+        <p class="hint">Your verse shows up inside your Morning Routine in Lock In. Haven&apos;t built a routine yet? It&apos;ll be waiting on your Lock In page every morning.</p>
         <div class="modal-actions">
           <button type="button" class="btn-primary" id="bible-yes">Yes, count me in</button>
           <button type="button" class="btn-secondary" id="bible-no">No thanks</button>
@@ -3248,6 +3250,7 @@ function mentalGamePage(user, data) {
   const cardsHtml = b.plan ? `
     <h2 class="section-title">Today</h2>
     ${heroCard('morning', '🌅', 'Morning Routine', routineItems, routineDone, '3 min')}
+    ${bibleHtml}
     <div class="day-picker">
       <p class="field-label compact">What's today?</p>
       <div class="day-picker-btns">

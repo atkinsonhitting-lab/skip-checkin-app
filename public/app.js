@@ -1172,27 +1172,42 @@ document.querySelectorAll('.feel-slider input[type="range"]').forEach((el) => {
   });
 })();
 
-// First-run onboarding (Bobby, Sep 23 2026): 3 swipe screens, once ever.
+// First-run onboarding (Bobby, Sep 23 2026): swipe screens, once ever.
+// v2 (Sep 23): everyone sees it again; ends by sending them to the new
+// mental-game questionnaire.
 (function () {
+  const KEY = 'dd-onboarded-v2';
   const ov = document.getElementById('onboard');
   if (!ov) return;
-  try { if (localStorage.getItem('dd-onboarded')) return; } catch (e) { return; }
+  try { if (localStorage.getItem(KEY)) return; } catch (e) { return; }
   const slides = Array.from(ov.querySelectorAll('.onboard-slide'));
   const dots = Array.from(ov.querySelectorAll('.onboard-dot'));
   const nextBtn = document.getElementById('onboard-next');
   const skipBtn = document.getElementById('onboard-skip');
   let i = 0;
+  const last = slides.length - 1;
+  const cta = () => {
+    const el = slides[i];
+    return el ? { text: el.dataset.cta || null, href: el.dataset.href || null } : {};
+  };
   const show = (n) => {
     i = n;
     slides.forEach((s, k) => { s.hidden = k !== i; });
     dots.forEach((d, k) => d.classList.toggle('active', k === i));
-    nextBtn.textContent = i === slides.length - 1 ? "Let's go" : 'Next';
+    const c = cta();
+    nextBtn.textContent = c.text || (i === last ? "Let's go" : 'Next');
   };
-  const done = () => {
-    try { localStorage.setItem('dd-onboarded', '1'); } catch (e) {}
+  const done = (go) => {
+    try { localStorage.setItem(KEY, '1'); } catch (e) {}
     ov.hidden = true;
+    document.body.style.overflow = '';
+    if (go) location.href = go;
   };
-  nextBtn.addEventListener('click', () => { i < slides.length - 1 ? show(i + 1) : done(); });
+  nextBtn.addEventListener('click', () => {
+    if (i < last) return show(i + 1);
+    const c = cta();
+    done(c.href || null);
+  });
   skipBtn.addEventListener('click', done);
   // Swipe support.
   let sx = null;
