@@ -76,6 +76,16 @@ for (const col of ['first_name', 'last_name']) {
   }
 }
 
+// Bible study opt-in (Sep 23 2026, Bobby): tri-state.
+// 1 = wants the daily Bible study, 0 = declined, NULL = not asked yet (the
+// opt-in popup shows on app open while NULL).
+{
+  const cols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+  if (!cols.includes('bible_study')) {
+    db.exec('ALTER TABLE users ADD COLUMN bible_study INTEGER;');
+  }
+}
+
 // Organizations (Sep 2026): Bobby sells Diamond Daily to colleges, travel
 // programs, and hitting coaches. Each organization has a signup code its
 // coaches hand to players, plus a per-organization Talk to Skip switch — many
@@ -620,6 +630,82 @@ db.exec(`CREATE TABLE IF NOT EXISTS program_checkoffs (
   UNIQUE(user_id, day, item_key)
 );`);
 db.exec('CREATE INDEX IF NOT EXISTS idx_checkoffs_user_key ON program_checkoffs(user_id, item_key, day);');
+// Hevy-style per-set logging (Sep 2026): sets_json holds
+// [{w: lbs, r: reps, done: 0/1}, ...] for kind='lift' rows.
+{
+  const cols = db.prepare('PRAGMA table_info(program_checkoffs)').all().map((c) => c.name);
+  if (!cols.includes('sets_json')) db.exec('ALTER TABLE program_checkoffs ADD COLUMN sets_json TEXT;');
+}
+// Coach-editable intake questions (Sep 2026): Bobby's own custom questions,
+// appended to the intake questionnaire. Core questions stay fixed (they
+// drive draft program generation); these are informational for his review.
+db.exec(`CREATE TABLE IF NOT EXISTS intake_custom_questions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  label TEXT NOT NULL,
+  field_type TEXT NOT NULL DEFAULT 'text',
+  options_json TEXT NOT NULL DEFAULT '[]',
+  required INTEGER NOT NULL DEFAULT 0,
+  position INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT ''
+);`);
+// Bobby's rule (Sep 2026): no static stretching, ever. Strip the banned
+// template stretches from existing programs' mobility blocks. Runs once.
+{
+  // Defensive: the canonical settings table is created further down in this
+  // file, so make sure it exists before this migration touches it.
+  db.exec("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '');");
+  const flag = db.prepare("SELECT value FROM settings WHERE key = 'migration_no_static_stretch'").get();
+  if (!flag) {
+    const banned = ['pigeon stretch', 'half-kneeling hip flexor stretch', 'deep squat hold w/ elbow press', 'sleeper stretch', 'cross-body shoulder stretch', 'half-kneeling calf stretch'];
+    let cleaned = 0;
+    try {
+      const rows = db.prepare('SELECT id, program_json FROM remote_programs').all();
+      for (const row of rows) {
+        let prog;
+        try { prog = JSON.parse(row.program_json || '{}'); } catch (e) { continue; }
+        let changed = false;
+        const blocks = Array.isArray(prog.routine) ? prog.routine : [];
+        for (const b of blocks) {
+          const cat = String(b.category || '');
+          if (!/^mobility/i.test(cat) || !Array.isArray(b.items)) continue;
+          const before = b.items.length;
+          b.items = b.items.filter((it) => !banned.includes(String(it.drill || it.name || '').toLowerCase().trim()));
+          if (b.items.length !== before) { changed = true; cleaned += before - b.items.length; }
+        }
+        if (changed) {
+          db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?')
+            .run(JSON.stringify(prog), new Date().toISOString(), row.id);
+        }
+      }
+    } catch (e) { /* best effort */ }
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('migration_no_static_stretch', ?)").run(String(cleaned));
+  }
+}
+// Bobby's rule (Sep 2026): med ball work links to YouTube, never the in-app
+// drill library. Re-point auto-linked med ball items at his YouTube registry
+// links. Runs once; manual links are never touched.
+{
+  const flag = db.prepare("SELECT value FROM settings WHERE key = 'migration_medball_youtube'").get();
+  if (!flag) {
+    let fixed = 0;
+    try {
+      const vl = require('./video_links');
+      const rows = db.prepare('SELECT id, program_json FROM remote_programs').all();
+      const upd = db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?');
+      for (const row of rows) {
+        let prog;
+        try { prog = JSON.parse(row.program_json || '{}'); } catch (e) { continue; }
+        const n = vl.repairMedBallLinks(prog);
+        if (n > 0) {
+          upd.run(JSON.stringify(prog), new Date().toISOString(), row.id);
+          fixed += n;
+        }
+      }
+    } catch (e) { /* best effort */ }
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('migration_medball_youtube', ?)").run(String(fixed));
+  }
+}
 // NOTE: starter lifting templates are seeded after the settings table is
 // created below (guarded by a settings flag).
 
@@ -696,6 +782,15 @@ CREATE TABLE IF NOT EXISTS leads (
 CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status);
 CREATE INDEX IF NOT EXISTS idx_leads_submitted ON leads(submitted_at);
 `);
+// The sales-site application form collects which program the visitor wants
+// (Regular / Complete, Remote / Hybrid). /api/leads silently dropped it;
+// the public intake endpoint stores it. Guarded for existing databases.
+{
+  const cols = db.prepare('PRAGMA table_info(leads)').all().map((c) => c.name);
+  if (!cols.includes('program_interest')) {
+    db.exec("ALTER TABLE leads ADD COLUMN program_interest TEXT NOT NULL DEFAULT '';");
+  }
+}
 
 // Skip's durable memory per hitter: what Skip has learned about this hitter
 // over time (their best-day patterns, cues that work for them, slump fixes).
