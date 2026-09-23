@@ -2260,6 +2260,11 @@ function isMyProgramPlayer(userId) {
     .prepare('SELECT 1 FROM users u JOIN organizations o ON o.id = u.organization_id WHERE u.id = ? AND o.is_mine = 1')
     .get(userId);
 }
+// Bobby (Sep 23 2026): messaging is remote-guys only (Atkinson Hitter
+// Development System). Checks the user has a remote program assigned.
+function isRemotePlayer(userId) {
+  return !!db.prepare('SELECT 1 FROM users WHERE id = ? AND remote_program_id IS NOT NULL').get(userId);
+}
 async function notifyMyPlayerCheckin(userId, athleteName, coachUrl) {
   if (!pushEnabled) return;
   if (!wantsCheckinNotify(userId)) return; // tri-state per-player alert pref
@@ -5535,7 +5540,7 @@ app.get('/coach/messages/:userId', requireGlobalCoachAny, (req, res) => {
   setApprovalCount(req);
   const me = realUser(req);
   const other = db.prepare("SELECT id, first_name, last_name, athlete_name, email FROM users WHERE id = ? AND role = 'athlete'").get(req.params.userId);
-  if (!other || !isMyProgramPlayer(other.id)) return res.status(403).send('Forbidden');
+  if (!other || !isRemotePlayer(other.id)) return res.status(403).send('Forbidden');
   db.prepare(
     'UPDATE message_recipients SET read_at = ? WHERE user_id = ? AND read_at IS NULL AND message_id IN (SELECT id FROM messages WHERE sender_id = ?)'
   ).run(new Date().toISOString(), me.id, other.id);
@@ -5556,7 +5561,7 @@ app.get('/coach/messages/:userId', requireGlobalCoachAny, (req, res) => {
 app.post('/coach/messages/to/:userId', requireCoach, (req, res) => {
   const me = realUser(req);
   const other = db.prepare("SELECT id FROM users WHERE id = ? AND role = 'athlete'").get(req.params.userId);
-  if (!other || !isMyProgramPlayer(other.id)) return res.status(403).send('Forbidden');
+  if (!other || !isRemotePlayer(other.id)) return res.status(403).send('Forbidden');
   msgAttachmentUpload.single('attachment')(req, res, (err) => {
     if (err) return res.redirect('/coach/messages/' + other.id + '?error=' + encodeURIComponent(err.message || 'Attachment failed.'));
     const body = String(req.body.body || '').trim();
@@ -5578,6 +5583,8 @@ app.post('/coach/messages/to/:userId', requireCoach, (req, res) => {
 // Viewing marks the player's rows read. Coaches use /coach/messages.
 app.get('/messages', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach/messages');
+  // Bobby (Sep 23 2026): only remote guys get messaging.
+  if (!req.user.remoteProgramId) return res.redirect('/');
   const me = req.user;
   markMessagesRead(me.id);
   const msgs = db
@@ -5606,7 +5613,8 @@ app.post('/messages/to-coach', requireLogin, (req, res) => {
   msgAttachmentUpload.single('attachment')(req, res, (err) => {
     if (err) return res.redirect('/messages?error=' + encodeURIComponent(err.message || 'Attachment failed.'));
     const me = req.user;
-    if (me.role !== 'athlete' || !isMyProgramPlayer(me.id)) return res.status(403).send('Forbidden');
+    // Bobby (Sep 23 2026): only remote guys can message.
+    if (me.role !== 'athlete' || !me.remoteProgramId) return res.status(403).send('Forbidden');
     const body = String(req.body.body || '').trim();
     const file = req.file;
     if ((!body || body.length > 500) && !file) {

@@ -147,8 +147,11 @@ function userTabs(active, user) {
     { href: '/checkin', label: 'Check In', active: active === 'checkin' },
     { href: '/notebook', label: 'Notebook', active: active === 'notebook' },
     { href: '/chat', label: 'Talk to Skip', sub: 'your personally trained coach', active: active === 'chat' },
-    { href: '/messages', label: 'Messages', active: active === 'messages', badge: user && user.unreadMessages > 0 ? String(user.unreadMessages) : null },
   );
+  // Bobby (Sep 23 2026): only remote guys get the Messages tab.
+  if (isRemote) {
+    tabs.push({ href: '/messages', label: 'Messages', active: active === 'messages', badge: user && user.unreadMessages > 0 ? String(user.unreadMessages) : null });
+  }
   // Organizations can turn Talk to Skip off for their players: no tab, no FAB,
   // no bottom-bar icon (all three key off this tab list).
   if (user && user.skipChatDisabled) {
