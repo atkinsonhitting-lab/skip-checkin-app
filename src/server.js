@@ -42,6 +42,8 @@ app.use(helmet({
       // Branded orgs inject a small <style> block overriding --red/--red-dark.
       // Colors are strict hex-validated server-side, so inline styles are safe.
       'style-src': ["'self'", "'unsafe-inline'"],
+      // App uses inline <script> for bootstrapping page data (WO_DAY, etc.).
+      'script-src': ["'self'", "'unsafe-inline'"],
       // Video library embeds Google Drive previews in an iframe.
       'frame-src': ["'self'", 'https://drive.google.com'],
     },
@@ -3403,7 +3405,11 @@ function buildPersonalRoutines(answers) {
   const a = answers || {};
   const has = (v) => String(v || '').trim().length > 0;
   const t = (v, n) => { v = String(v || '').trim(); return v.length > n ? v.slice(0, n - 1).trimEnd() + '…' : v; };
-  const kw = String(a.keyword || '').trim();
+  // Sanitize keyword: dismissive answers ("nope", "nah", "idk", etc.) become
+  // a positive default. A reset word must be something you WANT to say.
+  const rawKw = String(a.keyword || '').trim();
+  const dismissive = /^(nope?|nah+|no|none|n\/a|na|idk|dont know|don't know|nothing|no idea|\?+|-+)$/i;
+  const kw = dismissive.test(rawKw) ? 'Lock in' : rawKw;
   const starter = a.has_routine === 'no';
   const light = a.signal_light;
 
