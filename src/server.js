@@ -3719,8 +3719,10 @@ app.post('/coach/remote/unlink', requireCoach, (req, res) => {
 // Coach-only: templates, athlete assignments, and the per-athlete lifting
 // editor. requireCoach already 403s view-only coaches.
 function requireLiftingCoach(req, res, next) {
-  if (req.user.role !== 'coach') return res.status(403).send('Coaches only.');
-  if (!req.user.canEdit) return res.status(403).send('View-only coaches cannot change programs.');
+  // Use realUser: in view-as mode req.user is the previewed athlete.
+  const u = realUser(req);
+  if (!u || u.role !== 'coach') return res.status(403).send('Coaches only.');
+  if (!u.canEdit) return res.status(403).send('View-only coaches cannot change programs.');
   next();
 }
 function liftingProgramsList() {
@@ -5471,7 +5473,7 @@ app.get('/videos', requireLogin, requireRemote, (req, res) => {
   const cats = db
     .prepare(
       `SELECT vl.category AS category, COUNT(*) AS n,
-              COALESCE(NULLIF(cm.title, ''), vl.category) AS title,
+              COALESCE(NULLIF(cm.title, ''), REPLACE(vl.category, 'Apporach', 'Approach')) AS title,
               COALESCE(cm.emoji, '') AS emoji,
               COALESCE(cm.sort_order, 999) AS so
        FROM video_library vl LEFT JOIN category_meta cm ON cm.category = vl.category
@@ -5486,7 +5488,7 @@ app.get('/videos', requireLogin, requireRemote, (req, res) => {
   const videos = q
     ? db
         .prepare(
-          `SELECT vl.*, COALESCE(NULLIF(cm.title, ''), vl.category) AS cat_title
+          `SELECT vl.*, COALESCE(NULLIF(cm.title, ''), REPLACE(vl.category, 'Apporach', 'Approach')) AS cat_title
            FROM video_library vl LEFT JOIN category_meta cm ON cm.category = vl.category
            WHERE vl.hidden = 0 AND COALESCE(cm.hidden, 0) = 0
              AND (COALESCE(NULLIF(vl.custom_name, ''), vl.name) LIKE '%' || ? || '%')
@@ -5531,7 +5533,7 @@ app.get('/coach/videos', requireGlobalCoachAny, (req, res) => {
   const cats = db
     .prepare(
       `SELECT vl.category AS category, COUNT(*) AS n,
-              COALESCE(NULLIF(cm.title, ''), vl.category) AS title,
+              COALESCE(NULLIF(cm.title, ''), REPLACE(vl.category, 'Apporach', 'Approach')) AS title,
               COALESCE(cm.emoji, '') AS emoji,
               COALESCE(cm.sort_order, 999) AS so,
               COALESCE(cm.hidden, 0) AS mhidden
@@ -6763,8 +6765,22 @@ app.get('/coach', requireCoachAny, (req, res) => {
       (SELECT token FROM intake_invites WHERE lead_id = l.id AND used_at = '' ORDER BY id DESC LIMIT 1) AS invite_token
       FROM leads l ORDER BY submitted_at DESC LIMIT 25`).all();
   }
+  // Bible Study opt-ins for Bobby's dashboard (Sep 23 2026): who wants the
+  // daily verse. Global coaches only.
+  let bibleOptIns = [];
+  if (isGlobal) {
+    try {
+      bibleOptIns = db.prepare(
+        `SELECT u.id, u.first_name || ' ' || u.last_name AS name, u.email
+         FROM users u LEFT JOIN organizations o ON o.id = u.organization_id
+         WHERE u.role = 'athlete' AND u.status = 'approved' AND u.bible_study = 1
+           AND (o.is_mine = 1 OR u.organization_id IS NULL)
+         ORDER BY name LIMIT 50`
+      ).all();
+    } catch (e) { bibleOptIns = []; }
+  }
   res.send(
-    views.coachHomePage(me, quiet, latest, pending, userPushSubscriptions(req.user.id).length > 0, analytics, leads, myGuys)
+    views.coachHomePage(me, quiet, latest, pending, userPushSubscriptions(req.user.id).length > 0, analytics, leads, myGuys, bibleOptIns)
   );
 });
 
