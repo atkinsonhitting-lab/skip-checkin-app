@@ -1794,6 +1794,8 @@ function getProgram(id) {
   if (!prog || typeof prog !== 'object') prog = {};
   return { id: row.id, athlete_name: row.athlete_name, updated_at: row.updated_at, prog, session_order: row.session_order || 'hitting_first', component_order: row.component_order || '' };
 }
+// Hitting plan version — bump when buildHittingPlan logic changes to force regen of stale stored plans.
+const HITTING_PLAN_VERSION = 4;
 // Build a hitting-plan document from a program's routine blocks (Sep 23 2026).
 // Warmup = prep/mobility/daily-routine blocks (Bobby's prep work). Drills =
 // hitting blocks (tee/toss/BP/machine/game). Videos are NOT embedded — the
@@ -1849,7 +1851,7 @@ function buildHittingPlan(prog) {
       }
     }
   }
-  return { environments_note: '', env_variations: envVariations.join(', '), warmup, drills, medball, footer: '' };
+  return { _v: HITTING_PLAN_VERSION, environments_note: '', env_variations: envVariations.join(', '), warmup, drills, medball, footer: '' };
 }
 // ---- Programs tab: lifting + check-offs (Sep 2026) ----
 // Chicago date string (YYYY-MM-DD) used as the check-off day key.
@@ -2206,8 +2208,9 @@ app.get('/program/hitting-plan', requireLogin, requireWaiver, (req, res) => {
   if (!req.user.remoteProgramId) return res.redirect('/');
   const p = getProgram(req.user.remoteProgramId);
   if (!p) return res.redirect('/');
-  // Lazy-backfill: if no hitting_plan yet, derive it from the routine blocks.
-  if (!p.prog.hitting_plan) {
+  // Lazy-backfill: if no hitting_plan yet OR version is stale, (re)generate from routine blocks.
+  // Bobby (Sep 23 2026): stored plans don't auto-update when the builder changes — version check forces it.
+  if (!p.prog.hitting_plan || p.prog.hitting_plan._v !== HITTING_PLAN_VERSION) {
     p.prog.hitting_plan = buildHittingPlan(p.prog);
     db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?')
       .run(JSON.stringify(p.prog), new Date().toISOString(), p.id);
