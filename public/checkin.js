@@ -139,8 +139,7 @@ window.addEventListener('pageshow', function () {
   var INTENTS = ['light', 'medium', 'heavy'];
 
   var HEADLINES = {
-    hittingTaps: "Almost there — just tap what's missing:",
-    hittingTalk: "Your entry won't submit yet — here's what's missing:",
+    hitting12: "Almost there — just tap what's missing:",
     hitting: "Your entry won't submit yet — here's what's missing:",
     pitching: "Your entry won't submit yet — here's what's missing:",
     combined: "Your entry won't submit yet — here's what's missing:",
@@ -195,7 +194,7 @@ window.addEventListener('pageshow', function () {
       }
     }
 
-    if (kind === 'hittingTaps') {
+    if (kind === 'hitting12') {
       var STYPES = ['game', 'cage', 'live_abs', 'team_practice'];
       if (STYPES.indexOf(v.session_type) < 0) {
         missing('session_type', 'What did you do today?',
@@ -206,8 +205,6 @@ window.addEventListener('pageshow', function () {
         missing('swing_feel', 'Rate your swing, contact, and approach',
           'Tap the stars — 1 to 5 on each.');
       }
-    } else if (kind === 'hittingTalk') {
-      // Step 2: taps are hidden fields (already validated); reflections optional.
     } else if (kind === 'hitting') {
       if (ENVS.indexOf(v.environment) < 0) {
         missing('environment', 'Where were you?',
