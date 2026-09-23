@@ -203,6 +203,7 @@ function coachTabs(active, approvalCount, user) {
   if (user && user.role === 'coach' && !user.organizationId && user.canEdit !== false) {
     tabs.splice(6, 0, { href: '/coach/lifting', label: 'Lifting', active: active === 'lifting' });
     tabs.splice(7, 0, { href: '/coach/finances', label: 'Finances', active: active === 'finances' });
+    tabs.splice(8, 0, { href: '/coach/mental-questions', label: 'Questionnaire', active: active === 'mental-questions' });
   }
   return tabs;
 }
@@ -2791,6 +2792,59 @@ function liftingProgramsPage(user, data) {
 }
 
 // Coach: per-athlete / template lifting editor — compact day + exercise rows.
+// Coach: mental-game questionnaire editor (Sep 23 2026, Bobby). Add, edit,
+// reorder, archive questions. Athletes see the active ones on Lock In.
+function coachMentalQuestionsPage(user, questions) {
+  const optLines = (q) => (q.options || []).map((o) => `${o[0]} | ${o[1]}`).join('\n');
+  const rows = (questions || []).map((q, i) => `
+    <div class="card${q.active ? '' : ' archived'}" style="${q.active ? '' : 'opacity:0.55'}">
+      <form method="post" action="/coach/mental-questions/update" class="form">
+        <input type="hidden" name="id" value="${q.id}">
+        <p class="field-label" style="margin-top:0">${q.active ? '' : '<span class="badge">archived</span> '}Question ${i + 1}</p>
+        <label class="fld">Prompt<textarea name="prompt" rows="2" maxlength="300" required>${esc(q.prompt)}</textarea></label>
+        <label class="fld">Hint (optional)<input name="hint" maxlength="300" value="${esc(q.hint || '')}"></label>
+        <label class="fld">Type
+          <select name="qtype">
+            <option value="text"${q.qtype === 'text' ? ' selected' : ''}>Written answer</option>
+            <option value="radio"${q.qtype === 'radio' ? ' selected' : ''}>Tap choices</option>
+          </select>
+        </label>
+        <label class="fld">Choices (one per line: value | label)<textarea name="options" rows="3" placeholder="green | Green — calm, focused">${esc(optLines(q))}</textarea></label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <button type="submit" class="btn btn-primary btn-sm">Save</button>
+        </div>
+      </form>
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+        <form method="post" action="/coach/mental-questions/move" style="margin:0"><input type="hidden" name="id" value="${q.id}"><input type="hidden" name="dir" value="up"><button type="submit" class="btn-ghost btn-sm">↑</button></form>
+        <form method="post" action="/coach/mental-questions/move" style="margin:0"><input type="hidden" name="id" value="${q.id}"><input type="hidden" name="dir" value="down"><button type="submit" class="btn-ghost btn-sm">↓</button></form>
+        <form method="post" action="/coach/mental-questions/toggle" style="margin:0"><input type="hidden" name="id" value="${q.id}"><button type="submit" class="btn-ghost btn-sm">${q.active ? 'Archive' : 'Restore'}</button></form>
+      </div>
+    </div>`).join('');
+  return layout({
+    title: 'Questionnaire',
+    user,
+    tabs: coachTabs('mental-questions', 0, user),
+    body: `<h1 class="page-title">Lock In questionnaire</h1>
+    <p class="hint">This is what hitters answer on the Lock In tab. Skip builds their personal plan from it. Archived questions disappear for hitters but keep their old answers.</p>
+    ${rows}
+    <div class="card">
+      <h2 class="routine-station">Add a question</h2>
+      <form method="post" action="/coach/mental-questions/add" class="form">
+        <label class="fld">Prompt<textarea name="prompt" rows="2" maxlength="300" required placeholder="What do you want to ask?"></textarea></label>
+        <label class="fld">Hint (optional)<input name="hint" maxlength="300"></label>
+        <label class="fld">Type
+          <select name="qtype">
+            <option value="text">Written answer</option>
+            <option value="radio">Tap choices</option>
+          </select>
+        </label>
+        <label class="fld">Choices (one per line: value | label)<textarea name="options" rows="3" placeholder="attacking | Attacking"></textarea></label>
+        <p><button type="submit" class="btn btn-primary">Add question</button></p>
+      </form>
+    </div>`,
+  });
+}
+
 function liftingEditPage(user, lp) {
   const days = Array.isArray(lp.days) ? lp.days : [];
   const rpeOpts = (sel) =>
@@ -2912,8 +2966,9 @@ function biblePopupHtml() {
 }
 
 function mentalGamePage(user, data) {
-  const { baseline, saved, planFailed, keys, exercise, exerciseDone, bibleOptIn, bibleVerse, checkedInToday, showBiblePopup } = data || {};
+  const { baseline, saved, planFailed, keys, exercise, exerciseDone, bibleOptIn, bibleVerse, checkedInToday, showBiblePopup, questions, answers } = data || {};
   const b = baseline || {};
+  const ans = answers || {};
   const radio = (name, options) => `
     <div class="chip-row">${options
       .map(
@@ -2930,40 +2985,30 @@ function mentalGamePage(user, data) {
   const planHtml = b.plan
     ? `<div class="card"><h2 class="routine-station">Your mental game plan</h2><p style="white-space:pre-wrap;margin:0">${esc(b.plan)}</p></div>`
     : '';
-  // Questionnaire — main focus of the tab (Sep 23 2026). Bobby wants everyone
-  // to fill this out. Shown at the top if no plan yet, or if ?retake=1.
+  // Questionnaire v2 (Sep 23 2026) — rebuilt from scratch: renders from
+  // mental_questions so Bobby can edit it. Shown at the top if no plan yet,
+  // or if ?retake=1.
   const showQuestionnaire = !b.plan || (data && data.retake);
+  const qField = (q) => {
+    const name = 'q_' + q.qkey;
+    const val = ans[q.qkey] || '';
+    if (q.qtype === 'radio') {
+      return `<div class="chip-row">${(q.options || []).map(([ov, ol]) =>
+        `<label class="chip-radio"><input type="radio" name="${esc(name)}" value="${esc(ov)}"${val === String(ov) ? ' checked' : ''}><span>${esc(ol)}</span></label>`
+      ).join('')}</div>`;
+    }
+    return `<label class="fld">${q.hint ? `<span class="hint">${esc(q.hint)}</span>` : ''}
+      <textarea name="${esc(name)}" rows="2" maxlength="600" placeholder="${esc(q.hint || q.prompt)}">${esc(val)}</textarea>
+    </label>`;
+  };
   const questionnaireHtml = showQuestionnaire ? `
     <form method="post" action="/mental-game/save" class="form">
       <div class="card" style="border:2px solid var(--accent)">
         <h2 class="routine-station">Where's your head at?</h2>
         <p class="hint">Answer honestly — Skip builds your personal plan from this.</p>
-        <p class="field-label">In games, what color are you usually? (Ravizza's signal lights)</p>
-        ${radio('signal_light', [['green', 'Green — calm, focused'], ['yellow', 'Yellow — tension creeping in'], ['red', 'Red — emotional, rushed']])}
-        <p class="field-label">What's the worst thing you say to yourself when it's going bad? (write the actual sentence)</p>
-        ${fld('worst_self_talk', 'Worst self-talk', 'The exact sentence in your head.', b.worst_self_talk)}
-        <p class="field-label">When you struggle, what's usually going on in your head?</p>
-        ${radio('struggle_pattern', [['expecting_results', 'Expecting results'], ['thinking_mechanics', 'Thinking mechanics'], ['worried_watching', "Worried who's watching"], ['blank', 'I go blank']])}
-        <p class="field-label">In big moments — are you attacking or hoping?</p>
-        ${radio('big_moment_mode', [['attacking', 'Attacking'], ['hoping', 'Hoping'], ['depends', 'Depends']])}
-        <p class="field-label">When it gets hard, what does the voice say? (the governor)</p>
-        ${fld('hard_voice', 'The voice when it gets hard', 'What does it tell you?', b.hard_voice)}
-        <p class="field-label">Do you have a routine you actually trust?</p>
-        ${radio('has_routine', [['yes', 'Yes — it\u2019s automatic'], ['sortof', 'Sort of — sometimes'], ['no', 'No routine yet']])}
-        <p class="field-label">Between pitches — what do you actually do? (Ravizza: the 15 seconds between pitches is the game)</p>
-        ${fld('between_pitches', 'Between pitches', 'Step out? Breathe? Nothing?', b.between_pitches)}
-        <p class="field-label">Do you have a reset word — one word that locks you back in?</p>
-        ${fld('keyword', 'Your keyword', 'One word. Yours, not someone else\u2019s.', b.keyword)}
-        <p class="field-label">Your best game ever — what were you thinking and feeling? (be specific)</p>
-        ${fld('best_game', 'Best game', 'What was going through your head?', b.best_game)}
-        <p class="field-label">Do you picture success before games — see yourself getting hits?</p>
-        ${radio('visualization', [['yes', 'Yes — every game'], ['sometimes', 'Sometimes'], ['no', 'No, never tried it']])}
-        <p class="field-label">Where does your confidence come from?</p>
-        ${radio('confidence_source', [['preparation', 'My preparation — I know I put the work in'], ['past_success', 'Past success — I know I\u2019ve done it before'], ['disappears', 'Honestly it disappears when I struggle']])}
-        <p class="field-label">After a bad game, what do you do?</p>
-        ${radio('post_game', [['replay', 'Replay the mistakes over and over'], ['forget', 'Try to forget it'], ['review', 'Review what happened, then move on'], ['beat_up', 'Beat myself up']])}
-        <p class="field-label">What pulls your focus during games? (crowd, scouts, parents, last at-bat...)</p>
-        ${fld('focus_pull', 'Focus pull', 'What gets in your head?', b.focus_pull)}
+        ${(questions || []).map((q) => `
+        <p class="field-label">${esc(q.prompt)}</p>
+        ${qField(q)}`).join('')}
         <p><button type="submit" class="btn btn-primary">Save & build my plan</button></p>
       </div>
     </form>` : '';
@@ -4428,6 +4473,7 @@ module.exports = {
   programEditPage,
   liftingProgramsPage,
   liftingEditPage,
+  coachMentalQuestionsPage,
   videosPage,
   videoWatchPage,
   coachLibraryPage,

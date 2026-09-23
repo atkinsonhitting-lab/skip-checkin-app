@@ -3218,6 +3218,75 @@ app.post('/coach/lifting/delete', requireLiftingCoach, (req, res) => {
   }
   res.redirect('/coach/lifting');
 });
+
+// ---- Mental-game questionnaire editor (Sep 23 2026, Bobby) ----
+// Bobby edits the Lock In questionnaire: add / edit / reorder / archive.
+// Full-access coaches only (same gate as lifting programs).
+function getAllMentalQuestions() {
+  try {
+    return db.prepare('SELECT * FROM mental_questions ORDER BY sort, id').all()
+      .map((q) => ({ ...q, options: (() => { try { return JSON.parse(q.options || '[]'); } catch (e) { return []; } })() }));
+  } catch (e) { return []; }
+}
+app.get('/coach/mental-questions', requireLiftingCoach, (req, res) => {
+  res.send(views.coachMentalQuestionsPage(req.user, getAllMentalQuestions()));
+});
+app.post('/coach/mental-questions/add', requireLiftingCoach, (req, res) => {
+  const prompt = String(req.body.prompt || '').trim().slice(0, 300);
+  if (!prompt) return res.redirect('/coach/mental-questions');
+  const qtype = req.body.qtype === 'radio' ? 'radio' : 'text';
+  const hint = String(req.body.hint || '').trim().slice(0, 300);
+  let options = [];
+  if (qtype === 'radio') {
+    options = String(req.body.options || '').split('\n').map((l) => l.trim()).filter(Boolean)
+      .slice(0, 8).map((l, i) => {
+        const parts = l.split('|').map((s) => s.trim());
+        return [parts[0] || ('opt' + i), parts[1] || parts[0] || ('Option ' + (i + 1))];
+      });
+  }
+  const qkey = 'custom_' + Date.now().toString(36);
+  const maxSort = db.prepare('SELECT COALESCE(MAX(sort), -1) AS m FROM mental_questions').get().m;
+  db.prepare('INSERT INTO mental_questions (qkey, prompt, hint, qtype, options, sort, active) VALUES (?, ?, ?, ?, ?, ?, 1)')
+    .run(qkey, prompt, hint, qtype, JSON.stringify(options), maxSort + 1);
+  res.redirect('/coach/mental-questions');
+});
+app.post('/coach/mental-questions/update', requireLiftingCoach, (req, res) => {
+  const id = Number(req.body.id);
+  const q = id && db.prepare('SELECT * FROM mental_questions WHERE id = ?').get(id);
+  if (!q) return res.redirect('/coach/mental-questions');
+  const prompt = String(req.body.prompt || '').trim().slice(0, 300) || q.prompt;
+  const hint = String(req.body.hint || '').trim().slice(0, 300);
+  const qtype = req.body.qtype === 'radio' ? 'radio' : 'text';
+  let options = [];
+  if (qtype === 'radio') {
+    options = String(req.body.options || '').split('\n').map((l) => l.trim()).filter(Boolean)
+      .slice(0, 8).map((l, i) => {
+        const parts = l.split('|').map((s) => s.trim());
+        return [parts[0] || ('opt' + i), parts[1] || parts[0] || ('Option ' + (i + 1))];
+      });
+  }
+  db.prepare('UPDATE mental_questions SET prompt = ?, hint = ?, qtype = ?, options = ? WHERE id = ?')
+    .run(prompt, hint, qtype, JSON.stringify(options), id);
+  res.redirect('/coach/mental-questions');
+});
+app.post('/coach/mental-questions/toggle', requireLiftingCoach, (req, res) => {
+  const id = Number(req.body.id);
+  if (id) db.prepare('UPDATE mental_questions SET active = 1 - active WHERE id = ?').run(id);
+  res.redirect('/coach/mental-questions');
+});
+app.post('/coach/mental-questions/move', requireLiftingCoach, (req, res) => {
+  const id = Number(req.body.id);
+  const dir = req.body.dir === 'up' ? -1 : 1;
+  const qs = getAllMentalQuestions();
+  const i = qs.findIndex((q) => q.id === id);
+  const j = i + dir;
+  if (id && i >= 0 && j >= 0 && j < qs.length) {
+    db.prepare('UPDATE mental_questions SET sort = ? WHERE id = ?').run(qs[j].sort, qs[i].id);
+    db.prepare('UPDATE mental_questions SET sort = ? WHERE id = ?').run(qs[i].sort, qs[j].id);
+  }
+  res.redirect('/coach/mental-questions');
+});
+
 app.get('/coach/lifting/:id/edit', requireLiftingCoach, (req, res) => {
   const lp = getLifting(req.params.id);
   if (!lp) return res.redirect('/coach/lifting');

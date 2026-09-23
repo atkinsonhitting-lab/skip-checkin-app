@@ -1026,6 +1026,68 @@ CREATE TABLE IF NOT EXISTS mental_keys (
 CREATE INDEX IF NOT EXISTS idx_mental_keys_user ON mental_keys(user_id, created_at);
 `);
 
+// Mental-game questionnaire v2 (Sep 23 2026, Bobby): coach-editable questions.
+// Bobby edits the questions; the athlete form renders from this table.
+db.exec(`CREATE TABLE IF NOT EXISTS mental_questions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  qkey TEXT NOT NULL UNIQUE,
+  prompt TEXT NOT NULL,
+  hint TEXT NOT NULL DEFAULT '',
+  qtype TEXT NOT NULL DEFAULT 'text',
+  options TEXT NOT NULL DEFAULT '[]',
+  sort INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1
+);`);
+db.exec(`CREATE TABLE IF NOT EXISTS mental_answers (
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  qkey TEXT NOT NULL,
+  answer TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (user_id, qkey)
+);`);
+{
+  // Seed the questionnaire once (the original 13 book-based questions).
+  const n = db.prepare('SELECT COUNT(*) AS n FROM mental_questions').get().n;
+  if (!n) {
+    const seed = [
+      ['signal_light', 'In games, what color are you usually?', "Ravizza's signal lights", 'radio',
+        '[["green","Green \u2014 calm, focused"],["yellow","Yellow \u2014 tension creeping in"],["red","Red \u2014 emotional, rushed"]]'],
+      ['worst_self_talk', "What's the worst thing you say to yourself when it's going bad?", 'Write the actual sentence in your head.', 'text', '[]'],
+      ['struggle_pattern', "When you struggle, what's usually going on in your head?", '', 'radio',
+        '[["expecting_results","Expecting results"],["thinking_mechanics","Thinking mechanics"],["worried_watching","Worried who\u2019s watching"],["blank","I go blank"]]'],
+      ['big_moment_mode', 'In big moments \u2014 are you attacking or hoping?', '', 'radio',
+        '[["attacking","Attacking"],["hoping","Hoping"],["depends","Depends"]]'],
+      ['hard_voice', 'When it gets hard, what does the voice say?', 'The governor \u2014 what does it tell you?', 'text', '[]'],
+      ['has_routine', 'Do you have a routine you actually trust?', '', 'radio',
+        '[["yes","Yes \u2014 it\u2019s automatic"],["sortof","Sort of \u2014 sometimes"],["no","No routine yet"]]'],
+      ['between_pitches', 'Between pitches \u2014 what do you actually do?', 'Ravizza: the 15 seconds between pitches is the game. Step out? Breathe? Nothing?', 'text', '[]'],
+      ['keyword', 'Do you have a reset word \u2014 one word that locks you back in?', 'One word. Yours, not someone else\u2019s.', 'text', '[]'],
+      ['best_game', 'Your best game ever \u2014 what were you thinking and feeling?', 'Be specific.', 'text', '[]'],
+      ['visualization', 'Do you picture success before games \u2014 see yourself getting hits?', '', 'radio',
+        '[["yes","Yes \u2014 every game"],["sometimes","Sometimes"],["no","No, never tried it"]]'],
+      ['confidence_source', 'Where does your confidence come from?', '', 'radio',
+        '[["preparation","My preparation \u2014 I know I put the work in"],["past_success","Past success \u2014 I know I\u2019ve done it before"],["disappears","Honestly it disappears when I struggle"]]'],
+      ['post_game', 'After a bad game, what do you do?', '', 'radio',
+        '[["replay","Replay the mistakes over and over"],["forget","Try to forget it"],["review","Review what happened, then move on"],["beat_up","Beat myself up"]]'],
+      ['focus_pull', 'What pulls your focus during games?', 'Crowd, scouts, parents, last at-bat...', 'text', '[]'],
+    ];
+    const ins = db.prepare('INSERT INTO mental_questions (qkey, prompt, hint, qtype, options, sort, active) VALUES (?, ?, ?, ?, ?, ?, 1)');
+    seed.forEach((s, i) => ins.run(s[0], s[1], s[2], s[3], s[4], i));
+    // Migrate existing athletes' answers from mental_baseline into mental_answers.
+    try {
+      const cols = db.prepare('PRAGMA table_info(mental_baseline)').all().map((c) => c.name);
+      const keys = seed.map((s) => s[0]).filter((k) => cols.includes(k));
+      if (keys.length) {
+        const users = db.prepare(`SELECT user_id, ${keys.join(', ')} FROM mental_baseline`).all();
+        const up = db.prepare(`INSERT INTO mental_answers (user_id, qkey, answer, updated_at) VALUES (?, ?, ?, ?)
+          ON CONFLICT(user_id, qkey) DO UPDATE SET answer=excluded.answer, updated_at=excluded.updated_at`);
+        const now = new Date().toISOString();
+        for (const u of users) for (const k of keys) if (u[k]) up.run(u.user_id, k, u[k], now);
+      }
+    } catch (e) { /* best effort */ }
+  }
+}
+
 // Subscriptions (Sep 15 2026): account-level billing state lives here once
 // payments launch. Settings reads it (plan + End subscription); the cancel
 // route flips an active sub to canceled. No provider wired up yet.
