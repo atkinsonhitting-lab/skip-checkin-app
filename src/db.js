@@ -1392,6 +1392,54 @@ CREATE TABLE IF NOT EXISTS settings (
     }
   }
 
+  // Video fill (Sep 23 2026): fills in verified YouTube URLs for the 7 v4
+  // exercises that shipped with blank videos. Only fills blanks — never
+  // overwrites an existing URL. Runs on system templates and athlete copies.
+  {
+    const done = db.prepare("SELECT value FROM settings WHERE key = 'lifting_video_fill_v4'").get();
+    if (!done) {
+      const VIDEO_FILL = {
+        'Drop-Catch Split Jump': 'https://www.youtube.com/watch?v=GAm6K6p2gvg',
+        'Split-Squat ISO Pull': 'https://www.youtube.com/shorts/W7qLXJaXb_c',
+        'Pin Split Squat': 'https://www.youtube.com/watch?v=458ui9PxfP8',
+        'Banded Alternate Jumps': 'https://www.youtube.com/watch?v=-GXzGojjpr4',
+        'MB Step-Back Toss': 'https://www.youtube.com/shorts/xQQi7BviXnY',
+        'T-Spine Mobility': 'https://www.youtube.com/watch?v=NSxiZd8QGgA',
+        'Hip CARs': 'https://www.youtube.com/watch?v=5kM-o61Z14I',
+      };
+      const now = new Date().toISOString();
+      let filled = 0, rows = 0;
+      for (const r of db.prepare('SELECT id, program_json FROM lifting_programs').all()) {
+        let prog = null;
+        try { prog = JSON.parse(r.program_json || '{}'); } catch (e) { continue; }
+        if (!prog || !Array.isArray(prog.days)) continue;
+        let changed = false;
+        for (const d of prog.days) {
+          for (const key of ['speed', 'medball', 'exercises']) {
+            const arr = d[key];
+            if (!Array.isArray(arr)) continue;
+            for (const ex of arr) {
+              if (!ex || typeof ex !== 'object') continue;
+              const url = VIDEO_FILL[String(ex.name || '').trim()];
+              if (url && !String(ex.video || '').trim()) {
+                ex.video = url;
+                changed = true;
+                filled++;
+              }
+            }
+          }
+        }
+        if (changed) {
+          db.prepare('UPDATE lifting_programs SET program_json = ?, updated_at = ? WHERE id = ?')
+            .run(JSON.stringify(prog), now, r.id);
+          rows++;
+        }
+      }
+      db.prepare("INSERT INTO settings (key, value) VALUES ('lifting_video_fill_v4', '1')").run();
+      console.log(`Lifting video fill: filled ${filled} blank video(s) across ${rows} program row(s).`);
+    }
+  }
+
   // Template repair (Sep 23 2026): if a v4 system template exists but has
   // zero days (corrupted/empty — the coach editor shows "No days yet"),
   // refresh it from the v4 definition. A zero-day template is never a

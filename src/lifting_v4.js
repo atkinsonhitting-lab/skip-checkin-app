@@ -11,9 +11,9 @@ const YT_V4 = {
   latBoxSquat: 'https://www.youtube.com/watch?v=bjkyer2hCxQ',
   rearLateral: 'https://www.youtube.com/watch?v=p1yQnTNE808',
   pallofHold: 'https://www.youtube.com/watch?v=XypX3A_0Kbg',
-  dropCatch: '',
-  isoPull: '',
-  pinSplit: '',
+  dropCatch: 'https://www.youtube.com/watch?v=GAm6K6p2gvg',
+  isoPull: 'https://www.youtube.com/shorts/W7qLXJaXb_c',
+  pinSplit: 'https://www.youtube.com/watch?v=458ui9PxfP8',
   trunkRot: 'https://www.youtube.com/watch?v=mbbsYXGynDc',
   pinSquat: 'https://www.youtube.com/watch?v=3GjKE-OkLyY',
   splitSquat: 'https://www.youtube.com/watch?v=2V5NipAulKY',
@@ -24,11 +24,11 @@ const YT_V4 = {
   bearCrawl: 'https://www.youtube.com/watch?v=EAR26sGk8yI',
   pullover: 'https://www.youtube.com/watch?v=dtrnz0EKwnE',
   rackPull: 'https://www.youtube.com/watch?v=9vYBWV5OeKg',
-  bandedJumps: '',
-  stepBackToss: '',
+  bandedJumps: 'https://www.youtube.com/watch?v=-GXzGojjpr4',
+  stepBackToss: 'https://www.youtube.com/shorts/xQQi7BviXnY',
   goblet: 'https://www.youtube.com/watch?v=Xjo_fY9Hl9w',
-  tSpine: '',
-  hipCars: '',
+  tSpine: 'https://www.youtube.com/watch?v=NSxiZd8QGgA',
+  hipCars: 'https://www.youtube.com/watch?v=5kM-o61Z14I',
 };
 
 const spd = (name, volume, notes, vkey, intent) => ({
