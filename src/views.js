@@ -5086,11 +5086,14 @@ function mobilityWorkoutPage(user, p, opts) {
       ? `<div class="last-perf">Last: ${last.weight ? esc(String(last.weight)) + ' lbs' : ''} ${last.sets ? esc(JSON.stringify(last.sets)) : ''}</div>`
       : '';
     const isMedball = ex.type === 'medball';
+    const videoLink = ex.video
+      ? ` <a href="${esc(ex.video)}" target="_blank" rel="noopener" class="wo-video" aria-label="Watch video">▶ <span>Watch</span></a>`
+      : '';
     return `<div class="wo-ex" data-key="${esc(ex.key)}" data-idx="${i}">
       <div class="wo-ex-head">
         <span class="wo-ex-num">${i + 1}</span>
         <div>
-          <div class="wo-ex-name">${esc(ex.name)}</div>
+          <div class="wo-ex-name">${esc(ex.name)}${videoLink}</div>
           <div class="wo-ex-vol">${esc(ex.volume)}</div>
           ${lastStr}
         </div>
@@ -5124,6 +5127,8 @@ function mobilityWorkoutPage(user, p, opts) {
       .wo-ex-controls label { font-size: 14px; }
       .wo-ex-controls input { width: 80px; padding: 8px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; }
       .wo-ex-status { margin-top: 8px; font-size: 14px; color: #2a7; font-weight: 600; }
+      .wo-video { color: #c00; text-decoration: none; font-size: 14px; margin-left: 8px; font-weight: 600; }
+      .wo-video:hover { text-decoration: underline; }
       .wo-ex.done { border-color: #2a7; background: #f0faf0; }
     </style>`,
   });

@@ -2364,6 +2364,20 @@ app.get('/program/mobility-workout', requireLogin, requireWaiver, (req, res) => 
   if (!p) return res.redirect('/');
   const blocks = splitProgramBlocks(p);
   const today = chiToday();
+  // Bobby (Sep 23 2026): mobility exercise video links from drill registry
+  let mobilityVideos = {};
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const regPath = path.join(__dirname, '..', 'atkinson-hitting', 'programs', 'drill_links.json');
+    // Try workspace path first, then local
+    const wsPath = '/home/hatch/workspace/atkinson-hitting/programs/drill_links.json';
+    const rp = fs.existsSync(wsPath) ? wsPath : regPath;
+    if (fs.existsSync(rp)) {
+      const reg = JSON.parse(fs.readFileSync(rp, 'utf8'));
+      mobilityVideos = reg.mobility_youtube || {};
+    }
+  } catch (e) { /* no videos */ }
   // Build flat list of mobility + medball exercises
   const exercises = [];
   for (const b of blocks.mobility) {
@@ -2375,6 +2389,7 @@ app.get('/program/mobility-workout', requireLogin, requireWaiver, (req, res) => 
         volume: it.volume || '',
         type: 'mobility',
         key,
+        video: mobilityVideos[it.drill] || null,
         last: lastLiftLog(req.user.id, key, today),
         history: liftHistory(req.user.id, key, 8),
       });
@@ -2389,6 +2404,7 @@ app.get('/program/mobility-workout', requireLogin, requireWaiver, (req, res) => 
         volume: it.volume || '',
         type: 'medball',
         key,
+        video: null, // Med ball videos come from drill registry
         last: lastLiftLog(req.user.id, key, today),
         history: liftHistory(req.user.id, key, 8),
       });
