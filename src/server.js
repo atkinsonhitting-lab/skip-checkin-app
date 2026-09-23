@@ -2204,7 +2204,11 @@ app.get('/program/workout', requireLogin, requireWaiver, (req, res) => {
   const ldayIdx = pickLiftingDayIdx(req, p, days.length);
   const wd = buildWorkoutDay(req.user.id, lifting, ldayIdx, today);
   if (!wd.day) return res.redirect('/program?sub=lifting');
-  res.send(views.workoutPage(req.user, p, wd, ldayIdx, preview));
+  // Phase info for the athlete (Bobby Sep 23 2026): current phase, what it
+  // means, core principles. Filter out test/retest lines.
+  const phaseNotes = (Array.isArray(lifting.notes) ? lifting.notes : [])
+    .filter((n) => !/test\/retest/i.test(String(n || '')));
+  res.send(views.workoutPage(req.user, p, wd, ldayIdx, preview, phaseNotes));
 });
 
 // ---- Guided Today session (Sep 2026) ----

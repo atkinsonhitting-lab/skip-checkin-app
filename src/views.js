@@ -2779,7 +2779,9 @@ function programPage(user, p, opts) {
     const ldayExtra = `<input type=\"hidden\" name=\"lday\" value=\"${effLday}\">`;
     const curDay = effLday >= 0 ? days[effLday] || {} : {};
     const phaseBanner = (Array.isArray(lifting.notes) && lifting.notes.length)
-      ? `<div class=\"card phase-banner\">${lifting.notes.map((n) => `<p>${esc(n)}</p>`).join('')}</div>`
+      ? `<div class=\"card phase-banner\">${lifting.notes
+          .filter((n) => !/test\/retest/i.test(String(n || '')))
+          .map((n) => `<p>${esc(n)}</p>`).join('')}</div>`
       : '';
     const daySpeedAll = Array.isArray(curDay.speed) ? curDay.speed.filter((s) => String(s && s.name || '').trim()) : [];
     // Held items never render as work — the athlete sees a placeholder.
@@ -2924,11 +2926,16 @@ function programPage(user, p, opts) {
 // time — Speed → Med Ball → Lifts — big inputs, one-tap set logging,
 // rest timer, no page reloads. The day JSON rides in window.WO_DAY;
 // /workout.js renders and runs the session.
-function workoutPage(user, program, wd, ldayIdx, preview) {
+function workoutPage(user, program, wd, ldayIdx, preview, phaseNotes) {
   const dayJson = JSON.stringify(wd).replace(/</g, '\\u003c');
   const lday = Number(ldayIdx) || 0;
   const previewBanner = preview
     ? '<div class="card" style="margin:0 0 12px;background:#fff8e1;border:1px solid #f0d060"><p style="margin:0"><strong>Preview</strong> — you\'re viewing as a coach. Logging is disabled.</p></div>'
+    : '';
+  // Phase banner: current phase, what it means, core principles (no test/retest).
+  const phaseHtml = (Array.isArray(phaseNotes) && phaseNotes.length)
+    ? '<div class="card phase-banner" style="margin:0 0 12px">' +
+      phaseNotes.map((n) => `<p style="margin:4px 0">${esc(n)}</p>`).join('') + '</div>'
     : '';
   // Server-rendered fallback: if the client JS fails, the athlete still sees
   // the workout. The JS guided mode enhances this when it loads.
@@ -2947,7 +2954,7 @@ function workoutPage(user, program, wd, ldayIdx, preview) {
     title: wd.day.label + ' · Lift',
     user,
     tabs: [],
-    body: `${previewBanner}<div class="wo">
+    body: `${previewBanner}${phaseHtml}<div class="wo">
       <div class="wo-top">
         <a class="wo-end" href="/program?sub=lifting&lday=${lday}">✕ End</a>
         <div class="wo-prog"><div class="wo-bar"><div class="wo-fill" id="wo-fill"></div></div>
