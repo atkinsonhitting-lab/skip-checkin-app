@@ -919,3 +919,11 @@ a.stat-card { padding: 14px 8px; }
 .gp-toggle { display: flex; gap: 8px; margin: 12px 0; }
 .gp-btn { flex: 1; padding: 10px; border: 2px solid #e2e2e2; border-radius: 10px; background: #fff; font-weight: 600; cursor: pointer; font-size: 15px; }
 .gp-btn.active { border-color: var(--accent); background: #f0f7ff; }
+
+/* Check-in: compact 2x2 slider grid (Sep 23 2026) — Bobby: form too long */
+.sliders-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 16px; margin: 8px 0; }
+.sliders-grid .slider-block { margin: 4px 0; }
+.sliders-grid .field-label { font-size: 13px; margin-bottom: 2px; }
+.sliders-grid .hint-inline { display: none; }
+.sliders-grid .slider-ends { display: none; }
+@media (max-width: 380px) { .sliders-grid { grid-template-columns: 1fr 1fr; gap: 2px 12px; } }

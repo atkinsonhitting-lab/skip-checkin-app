@@ -717,3 +717,17 @@
     if (practice) practice.hidden = which !== 'practice';
   });
 })();
+
+// Activity checklist — show/hide drill field on check (Sep 23 2026)
+(function () {
+  document.addEventListener('change', function (ev) {
+    const cb = ev.target.closest('[data-section]');
+    if (!cb) return;
+    const item = cb.closest('.activity-item');
+    if (!item) return;
+    const input = item.querySelector('.activity-drills');
+    if (!input) return;
+    input.hidden = !cb.checked;
+    if (!cb.checked) input.value = '';
+  });
+})();

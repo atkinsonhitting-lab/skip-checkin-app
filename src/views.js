@@ -773,10 +773,12 @@ function checkinForm(user, error, values, drillNames, routine, recentGroups, act
           </div>`;
         })()}
       </div>
+      <div class="sliders-grid">
       ${sliderField('feel', 'Feel', 'How good did you feel?', v.feel)}
       ${sliderField('confidence', 'Confidence', 'How confident did you feel?', v.confidence)}
       ${sliderField('focus', 'Focus', 'How locked in was your focus?', v.focus)}
       ${sliderField('difficulty', 'Difficulty', 'How hard was the training?', v.difficulty, ['Easy', 'Brutal'], true)}
+      </div>
       <script src="/checkin.js"></script>
       <label>Session notes <span class="req" aria-hidden="true">*</span> <span class="hint-inline">(don't hold back — what you felt, what you saw, what was off)</span><span class="talk-wrap"><textarea id="session_notes" name="session_notes" rows="4" placeholder="How did it go? What did you feel?">${esc(v.session_notes || '')}</textarea><button type="button" class="mic-btn" data-target="session_notes" aria-label="Dictate instead of typing">🎙</button></span></label>
       <label>What worked <span class="hint-inline">(be specific — the exact drill, cue, or feel)</span><span class="talk-wrap"><textarea id="what_worked" name="what_worked" rows="2" placeholder="What clicked today?">${esc(v.what_worked || '')}</textarea><button type="button" class="mic-btn" data-target="what_worked" aria-label="Dictate instead of typing">🎙</button></span></label>
