@@ -31,6 +31,16 @@ function normWarmup(w) {
   return [];
 }
 
+// Bobby (Sep 24 2026): YouTube videos for mobility + med ball warm-up rows.
+const exVideos = (() => { try { return require('./exercise_videos.json'); } catch (e) { return {}; } })();
+const _normVn = (n) => String(n || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+function findExVideo(map, name) {
+  const m = (map && typeof map === 'object') ? map : {};
+  if (m[name]) return m[name];
+  const nn = _normVn(name);
+  for (const k of Object.keys(m)) if (_normVn(k) === nn) return m[k];
+  return '';
+}
 function esc(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;')
@@ -2482,7 +2492,12 @@ function programPage(user, p, opts) {
     // check-offs: render plain rows.
     const rows = guide
       ? real.map((it) => `<div class="guide-row"><span class="routine-name">${esc(it.drill || '')}</span>${it.volume || it.prescription ? `<span class="hint-inline">${esc(it.volume || it.prescription)}</span>` : ''}</div>`).join('')
-      : real.map((it) => checkRow(kind, `${kind}::${dayScope || ''}::${cat}::${it.drill}`, it.drill, it.volume, it.video, extra)).join('');
+      : real.map((it) => {
+        const v = it.video || (kind === 'mob'
+          ? findExVideo(exVideos.mobility_youtube, it.drill)
+          : kind === 'med' ? findExVideo(exVideos.medball_youtube, it.drill) : '');
+        return checkRow(kind, `${kind}::${dayScope || ''}::${cat}::${it.drill}`, it.drill, it.volume, v, extra);
+      }).join('');
     return `<details class="card routine-group" open><summary class="routine-summary"><span class="routine-station">${esc(cat)}</span></summary>${rows}</details>`;
   };
 
