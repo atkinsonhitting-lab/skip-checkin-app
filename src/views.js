@@ -5107,7 +5107,6 @@ function mobilityWorkoutPage(user, p, opts) {
       </div>
       <div class="wo-ex-controls">
         ${isMedball ? `<label>Ball weight (lbs): <input type="number" class="wo-weight" inputmode="decimal" placeholder="e.g. 8" ${preview ? 'disabled' : ''}></label>` : ''}
-        <label>Sets completed: <input type="number" class="wo-sets" inputmode="numeric" min="0" placeholder="0" ${preview ? 'disabled' : ''}></label>
         <button class="btn btn-sm wo-done" ${preview ? 'disabled' : ''}>✓ Done</button>
       </div>
       <div class="wo-ex-status"></div>
@@ -5118,7 +5117,7 @@ function mobilityWorkoutPage(user, p, opts) {
     user,
     body: `<h1 class="page-title">Warm-up & Med Ball</h1>
     <p><a href="/program/mobility">← Back</a></p>
-    <p class="hint">Tap through each exercise. Log your med ball weight and sets.</p>
+    <p class="hint">Tap through each exercise. Log your med ball weight.</p>
     <div class="wo-list">${exHtml || '<div class="empty">No mobility exercises found.</div>'}</div>
     <script src="/mobility-workout.js"></script>
     <style>
