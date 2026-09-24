@@ -5305,6 +5305,16 @@ function hittingPlanPage(user, p, opts) {
   // Bobby (Sep 24 2026): "Complete the program 3 to 5 times per week" —
   // standalone line on the hitting program, NOT inside the drills table.
   const freqLine = `<p class="freq-line"><strong>${esc(plan.frequency || 'Complete the program 3 to 5 times per week.')}</strong></p>`;
+  // Bobby (Sep 24 2026): show the prep right above the drills.
+  const warmupItems = Array.isArray(plan.warmup) ? plan.warmup : [];
+  const prepHtml = warmupItems.length
+    ? `<h2 class="doc-sec">Prep</h2>
+       <ul class="std-list">${warmupItems.map((w) => {
+         const nm = typeof w === 'string' ? w : (w && w.name) || '';
+         const dt = typeof w === 'object' && w ? w.detail : '';
+         return `<li><strong>${esc(nm)}</strong>${dt ? ` &mdash; ${esc(dt)}` : ''}</li>`;
+       }).join('')}</ul>`
+    : '';
 
   const reminderHtml = plan.reminder
     ? `<ul class="rem-list"><li>${esc(plan.reminder)}</li></ul>`
@@ -5333,19 +5343,19 @@ function hittingPlanPage(user, p, opts) {
     tabs: o.layoutTabs || userTabs('program', user),
     body: `${o.coachBar || ''}${liftBtn}${warmBtn}<div class="doc-page">
       <div class="doc-header">
-        <div class="doc-logo">ATKINSON<br>HITTING</div>
+        <img src="/atkinson-hitting-logo.jpg" class="doc-logo-img" alt="Atkinson Hitting">
         <div class="doc-title-wrap">
           <h1 class="doc-title">Hitting Program</h1>
           <p class="doc-athlete">${esc(athleteName)}</p>
         </div>
-        <div class="doc-logo">ATKINSON<br>HITTING</div>
       </div>
-      <p class="doc-note" style="font-size:14px;color:#333;font-style:normal;margin:0 0 16px">Use this program and work with me to develop your own daily routine &mdash; the exact work you do every day to get better.</p>
+      <p class="doc-note" style="font-size:14px;color:#ccc;font-style:normal;margin:0 0 16px">Use this program and work with me to develop your own daily routine &mdash; the exact work you do every day to get better.</p>
       ${evalHtml}
       <hr class="doc-rule">
       <h1 class="doc-sec-title">Hitting Program - ${esc(athleteName)}</h1>
       ${whyHtml}
       <p class="doc-note">Drill demos: <a href="https://drive.google.com/drive/folders/1exkky5BSQjiXoMF2J25sgW87OeYtwG8i" target="_blank">Google Drive Video Library</a></p>
+      ${prepHtml}
       ${drillTableHtml}
       ${freqLine}
       ${reminderHtml}
@@ -5353,45 +5363,47 @@ function hittingPlanPage(user, p, opts) {
       <p class="editable">Everything is editable based on need, progress, or lack of progress.</p>
     </div>
     <style>
-      .doc-page { max-width: 720px; margin: 0 auto; background: #fff; color: #111;
+      /* Bobby (Sep 24 2026): programs are black background, white text, his logo. */
+      .doc-page { max-width: 720px; margin: 0 auto; background: #000; color: #fff;
         padding: 28px 24px; font-family: Arial, Helvetica, sans-serif; line-height: 1.5; }
       .prog-tabs { display: flex; gap: 8px; justify-content: center; margin-bottom: 16px; }
       .prog-tab { padding: 8px 16px; border-radius: 8px; text-decoration: none; color: #666;
         background: #f0f0f0; font-weight: 600; font-size: 14px; }
       .prog-tab.active { background: #111; color: #fff; }
 
-      .doc-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-      .doc-logo { font-weight: 900; font-size: 13px; line-height: 1.2; text-align: center; color: #c00;
-        letter-spacing: 1px; }
+      .doc-header { display: flex; flex-direction: column; align-items: center; margin-bottom: 12px; }
+      .doc-logo-img { width: 150px; height: 150px; object-fit: contain; }
       .doc-title-wrap { text-align: center; }
-      .doc-title { font-size: 24px; margin: 0; color: #111; }
-      .doc-athlete { font-size: 16px; color: #444; margin: 2px 0 0; }
-      .doc-sec-title { font-size: 19px; margin: 18px 0 8px; color: #111; }
-      .doc-sec { font-size: 16px; margin: 14px 0 6px; color: #111; }
-      .important { background: #fffde7; border: 1px solid #f0e68c; padding: 8px 12px; border-radius: 4px;
-        font-size: 14px; margin: 12px 0; }
-      .doc-rule { border: none; border-top: 1px solid #ccc; margin: 16px 0; }
-      .grade-scale { font-size: 13px; color: #555; font-weight: 700; margin: 4px 0; }
+      .doc-title { font-size: 26px; margin: 10px 0 0; color: #fff; }
+      .doc-athlete { font-size: 16px; color: #ccc; margin: 2px 0 0; }
+      .doc-sec-title { font-size: 19px; margin: 18px 0 8px; color: #fff;
+        border-bottom: 2px solid #c8102e; padding-bottom: 4px; }
+      .doc-sec { font-size: 16px; margin: 14px 0 6px; color: #fff; }
+      .important { background: #1a1a1a; border: 1px solid #444; padding: 8px 12px; border-radius: 4px;
+        font-size: 14px; margin: 12px 0; color: #fff; }
+      .doc-rule { border: none; border-top: 1px solid #444; margin: 16px 0; }
+      .grade-scale { font-size: 13px; color: #ccc; font-weight: 700; margin: 4px 0; }
       .grade-list, .std-list { margin: 6px 0 12px 20px; padding: 0; font-size: 14px; }
-      .grade-list li, .std-list li { margin: 4px 0; color: #222; }
-      .need { font-size: 15px; background: #f5f5f5; padding: 10px 12px; border-radius: 4px; margin: 12px 0; }
-      .why-line { font-size: 14px; color: #333; margin: 10px 0; }
+      .grade-list li, .std-list li { margin: 4px 0; color: #fff; }
+      .need { font-size: 15px; background: #161616; padding: 10px 12px; border-radius: 4px; margin: 12px 0; color: #fff; }
+      .why-line { font-size: 14px; color: #ddd; margin: 10px 0; }
       .drill-table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14px; }
-      .drill-table th { background: #f0f0f0; border: 1px solid #999; padding: 8px 10px; text-align: left; font-size: 13px; }
-      .drill-table td { border: 1px solid #999; padding: 8px 10px; vertical-align: top; }
+      .drill-table th { background: #c8102e; color: #fff; border: 1px solid #c8102e; padding: 8px 10px; text-align: left; font-size: 13px; }
+      .drill-table td { border: 1px solid #444; padding: 8px 10px; vertical-align: top; color: #fff; }
       .drill-table .vol { text-align: center; font-weight: 700; white-space: nowrap; }
-      .freq-line { font-size: 15px; margin: 12px 0; }
-      .why { font-size: 13px; color: #333; }
-      .do-on { font-size: 13px; color: #333; }
-      .doc-note { font-size: 13px; color: #888; font-style: italic; }
+      .freq-line { font-size: 15px; margin: 12px 0; color: #fff; }
+      .why { font-size: 13px; color: #ccc; }
+      .do-on { font-size: 13px; color: #ccc; }
+      .doc-note { font-size: 13px; color: #999; font-style: italic; }
+      .doc-note a { color: #7ab8ff; }
       .rem-list { margin: 8px 0 12px 20px; padding: 0; font-size: 14px; }
-      .rem-list li { margin: 4px 0; color: #222; }
-      .env-note { font-size: 13px; color: #666; font-style: italic; }
-      .editable { font-size: 13px; color: #888; font-style: italic; margin-top: 18px; }
+      .rem-list li { margin: 4px 0; color: #fff; }
+      .env-note { font-size: 13px; color: #999; font-style: italic; }
+      .env-desc { color: #ccc; }
+      .editable { font-size: 13px; color: #777; font-style: italic; margin-top: 18px; }
       @media (max-width: 600px) {
         .doc-page { padding: 16px 12px; }
-        .doc-header { flex-direction: column; gap: 8px; }
-        .doc-logo { font-size: 11px; }
+        .doc-logo-img { width: 120px; height: 120px; }
         .drill-table { font-size: 13px; }
         .drill-table th, .drill-table td { padding: 6px 8px; }
       }
