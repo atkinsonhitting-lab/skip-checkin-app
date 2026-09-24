@@ -4315,7 +4315,6 @@ app.post('/coach/training-environments', requireCoach, (req, res) => {
   const b = req.body || {};
   const action = String(b.action || '');
   const list = envLib.ENV_LIST.map((e) => ({ ...e }));
-  const defaults = [...envLib.DEFAULT_IDS];
   let renamed = null;
   let deleted = null;
   if (action === 'add') {
@@ -4339,6 +4338,11 @@ app.post('/coach/training-environments', requireCoach, (req, res) => {
     const idx = list.findIndex((x) => x.id === String(b.id || ''));
     if (idx >= 0) deleted = list.splice(idx, 1)[0];
   }
+  // A deleted environment comes out of default_ids too, so a stale id can
+  // never be re-appended to a hitter's program by a later migration.
+  const defaults = deleted
+    ? envLib.DEFAULT_IDS.filter((d) => d !== deleted.id)
+    : [...envLib.DEFAULT_IDS];
   envLib.saveEnvLib({ environments: list, default_ids: defaults, note: undefined });
   // Propagate AFTER the save so name recomputes resolve against the new list.
   if (renamed) propagateEnvRename(renamed.oldName, renamed.newName);

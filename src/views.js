@@ -1934,6 +1934,7 @@ function coachHomeManage(user, quiet, latest, pending, pushOn, leads, myGuys, bi
       </details>
       <a class="ppl-row" href="/coach/organizations"><span class="ppl-main"><strong>Organizations</strong></span><span class="org-chev" aria-hidden="true">›</span></a>
       <a class="ppl-row" href="/coach/lifting"><span class="ppl-main"><strong>Lifting programs</strong></span><span class="org-chev" aria-hidden="true">›</span></a>
+      <a class="ppl-row" href="/coach/training-environments"><span class="ppl-main"><strong>Training environments</strong><span class="hint-inline">library + delete</span></span><span class="org-chev" aria-hidden="true">›</span></a>
     </div>`,
   });
 }
