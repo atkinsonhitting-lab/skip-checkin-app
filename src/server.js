@@ -1918,7 +1918,7 @@ function buildHittingPlan(prog) {
     },
     drills,
     environments,
-    frequency: 'Complete this 3–5x per week. Keep the focus to 1–2 cues per swing.',
+    frequency: 'Complete the program 3 to 5 times per week.',
   };
 }
 // ---- Programs tab: lifting + check-offs (Sep 2026) ----

@@ -5295,17 +5295,16 @@ function hittingPlanPage(user, p, opts) {
     return `<tr><td>${left}</td><td class="vol">${right}</td></tr>`;
   }).join('');
 
-  const freq = plan.frequency || '';
-  const freqRow = freq
-    ? `<tr class="freq-row"><td><strong>${esc(freq)}</strong></td><td class="vol"><strong>Repeat<br>3–5x per week</strong></td></tr>`
-    : '';
-
-  const drillTableHtml = (drillRows || freqRow)
+  const drillTableHtml = drillRows
     ? `<table class="drill-table">
          <thead><tr><th>Drill / Coaching Notes</th><th>Sets / Reps</th></tr></thead>
-         <tbody>${drillRows}${freqRow}</tbody>
+         <tbody>${drillRows}</tbody>
        </table>`
     : '';
+
+  // Bobby (Sep 24 2026): "Complete the program 3 to 5 times per week" —
+  // standalone line on the hitting program, NOT inside the drills table.
+  const freqLine = `<p class="freq-line"><strong>${esc(plan.frequency || 'Complete the program 3 to 5 times per week.')}</strong></p>`;
 
   const reminderHtml = plan.reminder
     ? `<ul class="rem-list"><li>${esc(plan.reminder)}</li></ul>`
@@ -5348,6 +5347,7 @@ function hittingPlanPage(user, p, opts) {
       ${whyHtml}
       <p class="doc-note">Drill demos: <a href="https://drive.google.com/drive/folders/1exkky5BSQjiXoMF2J25sgW87OeYtwG8i" target="_blank">Google Drive Video Library</a></p>
       ${drillTableHtml}
+      ${freqLine}
       ${reminderHtml}
       ${envHtml}
       <p class="editable">Everything is editable based on need, progress, or lack of progress.</p>
@@ -5380,7 +5380,7 @@ function hittingPlanPage(user, p, opts) {
       .drill-table th { background: #f0f0f0; border: 1px solid #999; padding: 8px 10px; text-align: left; font-size: 13px; }
       .drill-table td { border: 1px solid #999; padding: 8px 10px; vertical-align: top; }
       .drill-table .vol { text-align: center; font-weight: 700; white-space: nowrap; }
-      .drill-table .freq-row td { background: #f7f7f7; }
+      .freq-line { font-size: 15px; margin: 12px 0; }
       .why { font-size: 13px; color: #333; }
       .do-on { font-size: 13px; color: #333; }
       .doc-note { font-size: 13px; color: #888; font-style: italic; }
