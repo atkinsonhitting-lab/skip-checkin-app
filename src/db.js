@@ -1624,6 +1624,54 @@ CREATE TABLE IF NOT EXISTS settings (
       console.log(`Env library migration: appended missing defaults for ${touched} program(s).`);
     }
   }
+
+  // Hitting-plan eval repair (Bobby, Sep 24 2026): "Still don't see Dylan's
+  // eval." The old hitting-plan editor POST rebuilt the plan without the
+  // eval fields, wiping grades/strengths/need from saved plans (the doc
+  // reads hitting_plan, not prog). Later saves carry the eval over, but
+  // plans wiped earlier were never restored. This fills BLANK eval fields
+  // on the saved plan from the program's own eval data — never overwrites
+  // anything the coach set in the plan. Runs once.
+  {
+    const done = db.prepare("SELECT value FROM settings WHERE key = 'hitting_plan_eval_repair_v1'").get();
+    if (!done) {
+      const now = new Date().toISOString();
+      let repaired = 0;
+      const rows = db.prepare('SELECT id, program_json FROM remote_programs').all();
+      for (const r of rows) {
+        let prog = null;
+        try { prog = JSON.parse(r.program_json || '{}'); } catch (e) { continue; }
+        const hp = prog.hitting_plan;
+        if (!hp || typeof hp !== 'object') continue;
+        let changed = false;
+        const planGradesEmpty = !hp.grades || !Object.keys(hp.grades).some((k) => String(hp.grades[k] || '').trim());
+        if (planGradesEmpty && prog.grades && typeof prog.grades === 'object' && Object.keys(prog.grades).length) {
+          hp.grades = { ...prog.grades };
+          changed = true;
+        }
+        const planWhysEmpty = !hp.grade_whys || typeof hp.grade_whys !== 'object' || !Object.keys(hp.grade_whys).length;
+        if (planWhysEmpty && prog.grade_whys && typeof prog.grade_whys === 'object' && Object.keys(prog.grade_whys).length) {
+          hp.grade_whys = { ...prog.grade_whys };
+          changed = true;
+        }
+        if ((!Array.isArray(hp.strengths) || !hp.strengths.length) && Array.isArray(prog.strengths) && prog.strengths.length) {
+          hp.strengths = [...prog.strengths];
+          changed = true;
+        }
+        if (!String(hp.need || '').trim() && String(prog.adjustment || '').trim()) {
+          hp.need = String(prog.adjustment);
+          changed = true;
+        }
+        if (changed) {
+          db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?')
+            .run(JSON.stringify(prog), now, r.id);
+          repaired++;
+        }
+      }
+      db.prepare("INSERT INTO settings (key, value) VALUES ('hitting_plan_eval_repair_v1', '1')").run();
+      console.log(`Hitting plan eval repair: restored eval fields for ${repaired} program(s).`);
+    }
+  }
 }
 
 // One-time cleanup (Sep 23 2026): Bobby confirmed none of the remote hitters
