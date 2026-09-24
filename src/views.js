@@ -3661,6 +3661,15 @@ function mentalGamePage(user, data) {
   const cardsHtml = b.plan ? `
     <h2 class="section-title">Today</h2>
     ${routineCaption}
+    ${data.built ? '<div class="notice">Routine built — now run it. Tap a routine below and the player walks you through it. 👇</div>' : ''}
+    <a href="/mental-game/builder" class="routine-hero" style="text-decoration:none">
+      <span class="routine-hero-icon">🛠️</span>
+      <span class="routine-hero-body">
+        <span class="routine-hero-title">${routineSource === 'custom' ? 'Rebuild my routine' : 'Build my routine'}</span>
+        <span class="routine-hero-sub">${routineSource === 'custom' ? 'Tweak your keyword and steps' : 'Come up with your own keyword + routine'}</span>
+      </span>
+      <span class="routine-hero-go">›</span>
+    </a>
     ${heroCard('morning', '🌅', 'Morning Routine', routineItems, routineDone, '3 min')}
     ${bibleHtml}
     <div class="day-picker">
@@ -3721,6 +3730,217 @@ function mentalGamePage(user, data) {
       <p style="margin:0">Feeling sped up or rushing in a game? <a href="/chat">Talk to Coach Skip →</a> — he'll give you one thing to lock back in.</p>
     </div>
     <p style="text-align:center;margin-top:24px"><a href="/mental-game?retake=1" class="hint">Retake the questionnaire</a></p>` : ''}`,
+  });
+}
+
+// Routine Builder page (Bobby, Sep 24 2026): the hitter comes up with his OWN
+// keyword + routines — tapping suggestions built from his questionnaire
+// answers, never assigned. One screen per step, then the guided routine
+// player (already on the Lock In tab) walks him through what he built.
+function mentalBuilderPage(user, data) {
+  const d = data || {};
+  const payload = JSON.stringify({
+    keyword: d.keyword || '',
+    suggestions: d.suggestions || [],
+    pools: d.pools || { morning: [], pregame: [], practice: [] },
+    current: d.current || null,
+  }).replace(/</g, '\\u003c');
+  return layout({
+    title: 'Build your routine',
+    user,
+    tabs: userTabs('mental', user),
+    body: `<h1 class="page-title">Build your routine</h1>
+    <p class="hint" style="margin-top:-8px">Your words. Your routine. Nobody else's.</p>
+    <div class="card" id="builder-card">
+      <div class="b-dots" id="b-dots"></div>
+      <div id="b-step"></div>
+      <div class="b-nav">
+        <button type="button" class="btn btn-secondary btn-sm" id="b-back">‹ Back</button>
+        <button type="button" class="btn btn-primary btn-sm" id="b-next">Next ›</button>
+      </div>
+      <p class="hint" id="b-err" style="color:var(--bad);min-height:1.2em;margin:8px 0 0"></p>
+    </div>
+    <style>
+      .b-dots { display:flex;gap:6px;justify-content:center;margin-bottom:14px; }
+      .b-dot { width:8px;height:8px;border-radius:50%;background:var(--line); }
+      .b-dot.on { background:var(--accent); }
+      .b-nav { display:flex;justify-content:space-between;margin-top:16px; }
+      .b-chips { display:flex;flex-wrap:wrap;gap:8px;margin:10px 0; }
+      .b-chip { border:1px solid var(--line);border-radius:999px;padding:8px 14px;background:transparent;color:var(--text);font-size:15px; }
+      .b-chip:active { transform:scale(.96); }
+      .b-chip.picked { border-color:var(--accent);color:var(--accent); }
+      .b-pick { display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin:6px 0; }
+      .b-pick span { flex:1; }
+      .b-pick button { border:none;background:none;color:var(--bad);font-size:18px; }
+      .b-kw { font-size:22px;text-align:center;width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:transparent;color:var(--text); }
+      .b-review h3 { margin:14px 0 6px;font-size:15px;color:var(--accent); }
+      .b-review ul { margin:0;padding-left:20px; }
+      .b-review .kw-big { font-size:30px;text-align:center;margin:6px 0;letter-spacing:1px; }
+    </style>
+    <script>
+    (function(){
+      const D = ${payload};
+      const state = {
+        step: 0,
+        keyword: D.keyword || '',
+        reset: '',
+        resetDirty: false,
+        picks: { pregame: [], morning: [], practice: [] },
+      };
+      if (D.current) {
+        for (const k of ['pregame','morning','practice']) {
+          state.picks[k] = (D.current[k] || []).map((x) => ({ text: x.text, detail: x.detail || '' }));
+        }
+      }
+      const STEPS = ['keyword','reset','pregame','morning','practice','review'];
+      const MIN = { pregame: 2, morning: 2, practice: 1 };
+      const MAX = { pregame: 6, morning: 5, practice: 5 };
+      const TITLES = {
+        keyword: 'Your one word',
+        reset: 'Your reset',
+        pregame: 'Pregame routine',
+        morning: 'Morning routine',
+        practice: 'Practice routine',
+        review: 'Your routine',
+      };
+      const SUBS = {
+        keyword: 'One word that locks you in. Yours — not someone else\\u2019s.',
+        reset: 'What you do between pitches when your head gets loud. 15 seconds, automatic.',
+        pregame: 'Tap to add steps. This is YOUR pregame — pick what actually locks you in.',
+        morning: 'Tap to add steps. Start the day like the player you want to be.',
+        practice: 'Tap to add steps. Practice with a purpose.',
+        review: 'This is what you came up with. The guided player will walk you through it.',
+      };
+      const el = (id) => document.getElementById(id);
+      const escH = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+      function defaultReset() {
+        const kw = state.keyword || 'your keyword';
+        return 'Step out of the box. One breath. Say \\u201c' + kw + '\\u201d. Step back in \\u2014 next pitch.';
+      }
+      function renderDots() {
+        el('b-dots').innerHTML = STEPS.map((_, i) => '<span class="b-dot' + (i === state.step ? ' on' : '') + '"></span>').join('');
+      }
+      function chipList(kind) {
+        const pool = D.pools[kind] || [];
+        const picked = state.picks[kind];
+        const isPicked = (t) => picked.some((p) => p.text.toLowerCase() === String(t).toLowerCase());
+        return '<div class="b-chips">' + pool.map((p) =>
+          '<button type="button" class="b-chip' + (isPicked(p.text) ? ' picked' : '') + '" data-kind="' + kind + '" data-text="' + escH(p.text) + '" data-detail="' + escH(p.detail || '') + '">' + escH(p.text) + '</button>'
+        ).join('') + '</div>';
+      }
+      function pickList(kind) {
+        const picked = state.picks[kind];
+        return '<div>' + picked.map((p, i) =>
+          '<div class="b-pick"><span><strong>' + (i + 1) + '.</strong> ' + escH(p.text) + '</span>' +
+          '<button type="button" data-unpick="' + kind + '" data-idx="' + i + '" aria-label="Remove">\\u2715</button></div>'
+        ).join('') + '</div>' +
+        '<div style="display:flex;gap:8px;margin-top:8px"><input type="text" id="b-custom-' + kind + '" placeholder="Add your own step..." maxlength="200" style="flex:1;padding:8px;border:1px solid var(--line);border-radius:10px;background:transparent;color:var(--text)">' +
+        '<button type="button" class="btn btn-sm" data-addcustom="' + kind + '">Add</button></div>';
+      }
+      function render() {
+        renderDots();
+        const s = STEPS[state.step];
+        let h = '<h2 style="margin:0 0 4px">' + TITLES[s] + '</h2><p class="hint" style="margin:0 0 10px">' + SUBS[s] + '</p>';
+        if (s === 'keyword') {
+          h += '<div class="b-chips">' + D.suggestions.map((w) =>
+            '<button type="button" class="b-chip' + (state.keyword.toLowerCase() === String(w).toLowerCase() ? ' picked' : '') + '" data-kw="' + escH(w) + '">' + escH(w) + '</button>'
+          ).join('') + '</div>' +
+          '<input type="text" class="b-kw" id="b-kw-input" maxlength="24" placeholder="Or type your own..." value="' + escH(state.keyword) + '">';
+        } else if (s === 'reset') {
+          if (!state.resetDirty) state.reset = defaultReset();
+          h += '<textarea id="b-reset" rows="4" maxlength="600" style="width:100%;padding:10px;border:1px solid var(--line);border-radius:10px;background:transparent;color:var(--text)">' + escH(state.reset) + '</textarea>' +
+               '<p class="hint">Say it out loud once. If it doesn\\u2019t feel like you, change the words until it does.</p>';
+        } else if (s === 'review') {
+          const sec = (t, items) => '<h3>' + t + '</h3><ul>' + items.map((p) => '<li>' + escH(p.text) + '</li>').join('') + '</ul>';
+          h += '<div class="b-review"><div class="kw-big">\\u201c' + escH(state.keyword) + '\\u201d</div>' +
+               '<h3>Reset</h3><p style="margin:0">' + escH(state.reset) + '</p>' +
+               sec('Pregame (' + state.picks.pregame.length + ')', state.picks.pregame) +
+               sec('Morning (' + state.picks.morning.length + ')', state.picks.morning) +
+               sec('Practice (' + state.picks.practice.length + ')', state.picks.practice) + '</div>';
+        } else {
+          h += chipList(s) + '<h3 style="margin:12px 0 4px;font-size:14px">Your ' + s + ' routine (' + state.picks[s].length + ')</h3>' + pickList(s);
+        }
+        el('b-step').innerHTML = h;
+        el('b-back').style.visibility = state.step === 0 ? 'hidden' : 'visible';
+        el('b-next').textContent = s === 'review' ? 'Save my routine' : 'Next \\u203a';
+        el('b-err').textContent = '';
+        wire();
+      }
+      function err(m) { el('b-err').textContent = m; }
+      function wire() {
+        el('b-step').querySelectorAll('[data-kw]').forEach((b) => b.addEventListener('click', () => {
+          state.keyword = b.getAttribute('data-kw'); state.resetDirty = false; render();
+        }));
+        const kwInput = el('b-kw-input');
+        if (kwInput) kwInput.addEventListener('input', () => { state.keyword = kwInput.value.trim(); state.resetDirty = false; });
+        const rta = el('b-reset');
+        if (rta) rta.addEventListener('input', () => { state.reset = rta.value; state.resetDirty = true; });
+        el('b-step').querySelectorAll('.b-chip[data-kind]').forEach((c) => c.addEventListener('click', () => {
+          const kind = c.getAttribute('data-kind');
+          const text = c.getAttribute('data-text');
+          const detail = c.getAttribute('data-detail');
+          const picked = state.picks[kind];
+          const i = picked.findIndex((p) => p.text.toLowerCase() === text.toLowerCase());
+          if (i >= 0) picked.splice(i, 1);
+          else {
+            if (picked.length >= MAX[kind]) { err('Keep it tight — max ' + MAX[kind] + ' steps.'); return; }
+            picked.push({ text, detail });
+          }
+          render();
+        }));
+        el('b-step').querySelectorAll('[data-unpick]').forEach((b) => b.addEventListener('click', () => {
+          state.picks[b.getAttribute('data-unpick')].splice(Number(b.getAttribute('data-idx')), 1); render();
+        }));
+        el('b-step').querySelectorAll('[data-addcustom]').forEach((b) => b.addEventListener('click', () => {
+          const kind = b.getAttribute('data-addcustom');
+          const inp = el('b-custom-' + kind);
+          const v = (inp.value || '').trim();
+          if (!v) return;
+          if (state.picks[kind].length >= MAX[kind]) { err('Keep it tight — max ' + MAX[kind] + ' steps.'); return; }
+          state.picks[kind].push({ text: v, detail: '' });
+          render();
+        }));
+      }
+      el('b-back').addEventListener('click', () => { if (state.step > 0) { state.step--; render(); } });
+      el('b-next').addEventListener('click', () => {
+        const s = STEPS[state.step];
+        if (s === 'keyword') {
+          const inp = el('b-kw-input');
+          state.keyword = (inp.value || '').trim();
+          if (!state.keyword) { err('Give me one word — yours.'); return; }
+          state.resetDirty = false;
+        }
+        if (['pregame','morning','practice'].includes(s) && state.picks[s].length < MIN[s]) {
+          err('Pick at least ' + MIN[s] + ' step' + (MIN[s] > 1 ? 's' : '') + ' — tap the suggestions or add your own.');
+          return;
+        }
+        if (s === 'review') { save(); return; }
+        state.step++; render();
+      });
+      function save() {
+        el('b-next').disabled = true;
+        el('b-next').textContent = 'Saving...';
+        fetch('/mental-game/builder/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            keyword: state.keyword,
+            reset: state.reset || defaultReset(),
+            pregame: state.picks.pregame,
+            morning: state.picks.morning,
+            practice: state.picks.practice,
+          }),
+        }).then((r) => {
+          window.location.href = '/mental-game?built=1';
+        }).catch(() => {
+          el('b-next').disabled = false;
+          el('b-next').textContent = 'Save my routine';
+          err('Couldn\\u2019t save — check your connection and try again.');
+        });
+      }
+      render();
+    })();
+    </script>`,
   });
 }
 
@@ -5367,7 +5587,7 @@ function hittingPlanPage(user, p, opts) {
       <hr class="doc-rule">
       <h1 class="doc-sec-title">Hitting Program - ${esc(athleteName)}</h1>
       ${whyHtml}
-      <p class="doc-note">Drill demos: <a href="https://drive.google.com/drive/folders/1exkky5BSQjiXoMF2J25sgW87OeYtwG8i" target="_blank">Google Drive Video Library</a></p>
+      <p class="doc-note">Video library &mdash; drill demos, approach, field work &amp; more: <a href="https://drive.google.com/drive/folders/1exkky5BSQjiXoMF2J25sgW87OeYtwG8i" target="_blank">Google Drive Video Library</a></p>
       ${prepHtml}
       ${drillTableHtml}
       ${freqLine}
@@ -5843,6 +6063,7 @@ module.exports = {
   sessionPage,
   programRoutinePage,
   mentalGamePage,
+  mentalBuilderPage,
   programEditPage,
   liftingProgramsPage,
   liftingEditPage,

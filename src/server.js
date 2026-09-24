@@ -3291,6 +3291,7 @@ app.get('/mental-game', requireLogin, (req, res) => {
     pregame: { items: pregameItems, done: pregameDone },
     practice: { items: practiceItems, done: practiceDone },
     routineSource: (routineRow && routineRow.source) || 'default',
+    built: req.query.built === '1',
   }));
 });
 
@@ -3383,6 +3384,66 @@ app.post('/mental-game/routine/edit', requireLogin, (req, res) => {
     }
   }
   res.redirect('/mental-game/routines/edit');
+});
+// Routine Builder (Bobby, Sep 24 2026): "They go through the routine builder
+// first, and then you guide them through it once they have it." The hitter
+// comes up with his OWN keyword + routines (tapping suggestions built from
+// his questionnaire answers, never assigned) — then the existing guided
+// routine player walks him through them.
+app.get('/mental-game/builder', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.redirect('/coach');
+  const answers = getMentalAnswers(req.user.id);
+  let pools = null;
+  try { pools = buildPersonalRoutines(answers); } catch (e) { pools = null; }
+  const fb = (arr) => (arr || []).map((x) => ({ text: x.text, detail: x.detail || '' }));
+  const poolData = {
+    morning: pools ? fb(pools.morning) : fb(DEFAULT_MORNING),
+    pregame: pools ? fb(pools.pregame) : fb(DEFAULT_PREGAME),
+    practice: pools ? fb(pools.practice) : fb(DEFAULT_PRACTICE),
+  };
+  const rawKw = String(answers.keyword || '').trim();
+  const dismissive = /^(nope?|nah+|no|none|n\/a|na|idk|dont know|don't know|nothing|no idea|\?+|-+)$/i;
+  const keyword = dismissive.test(rawKw) ? '' : rawKw;
+  const suggestions = [];
+  if (keyword) suggestions.push(keyword);
+  for (const s of ['Lock in', 'Attack', 'Free', 'Calm', 'Hunt', 'Next pitch', 'Compete', 'Breathe']) {
+    if (!suggestions.some((x) => x.toLowerCase() === s.toLowerCase())) suggestions.push(s);
+  }
+  let current = null;
+  try {
+    const row = db.prepare('SELECT morning_json, pregame_json, prepractice_json, source FROM mental_routines WHERE user_id = ?').get(req.user.id);
+    if (row && row.source === 'custom') {
+      current = {
+        morning: JSON.parse(row.morning_json || '[]'),
+        pregame: JSON.parse(row.pregame_json || '[]'),
+        practice: JSON.parse(row.prepractice_json || '[]'),
+      };
+    }
+  } catch (e) { /* fresh build */ }
+  res.send(views.mentalBuilderPage(req.user, { keyword, suggestions, pools: poolData, current }));
+});
+
+app.post('/mental-game/builder/save', requireLogin, (req, res) => {
+  if (req.user.role === 'coach') return res.redirect('/coach');
+  const b = req.body || {};
+  const clean = (v, n) => String(v || '').trim().slice(0, n || 200);
+  const cleanItem = (it) => ({ text: clean(it && it.text, 200), detail: clean(it && it.detail, 600), done: false });
+  const keyword = clean(b.keyword, 24);
+  const reset = clean(b.reset, 600);
+  const morning = (Array.isArray(b.morning) ? b.morning : []).map(cleanItem).filter((x) => x.text).slice(0, 8);
+  const pregame = (Array.isArray(b.pregame) ? b.pregame : []).map(cleanItem).filter((x) => x.text).slice(0, 8);
+  const practice = (Array.isArray(b.practice) ? b.practice : []).map(cleanItem).filter((x) => x.text).slice(0, 8);
+  if (!keyword || !morning.length || !pregame.length) return res.redirect('/mental-game/builder');
+  const now = new Date().toISOString();
+  db.prepare(`INSERT INTO mental_answers (user_id, qkey, answer, updated_at) VALUES (?, ?, ?, ?)
+    ON CONFLICT(user_id, qkey) DO UPDATE SET answer=excluded.answer, updated_at=excluded.updated_at`)
+    .run(req.user.id, 'keyword', keyword, now);
+  db.prepare(`DELETE FROM mental_keys WHERE user_id = ? AND content LIKE 'My reset:%'`).run(req.user.id);
+  if (reset) db.prepare('INSERT INTO mental_keys (user_id, content, created_at) VALUES (?, ?, ?)').run(req.user.id, 'My reset: ' + reset, now);
+  db.prepare(`INSERT INTO mental_routines (user_id, morning_json, pregame_json, prepractice_json, source, updated_at) VALUES (?, ?, ?, ?, 'custom', ?)
+    ON CONFLICT(user_id) DO UPDATE SET morning_json=excluded.morning_json, pregame_json=excluded.pregame_json, prepractice_json=excluded.prepractice_json, source='custom', updated_at=excluded.updated_at`)
+    .run(req.user.id, JSON.stringify(morning), JSON.stringify(pregame), JSON.stringify(practice), now);
+  res.redirect('/mental-game?built=1');
 });
 app.post('/mental-game/bible/done', requireLogin, (req, res) => {
   const today = todayChicagoDate();
