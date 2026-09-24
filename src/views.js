@@ -5636,6 +5636,12 @@ function trainingEnvironmentsPage(user, programs, lib, saved) {
         <input type="hidden" name="id" value="${esc(e.id)}">
         <button type="submit" class="btn-small btn-quiet">Delete</button>
       </form>
+      <form method="post" action="/coach/training-environments" style="margin:8px 0 0;display:flex;gap:8px" aria-label="Reorder">
+        <input type="hidden" name="action" value="move">
+        <input type="hidden" name="id" value="${esc(e.id)}">
+        <button type="submit" name="dir" value="up" class="btn-small btn-quiet" aria-label="Move up">↑</button>
+        <button type="submit" name="dir" value="down" class="btn-small btn-quiet" aria-label="Move down">↓</button>
+      </form>
     </div>`).join('');
   return layout({
     title: 'Training Environment Library',

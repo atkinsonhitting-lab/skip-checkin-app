@@ -4261,7 +4261,10 @@ app.post('/coach/program/:id/hitting-plan', requireCoach, (req, res) => {
   p.prog.hitting_plan = plan;
   db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?')
     .run(JSON.stringify(p.prog), new Date().toISOString(), p.id);
-  res.redirect(`/coach/program/${p.id}/hitting-plan?saved=1`);
+  // Bobby (Sep 24 2026): "Grades go in hitting program!" — after a save,
+  // land on the doc itself so the grades are immediately visible in the
+  // hitting program. The doc's coach bar jumps back to the editor.
+  res.redirect(`/coach/program/${p.id}/doc`);
 });
 
 // ---- Training Environment Library (Bobby, Sep 24 2026) ----
@@ -4337,6 +4340,14 @@ app.post('/coach/training-environments', requireCoach, (req, res) => {
   } else if (action === 'delete') {
     const idx = list.findIndex((x) => x.id === String(b.id || ''));
     if (idx >= 0) deleted = list.splice(idx, 1)[0];
+  } else if (action === 'move') {
+    // Bobby (Sep 24 2026): "And reorder them" — ↑ ↓ buttons on each entry.
+    const idx = list.findIndex((x) => x.id === String(b.id || ''));
+    const j = idx + (String(b.dir || '') === 'down' ? 1 : -1);
+    if (idx >= 0 && j >= 0 && j < list.length) {
+      const [e] = list.splice(idx, 1);
+      list.splice(j, 0, e);
+    }
   }
   // A deleted environment comes out of default_ids too, so a stale id can
   // never be re-appended to a hitter's program by a later migration.
