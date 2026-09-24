@@ -5510,6 +5510,14 @@ function hittingPlanEditPage(user, p) {
     body: `<h1 class="page-title">Hitting Plan — ${esc(athleteName)}</h1>
     <p><a href="/coach/program/${p.id}/edit" class="hint-inline">‹ Back to program editor</a></p>
     <form method="post" action="/coach/program/${p.id}/hitting-plan" class="form">
+      <div class="card routine-group">
+        <label class="fld">Date range<input type="text" name="date_range" value="${esc(prog.date_range || '')}" maxlength="60" placeholder="8/18–9/16"></label>
+        <label class="fld">Phase emphasis<input type="text" name="phase_emphasis" value="${esc(prog.phase_emphasis || '')}" maxlength="120" placeholder="Coil and Barrel Turn"></label>
+        <label class="fld">The adjustment — the one thing he's working on
+          <textarea name="adjustment" rows="2" maxlength="500">${esc(prog.adjustment || '')}</textarea>
+        </label>
+        <label class="fld">Mental framework<input type="text" name="mental_framework" value="${esc(prog.mental_framework || '')}" maxlength="200" placeholder="PREPARED → PRESENT → COMPETE"></label>
+      </div>
       <h3>Grades</h3>
       <p class="hint-inline">Show on his program right after the key strengths.</p>
       <div class="grade-edit-row">${gradeRows}</div>

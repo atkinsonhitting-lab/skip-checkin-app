@@ -4201,6 +4201,16 @@ app.post('/coach/program/:id/hitting-plan', requireCoach, (req, res) => {
   } else {
     plan.cues = oldPlan.cues && typeof oldPlan.cues === 'object' ? oldPlan.cues : { movement: '', timing: '', game: '' };
   }
+  // Eval header (Bobby Sep 24 2026): date range / phase emphasis / the
+  // adjustment / mental framework — editable here and in the program
+  // editor, one canonical copy on prog. Guarded: a stale form without
+  // the fields must not wipe them.
+  if ('date_range' in b || 'phase_emphasis' in b || 'adjustment' in b || 'mental_framework' in b) {
+    if ('date_range' in b) p.prog.date_range = String(b.date_range || '').trim().slice(0, 60);
+    if ('phase_emphasis' in b) p.prog.phase_emphasis = String(b.phase_emphasis || '').trim().slice(0, 120);
+    if ('adjustment' in b) p.prog.adjustment = String(b.adjustment || '').trim().slice(0, 500);
+    if ('mental_framework' in b) p.prog.mental_framework = String(b.mental_framework || '').trim().slice(0, 200);
+  }
   // Warmup items: w_name_0, w_detail_0, ...
   for (let i = 0; i < 50; i++) {
     const name = String(b[`w_name_${i}`] || '').trim();
