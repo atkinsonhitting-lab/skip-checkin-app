@@ -20,7 +20,8 @@ const data = require('./data');
 const views = require('./views');
 const brain = require('./brain');
 const videoLinks = require('./video_links');
-const { envById, defaultEnvEntries } = require('./env_lib');
+const envLib = require('./env_lib');
+const { envById, defaultEnvEntries } = envLib;
 const { seedUsers, writeCredentialsFile, userCount } = require('./seed');
 
 // Bobby's own organization — his 4 remote hitters, Talk to Skip on, free
@@ -1801,7 +1802,7 @@ const HITTING_PLAN_VERSION = 6;
 // "do this drill on ..." whatever he picks.
 const DRILL_ENVS = ['Tee', 'Side Toss', 'Front Toss', 'BP', 'Machine'];
 // Build a hitting-plan document from Bobby's template (Sep 23 2026):
-// Eval (Key Strengths, Grades, Overall Grade, Need) + Plan (2-4 core drills
+// Eval (Key Strengths, Grades, Need) + Plan (2-4 core drills
 // with Why? + sets/reps, frequency line, training environments at the bottom).
 // Template: ~/workspace/user/files/Atkinson_Hitting_Remote_Template.docx
 // Bobby: no Weekly Check-In Notes (the app does that), no mobility (lives in
@@ -1906,7 +1907,6 @@ function buildHittingPlan(prog) {
     strengths: Array.isArray(prog.strengths) ? prog.strengths.filter(Boolean) : [],
     grades: prog.grades && typeof prog.grades === 'object' ? prog.grades : {},
     grade_whys: prog.grade_whys && typeof prog.grade_whys === 'object' ? prog.grade_whys : {},
-    overall_grade: '',
     need: prog.adjustment || '',
     why_text: whyText,
     reminder: cues.game || '',
@@ -4187,6 +4187,149 @@ app.post('/coach/program/:id/hitting-plan', requireCoach, (req, res) => {
   db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?')
     .run(JSON.stringify(p.prog), new Date().toISOString(), p.id);
   res.redirect(`/coach/program/${p.id}/hitting-plan?saved=1`);
+});
+
+// ---- Training Environment Library (Bobby, Sep 24 2026) ----
+// One page: see the whole library with every explanation, pick environments
+// for each hitter (matrix), and add/edit/remove library entries.
+function programsWithEnvPicks() {
+  return db
+    .prepare('SELECT id, athlete_name, program_json FROM remote_programs ORDER BY athlete_name')
+    .all()
+    .map((r) => {
+      let prog = {};
+      try { prog = JSON.parse(r.program_json || '{}'); } catch (e) {}
+      const hp = (prog && prog.hitting_plan) || {};
+      const picked = new Set(Array.isArray(hp.environments_custom) ? hp.environments_custom.map(String) : []);
+      return { id: r.id, athlete_name: r.athlete_name, picked };
+    });
+}
+
+app.get('/coach/training-environments', requireCoach, (req, res) => {
+  setApprovalCount(req);
+  res.send(views.trainingEnvironmentsPage(req.user, programsWithEnvPicks(), envLib, req.query.saved === '1'));
+});
+
+// Matrix save: checked boxes become each hitter's environments_custom.
+app.post('/coach/training-environments/assign', requireCoach, (req, res) => {
+  const b = req.body || {};
+  const rows = db.prepare('SELECT id, program_json FROM remote_programs').all();
+  for (const r of rows) {
+    let prog = {};
+    try { prog = JSON.parse(r.program_json || '{}'); } catch (e) { continue; }
+    if (!prog.hitting_plan) continue;
+    const hp = prog.hitting_plan;
+    const pickedIds = envLib.ENV_LIST.map((e) => e.id).filter((id) => b[`sel_${r.id}_${id}`]);
+    hp.environments_custom = pickedIds;
+    hp.environments = [
+      ...pickedIds.map((id) => { const e = envLib.envById(id); return e ? e.name : null; }).filter(Boolean),
+      ...(Array.isArray(hp.environments_other) ? hp.environments_other : []),
+    ];
+    hp._custom = true;
+    prog.hitting_plan = hp;
+    db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?')
+      .run(JSON.stringify(prog), new Date().toISOString(), r.id);
+  }
+  res.redirect('/coach/training-environments?saved=1');
+});
+
+// Add / update / delete a library entry. Renames and deletes propagate to
+// every hitter's program so names never go stale and deleted environments
+// come off programs.
+app.post('/coach/training-environments', requireCoach, (req, res) => {
+  const b = req.body || {};
+  const action = String(b.action || '');
+  const list = envLib.ENV_LIST.map((e) => ({ ...e }));
+  const defaults = [...envLib.DEFAULT_IDS];
+  let renamed = null;
+  let deleted = null;
+  if (action === 'add') {
+    const name = String(b.name || '').trim();
+    if (name) {
+      let id = envLib.slugify(name);
+      let n = 2;
+      while (list.some((e) => e.id === id)) id = `${envLib.slugify(name)}-${n++}`;
+      list.push({ id, name, description: String(b.description || '').trim(), match: [name.toLowerCase()] });
+    }
+  } else if (action === 'update') {
+    const e = list.find((x) => x.id === String(b.id || ''));
+    if (e) {
+      const oldName = e.name;
+      e.name = String(b.name || '').trim() || e.name;
+      e.description = String(b.description || '').trim();
+      if (!e.match || !e.match.length) e.match = [e.name.toLowerCase()];
+      if (oldName !== e.name) renamed = { oldName, newName: e.name };
+    }
+  } else if (action === 'delete') {
+    const idx = list.findIndex((x) => x.id === String(b.id || ''));
+    if (idx >= 0) deleted = list.splice(idx, 1)[0];
+  }
+  envLib.saveEnvLib({ environments: list, default_ids: defaults, note: undefined });
+  // Propagate AFTER the save so name recomputes resolve against the new list.
+  if (renamed) propagateEnvRename(renamed.oldName, renamed.newName);
+  if (deleted) propagateEnvDelete(deleted.id, deleted.name);
+  res.redirect('/coach/training-environments?saved=1');
+});
+
+// Rename/delete propagation across all hitting plans.
+function propagateEnvRename(oldName, newName) {
+  if (!oldName || oldName === newName) return;
+  const rows = db.prepare('SELECT id, program_json FROM remote_programs').all();
+  for (const r of rows) {
+    let prog = {};
+    try { prog = JSON.parse(r.program_json || '{}'); } catch (e) { continue; }
+    const hp = prog.hitting_plan;
+    if (!hp) continue;
+    let changed = false;
+    if (Array.isArray(hp.environments_custom)) {
+      // IDs are stable across renames — just recompute display names.
+      hp.environments = [
+        ...hp.environments_custom.map((id) => { const e = envLib.envById(id); return e ? e.name : null; }).filter(Boolean),
+        ...(Array.isArray(hp.environments_other) ? hp.environments_other : []),
+      ];
+      changed = true;
+    } else if (Array.isArray(hp.environments)) {
+      hp.environments = hp.environments.map((n) => (n === oldName ? (changed = true, newName) : n));
+    }
+    if (changed) {
+      db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?')
+        .run(JSON.stringify(prog), new Date().toISOString(), r.id);
+    }
+  }
+}
+
+function propagateEnvDelete(id, name) {
+  const rows = db.prepare('SELECT id, program_json FROM remote_programs').all();
+  for (const r of rows) {
+    let prog = {};
+    try { prog = JSON.parse(r.program_json || '{}'); } catch (e) { continue; }
+    const hp = prog.hitting_plan;
+    if (!hp) continue;
+    let changed = false;
+    if (Array.isArray(hp.environments_custom) && hp.environments_custom.includes(id)) {
+      hp.environments_custom = hp.environments_custom.filter((x) => x !== id);
+      hp.environments = [
+        ...hp.environments_custom.map((x) => { const e = envLib.envById(x); return e ? e.name : null; }).filter(Boolean),
+        ...(Array.isArray(hp.environments_other) ? hp.environments_other : []),
+      ];
+      changed = true;
+    } else if (Array.isArray(hp.environments) && hp.environments.includes(name)) {
+      hp.environments = hp.environments.filter((n) => n !== name);
+      changed = true;
+    }
+    if (changed) {
+      db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?')
+        .run(JSON.stringify(prog), new Date().toISOString(), r.id);
+    }
+  }
+}
+
+// Raw library JSON for the deploy-sync workflow (API key auth). The library
+// is coach-editable in production, so the repo copy is refreshed from here
+// before pushes — otherwise a push would ship a stale library.
+app.get('/api/env-lib', (req, res) => {
+  if (!checkApiKey(req, res)) return;
+  res.json({ default_ids: envLib.DEFAULT_IDS, environments: envLib.ENV_LIST });
 });
 
 app.post('/coach/remote/remove', requireCoach, (req, res) => {
@@ -6997,6 +7140,7 @@ function coachUserStats(scope, opts) {
     return { id: u.id, email: u.email, name, total: row.total, last: row.last, age: ageOn(u.date_of_birth), team: u.team_name || null,
       organizationId: u.organization_id || null, orgName: u.org_name || null, playerType: u.player_type || 'hitter',
       isRemote: u.remote_program_id != null,
+      remoteProgramId: u.remote_program_id || null,
       notifyOn: flag === 1 || (flag == null && u.org_is_mine === 1), streak, weekCount };
   });
 }

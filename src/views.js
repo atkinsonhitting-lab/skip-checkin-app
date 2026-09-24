@@ -2082,6 +2082,7 @@ function skipAvatar(user) {
 }
 function coachHittersPage(user, userStats, opts) {
   const o = opts || {};
+  const canEdit = user.role === 'coach' && user.canEdit !== false;
   const title = o.title || 'Players';
   const tab = o.tab || 'hitters';
   const cards = userStats
@@ -2093,7 +2094,7 @@ function coachHittersPage(user, userStats, opts) {
           <div class="athlete-card-meta">${a.total} check-in${a.total === 1 ? '' : 's'}${a.streak ? ` · 🔥 ${a.streak}-day streak` : ''}${a.weekCount != null ? ` · ${a.weekCount}/7 days` : ''}${a.last ? ` · last ${fmtDate(a.last)}` : ' · none yet'}${a.age != null ? ` · age ${a.age}` : ''}${a.team ? ` · ${esc(a.team)}` : ''}${!o.filterOrg && a.orgName ? ` · ${esc(a.orgName)}` : ''}</div>
         </a>
         <div style="display:flex;gap:8px;margin:8px 0 0;flex-wrap:wrap">
-          
+          ${a.isRemote && a.remoteProgramId && canEdit ? `<a href="/coach/program/${a.remoteProgramId}/hitting-plan" class="btn-small" style="text-decoration:none">📄 Program</a>` : ''}
           ${o.notifyButton ? `<form method="post" action="/coach/player/${a.id}/notify-checkin" style="margin:0">
             <input type="hidden" name="back" value="${esc(o.tab === 'my-players' ? '/coach/my-players' : '/coach/hitters')}">
             <button class="btn-small btn-quiet" type="submit" title="${a.notifyOn ? 'Log alerts ON — tap to mute' : 'Log alerts OFF — tap to unmute'}">${a.notifyOn ? '🔔 Alerts on' : '🔕 Alerts off'}</button>
@@ -5116,7 +5117,7 @@ function mobilityWorkoutPage(user, p, opts) {
     <script src="/mobility-workout.js"></script>
     <style>
       .wo-list { max-width: 600px; margin: 0 auto; }
-      .wo-ex { background: #fff; border: 1px solid #e0e0e0; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+      .wo-ex { background: #fff; color: #111; border: 1px solid #e0e0e0; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
       .wo-ex-head { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 12px; }
       .wo-ex-num { background: #111; color: #fff; width: 28px; height: 28px; border-radius: 50%;
         display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; flex-shrink: 0; }
@@ -5200,7 +5201,8 @@ function hittingPlanPage(user, p, opts) {
   ).join('')}</div>` : '';
 
   // === EVAL: Hitting Evaluation Report (Bobby's template, Sep 23 2026) ===
-  // Key Strengths, Grades (his sheet system), Overall Grade, Need.
+  // Key Strengths, Grades (his sheet system), Need. (Overall Grade removed
+  // Sep 24 2026 — Bobby doesn't want it.)
   const strengths = Array.isArray(plan.strengths) ? plan.strengths : [];
   const strengthsHtml = strengths.length
     ? `<h2 class="doc-sec">Key Strengths</h2>
@@ -5217,14 +5219,13 @@ function hittingPlanPage(user, p, opts) {
          <li><strong>${esc(k)} = ${esc(String(v))}</strong>${gradeWhys[k] ? ` - ${esc(gradeWhys[k])}` : ''}</li>`).join('')}</ul>`
     : '';
 
-  const overallHtml = `<p class="overall"><strong>Overall Grade = ${esc(String(plan.overall_grade || ''))}</strong></p>`;
   const needHtml = plan.need
     ? `<p class="need"><strong>Need =</strong> ${esc(plan.need)}</p>`
     : '';
 
   const evalHtml = `<div class="eval-section">
       <h1 class="doc-sec-title">Hitting Evaluation Report - ${esc(athleteName)}</h1>
-      ${strengthsHtml}${gradesHtml}${overallHtml}${needHtml}
+      ${strengthsHtml}${gradesHtml}${needHtml}
     </div>`;
 
   // === PLAN: Hitting Program (Bobby's template, Sep 23 2026) ===
@@ -5327,7 +5328,6 @@ function hittingPlanPage(user, p, opts) {
       .grade-scale { font-size: 13px; color: #555; font-weight: 700; margin: 4px 0; }
       .grade-list, .std-list { margin: 6px 0 12px 20px; padding: 0; font-size: 14px; }
       .grade-list li, .std-list li { margin: 4px 0; color: #222; }
-      .overall { font-size: 15px; margin: 10px 0; }
       .need { font-size: 15px; background: #f5f5f5; padding: 10px 12px; border-radius: 4px; margin: 12px 0; }
       .why-line { font-size: 14px; color: #333; margin: 10px 0; }
       .drill-table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14px; }
@@ -5384,7 +5384,7 @@ function hittingPlanEditPage(user, p) {
     : _envNames.filter((nm) => !envLib.findEnvEntry(nm));
   const envPickerHtml = `
       <h3>Training Environments</h3>
-      <p class="hint-inline">Tap the environments for his program. Descriptions come from your library.</p>
+      <p class="hint-inline">Tap the environments for his program. Descriptions come from your library. <a href="/coach/training-environments">Open the library →</a> to pick for all your guys or add/edit environments.</p>
       <div class="env-picker">
         ${envLib.ENV_LIST.map((e) => `
         <label class="env-pick">
@@ -5490,7 +5490,7 @@ function hittingPlanEditPage(user, p) {
     <style>
       .plan-row { display: flex; gap: 8px; margin: 6px 0; }
       .plan-row input { flex: 1; padding: 8px; }
-      .plan-drill { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; padding: 10px; background: #f9f9f9; border-radius: 6px; }
+      .plan-drill { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; padding: 10px; background: var(--card); border: 1px solid var(--line); border-radius: 6px; }
       .plan-drill input { padding: 8px; }
       .plan-drill .drill-name { grid-column: 1 / -1; font-weight: 600; }
       .drill-envs { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; font-size: 14px; }
@@ -5498,10 +5498,10 @@ function hittingPlanEditPage(user, p) {
       .env-check { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; }
       .env-check input { width: 16px; height: 16px; }
       .env-picker { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 4px; }
-      .env-pick { display: flex; gap: 10px; align-items: flex-start; padding: 10px; background: #f9f9f9; border-radius: 8px; cursor: pointer; }
+      .env-pick { display: flex; gap: 10px; align-items: flex-start; padding: 10px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
       .env-pick input { margin-top: 3px; width: 18px; height: 18px; flex-shrink: 0; }
       .env-pick-body { display: flex; flex-direction: column; gap: 2px; }
-      .env-pick-desc { font-size: 13px; color: #555; line-height: 1.4; }
+      .env-pick-desc { font-size: 13px; color: var(--muted); line-height: 1.4; }
       .env-desc { font-size: 14px; color: #444; }
     </style>`,
   });
@@ -5548,7 +5548,81 @@ function routineEditPage(user, routines) {
     ${section('practice', routines.practice)}`,
   });
 }
+// Training Environment Library (Bobby, Sep 24 2026): one page to see the
+// whole library with every explanation, pick environments for each hitter,
+// and add/edit/remove library entries. Selections write each hitter's
+// hitting-plan environments_custom (the per-athlete editor picker stays for
+// fine-tuning one guy at a time).
+function trainingEnvironmentsPage(user, programs, lib, saved) {
+  const envs = lib.ENV_LIST || [];
+  const firstName = (n) => String(n || '').split(' ')[0];
+  // Assignment matrix: rows = environments, columns = hitters.
+  const matrixRows = envs.map((e) => {
+    const cells = programs.map((pr) =>
+      `<td class="mx-cell"><input type="checkbox" name="sel_${pr.id}_${e.id}"${pr.picked.has(e.id) ? ' checked' : ''} aria-label="${esc(e.name)} for ${esc(pr.athlete_name)}"></td>`
+    ).join('');
+    return `<tr><td class="mx-env"><strong>${esc(e.name)}</strong>${e.description ? `<div class="mx-desc">${esc(e.description)}</div>` : ''}</td>${cells}</tr>`;
+  }).join('');
+  const headCells = programs.map((pr) => `<th>${esc(firstName(pr.athlete_name))}</th>`).join('');
+  // Library editor: add form + per-entry edit/delete, every explanation shown.
+  const libRows = envs.map((e) => `
+    <div class="card lib-entry">
+      <form method="post" action="/coach/training-environments" class="form" style="margin:0">
+        <input type="hidden" name="action" value="update">
+        <input type="hidden" name="id" value="${esc(e.id)}">
+        <label class="fld">Name<input type="text" name="name" value="${esc(e.name)}" maxlength="80" required></label>
+        <label class="fld">Explanation (shows on the hitter's program)<textarea name="description" rows="4" maxlength="2000">${esc(e.description || '')}</textarea></label>
+        <div style="display:flex;gap:8px">
+          <button type="submit" class="btn-small">Save</button>
+        </div>
+      </form>
+      <form method="post" action="/coach/training-environments" style="margin:8px 0 0" onsubmit="return confirm('Delete this environment from the library? It will also come off every hitter\'s program.');">
+        <input type="hidden" name="action" value="delete">
+        <input type="hidden" name="id" value="${esc(e.id)}">
+        <button type="submit" class="btn-small btn-quiet">Delete</button>
+      </form>
+    </div>`).join('');
+  return layout({
+    title: 'Training Environment Library',
+    user,
+    tabs: coachTabs('programs', user.approvalCount, user),
+    body: `<h1 class="page-title">Training Environment Library</h1>
+    ${saved ? '<div class="card" style="border-color:var(--ok)"><strong>Saved.</strong></div>' : ''}
+    <h2 class="section-head">Pick environments for your hitters</h2>
+    <form method="post" action="/coach/training-environments/assign">
+      <div class="mx-wrap"><table class="mx-table">
+        <thead><tr><th>Environment</th>${headCells}</tr></thead>
+        <tbody>${matrixRows}</tbody>
+      </table></div>
+      <button type="submit" class="btn btn-primary" style="margin-top:10px">Save picks for all hitters</button>
+    </form>
+    <h2 class="section-head" style="margin-top:28px">Edit the library</h2>
+    <p class="hint-inline">Add new environments, fix a name, or rewrite an explanation. Everything here shows on the hitter's program under "Training Environments That Will Be Good for You".</p>
+    <div class="card">
+      <form method="post" action="/coach/training-environments" class="form" style="margin:0">
+        <input type="hidden" name="action" value="add">
+        <label class="fld">New environment name<input type="text" name="name" maxlength="80" placeholder="e.g. Open angle machine and front toss" required></label>
+        <label class="fld">Explanation<textarea name="description" rows="4" maxlength="2000" placeholder="How to set it up and what a good rep looks like..."></textarea></label>
+        <button type="submit" class="btn-small">Add environment</button>
+      </form>
+    </div>
+    ${libRows}
+    <style>
+      .mx-wrap { overflow-x: auto; margin: 0 -16px; padding: 0 16px; }
+      .mx-table { border-collapse: collapse; min-width: 100%; }
+      .mx-table th, .mx-table td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+      .mx-table thead th { position: sticky; top: 0; background: var(--bg); text-align: center; font-size: 13px; }
+      .mx-table thead th:first-child { text-align: left; }
+      .mx-env { min-width: 220px; font-size: 14px; }
+      .mx-desc { font-size: 12px; color: var(--muted); margin-top: 2px; line-height: 1.4; }
+      .mx-cell { text-align: center; }
+      .mx-cell input { width: 22px; height: 22px; accent-color: var(--red); }
+      .lib-entry { margin-top: 12px; }
+    </style>`,
+  });
+}
 module.exports = {
+  trainingEnvironmentsPage,
   layout,
   userTabs,
   coachTabs,

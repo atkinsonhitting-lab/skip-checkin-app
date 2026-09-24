@@ -1,1 +1,131 @@
-{"default_ids":["open-angle-front-toss","closed-angle-front-toss","mixed-front-toss","mixed-bp","machine-fastball-swing-decisions","breaking-ball-swing-decisions"],"environments":[{"description":"Set the machine on the hitter's open side and aim it over the plate. The goal is a line drive through the batter's eye. If you pull it with backspin, that's a good swing too. Stay in your move and deliver a clean barrel.","id":"open-angle","match":["open angled","open angle"],"name":"Open angle"},{"description":"Set the machine on the hitter's closed side and aim it over the plate. Let the ball travel and hold your direction as long as possible. Don't rush the turn or force the ball to any part of the field.","id":"closed-angle","match":["closed angle"],"name":"Closed angle"},{"description":"Take the Hack Attack off its legs and secure it low behind a screen. Set it for fastballs at the top of the zone to create a riding look. Recognize the ball up, get on time, and match your barrel path to it.","id":"low-release","match":["low release"],"name":"Low release"},{"description":"Set the machine near a right-handed pitcher's release side and dial in a breaking ball that moves like it's coming from a righty. The hitter's job is to read the angle and break, stay in the swing, and adjust to where the ball actually ends up.","id":"rh-angled-breaking-ball","match":["rh breaking ball","righty breaking","right-handed breaking","right hand breaking"],"name":"RH angled breaking ball"},{"description":"Move the machine near a left-handed pitcher's release side and set the break to match a lefty. This gives the hitter a different starting point and ball flight to recognize. Let it travel, hold your direction, and hit what you see","id":"lh-angled-breaking-ball","match":["lh breaking ball","lefty breaking","left-handed breaking","left hand breaking"],"name":"LH angled breaking ball"},{"description":"Toss from the hitter's open side and angle the ball over the plate. The goal is a line drive through the batter's eye, but pulling it with backspin is good too. Stay in your move and deliver a clean barrel.","id":"open-angle-front-toss","match":["open angle front toss","open angled front toss"],"name":"Open angle front toss"},{"description":"Toss from the hitter's closed side and angle the ball over the plate. Let it travel and hold your direction as long as possible. We're not forcing the ball anywhere.","id":"closed-angle-front-toss","match":["closed angle front toss","closed angled front toss"],"name":"Closed angle front toss"},{"description":"Mix the front toss angles and locations, then give the hitter a count and play out the at-bat. The goal is to have a plan, make swing decisions, and adjust as the at-bat develops.","id":"mixed-front-toss","match":["mixed front toss"],"name":"Mixed front toss"},{"description":"Mix pitches and locations during BP and play out full at-bats. This is where we compete: take pitches, adjust to the count, and put a good swing on the pitch we choose.","id":"mixed-bp","match":["mixed bp"],"name":"Mixed BP"},{"description":"Throw fastballs both in and out of the zone, calling out the count before each pitch. Hunt a pitch you can drive when you're ahead. When you're behind, compete and cover more of the zone. A good take matters too.","id":"machine-fastball-swing-decisions","match":["machine fastball","fastball swing decisions"],"name":"Machine fastball swing decisions with count work"},{"description":"Mix breaking balls that finish in the zone with ones that finish out of it, and call out the count. Read the shape and where the ball is going to finish. Make a swing decision that fits the pitch and the count.","id":"breaking-ball-swing-decisions","match":["breaking ball swing decisions"],"name":"Breaking ball swing decisions with count work"}],"note":"Bobby's canonical training environment library. Descriptions are his exact words — do not rewrite. default_ids go into every remote hitter's program (Bobby, Sep 24 2026: 'put these in everyone's program for now'); a coach's per-athlete picker overrides them. Matching is longest-pattern-wins, so file order is display order.","updated":"2026-09-24","version":3}
+{
+  "default_ids": [
+    "open-angle-front-toss",
+    "closed-angle-front-toss",
+    "mixed-front-toss",
+    "mixed-bp",
+    "machine-fastball-swing-decisions",
+    "breaking-ball-swing-decisions"
+  ],
+  "environments": [
+    {
+      "description": "Set the machine on the hitter's open side and aim it over the plate. The goal is a line drive through the batter's eye. If you pull it with backspin, that's a good swing too. Stay in your move and deliver a clean barrel.",
+      "id": "open-angle",
+      "match": [
+        "open angled",
+        "open angle"
+      ],
+      "name": "Open angle"
+    },
+    {
+      "description": "Set the machine on the hitter's closed side and aim it over the plate. Let the ball travel and hold your direction as long as possible. Don't rush the turn or force the ball to any part of the field.",
+      "id": "closed-angle",
+      "match": [
+        "closed angle"
+      ],
+      "name": "Closed angle"
+    },
+    {
+      "description": "Take the Hack Attack off its legs and secure it low behind a screen. Set it for fastballs at the top of the zone to create a riding look. Recognize the ball up, get on time, and match your barrel path to it.",
+      "id": "low-release",
+      "match": [
+        "low release"
+      ],
+      "name": "Low release"
+    },
+    {
+      "description": "Set the machine near a right-handed pitcher's release side and dial in a breaking ball that moves like it's coming from a righty. The hitter's job is to read the angle and break, stay in the swing, and adjust to where the ball actually ends up.",
+      "id": "rh-angled-breaking-ball",
+      "match": [
+        "rh breaking ball",
+        "righty breaking",
+        "right-handed breaking",
+        "right hand breaking"
+      ],
+      "name": "RH angled breaking ball"
+    },
+    {
+      "description": "Move the machine near a left-handed pitcher's release side and set the break to match a lefty. This gives the hitter a different starting point and ball flight to recognize. Let it travel, hold your direction, and hit what you see",
+      "id": "lh-angled-breaking-ball",
+      "match": [
+        "lh breaking ball",
+        "lefty breaking",
+        "left-handed breaking",
+        "left hand breaking"
+      ],
+      "name": "LH angled breaking ball"
+    },
+    {
+      "description": "Toss from the hitter's open side and angle the ball over the plate. The goal is a line drive through the batter's eye, but pulling it with backspin is good too. Stay in your move and deliver a clean barrel.",
+      "id": "open-angle-front-toss",
+      "match": [
+        "open angle front toss",
+        "open angled front toss"
+      ],
+      "name": "Open angle front toss"
+    },
+    {
+      "description": "Toss from the hitter's closed side and angle the ball over the plate. Let it travel and hold your direction as long as possible. We're not forcing the ball anywhere.",
+      "id": "closed-angle-front-toss",
+      "match": [
+        "closed angle front toss",
+        "closed angled front toss"
+      ],
+      "name": "Closed angle front toss"
+    },
+    {
+      "description": "Mix the front toss angles and locations, then give the hitter a count and play out the at-bat. The goal is to have a plan, make swing decisions, and adjust as the at-bat develops.",
+      "id": "mixed-front-toss",
+      "match": [
+        "mixed front toss"
+      ],
+      "name": "Mixed front toss"
+    },
+    {
+      "description": "Mix pitches and locations during BP and play out full at-bats. This is where we compete: take pitches, adjust to the count, and put a good swing on the pitch we choose.",
+      "id": "mixed-bp",
+      "match": [
+        "mixed bp"
+      ],
+      "name": "Mixed BP"
+    },
+    {
+      "description": "Throw fastballs both in and out of the zone, calling out the count before each pitch. Hunt a pitch you can drive when you're ahead. When you're behind, compete and cover more of the zone. A good take matters too.",
+      "id": "machine-fastball-swing-decisions",
+      "match": [
+        "machine fastball",
+        "fastball swing decisions"
+      ],
+      "name": "Machine fastball swing decisions with count work"
+    },
+    {
+      "description": "Mix breaking balls that finish in the zone with ones that finish out of it, and call out the count. Read the shape and where the ball is going to finish. Make a swing decision that fits the pitch and the count.",
+      "id": "breaking-ball-swing-decisions",
+      "match": [
+        "breaking ball swing decisions"
+      ],
+      "name": "Breaking ball swing decisions with count work"
+    },
+    {
+      "id": "open-angle-machine-and-front-toss",
+      "name": "Open angle machine and front toss",
+      "description": "Pair the machine and front toss from the hitter's open side. Set the machine on the open side and aim it over the plate, then mix in front toss from the same angle. The goal is a line drive through the batter's eye — pulling it with backspin is good too. Stay in your move and deliver a clean barrel through both looks.",
+      "match": [
+        "open angle machine and front toss",
+        "open angle machine + front toss"
+      ]
+    },
+    {
+      "id": "closed-angle-machine-and-front-toss",
+      "name": "Closed angle machine and front toss",
+      "description": "Pair the machine and front toss from the hitter's closed side. Set the machine on the closed side and aim it over the plate, then mix in front toss from the same angle. Let it travel and hold your direction as long as possible. We're not forcing the ball anywhere.",
+      "match": [
+        "closed angle machine and front toss",
+        "closed angle machine + front toss"
+      ]
+    }
+  ],
+  "note": "Bobby's canonical training environment library. Descriptions are his exact words — do not rewrite. default_ids go into every remote hitter's program (Bobby, Sep 24 2026: 'put these in everyone's program for now'); a coach's per-athlete picker overrides them. Matching is longest-pattern-wins, so file order is display order.",
+  "updated": "2026-09-24",
+  "version": 3
+}
