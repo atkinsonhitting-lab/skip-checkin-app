@@ -1554,6 +1554,76 @@ CREATE TABLE IF NOT EXISTS settings (
       console.log(`Lifting v4c: updated ${updated} template(s), kept ${kept} (customized or missing).`);
     }
   }
+
+  // Training Environment Library: paired machine+front-toss entries + six new
+  // defaults for everyone (Bobby, Sep 24 2026). Runs once.
+  // 1. The two paired entries ("Open angle machine and front toss",
+  //    "Closed angle machine and front toss") are added to the LIVE library
+  //    file if missing. Render's persistent disk shadows the repo copy, so
+  //    the deploy alone can't deliver them. Add-missing-only — a coach edit
+  //    to an existing entry is never overwritten. Descriptions are composed
+  //    from Bobby's existing machine/front-toss explanations.
+  // 2. The six default environments are appended to every remote hitter's
+  //    customized plan (environments_custom) when missing. Non-destructive:
+  //    everything else in the program is preserved, and plans without a
+  //    custom selection get the defaults from the normal backfill anyway.
+  //    The settings flag means a later coach deselect is never re-added.
+  {
+    const done = db.prepare("SELECT value FROM settings WHERE key = 'env_lib_paired_defaults_v1'").get();
+    if (!done) {
+      const envLib = require('./env_lib');
+      const now = new Date().toISOString();
+      const PAIRED = [
+        {
+          id: 'open-angle-machine-and-front-toss',
+          name: 'Open angle machine and front toss',
+          description:
+            "Pair the machine and front toss from the hitter's open side. Set the machine on the open side and aim it over the plate, then mix in front toss from the same angle. The goal is a line drive through the batter's eye \u2014 pulling it with backspin is good too. Stay in your move and deliver a clean barrel through both looks.",
+          match: ['open angle machine and front toss', 'open angle machine + front toss'],
+        },
+        {
+          id: 'closed-angle-machine-and-front-toss',
+          name: 'Closed angle machine and front toss',
+          description:
+            "Pair the machine and front toss from the hitter's closed side. Set the machine on the closed side and aim it over the plate, then mix in front toss from the same angle. Let it travel and hold your direction as long as possible. We're not forcing the ball anywhere.",
+          match: ['closed angle machine and front toss', 'closed angle machine + front toss'],
+        },
+      ];
+      const haveIds = new Set(envLib.ENV_LIST.map((e) => e.id));
+      const missingEntries = PAIRED.filter((e) => !haveIds.has(e.id));
+      if (missingEntries.length) {
+        envLib.saveEnvLib({
+          environments: [...envLib.ENV_LIST, ...missingEntries],
+          default_ids: [...envLib.DEFAULT_IDS],
+        });
+        console.log(`Env library: added ${missingEntries.length} paired entr${missingEntries.length === 1 ? 'y' : 'ies'}.`);
+      }
+      let touched = 0;
+      const rows = db.prepare('SELECT id, program_json FROM remote_programs').all();
+      for (const r of rows) {
+        let prog = null;
+        try { prog = JSON.parse(r.program_json || '{}'); } catch (e) { continue; }
+        const hp = prog.hitting_plan;
+        if (!hp || !Array.isArray(hp.environments_custom)) continue;
+        const have = new Set(hp.environments_custom.map(String));
+        const missing = envLib.DEFAULT_IDS.filter((id) => !have.has(String(id)));
+        if (!missing.length) continue;
+        hp.environments_custom = [...hp.environments_custom.map(String), ...missing];
+        hp.environments = [
+          ...hp.environments_custom
+            .map((id) => { const e = envLib.envById(id); return e ? e.name : null; })
+            .filter(Boolean),
+          ...(Array.isArray(hp.environments_other) ? hp.environments_other : []),
+        ];
+        hp._custom = true; // keep the lazy backfill from rebuilding a customized plan
+        db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?')
+          .run(JSON.stringify(prog), now, r.id);
+        touched++;
+      }
+      db.prepare("INSERT INTO settings (key, value) VALUES ('env_lib_paired_defaults_v1', '1')").run();
+      console.log(`Env library migration: appended missing defaults for ${touched} program(s).`);
+    }
+  }
 }
 
 // One-time cleanup (Sep 23 2026): Bobby confirmed none of the remote hitters
