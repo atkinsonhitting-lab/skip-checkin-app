@@ -5315,8 +5315,11 @@ function hittingPlanPage(user, p, opts) {
        }).join('')}</ul>`
     : '';
 
-  const reminderHtml = plan.reminder
-    ? `<ul class="rem-list"><li>${esc(plan.reminder)}</li></ul>`
+  const cueItems = [pc.movement, pc.timing, pc.game]
+    .map((c) => String(c || '').trim()).filter(Boolean);
+  const cuesHtml = cueItems.length
+    ? `<h2 class="doc-sec">Cues</h2>
+       <ul class="std-list">${cueItems.map((c) => `<li>${esc(c)}</li>`).join('')}</ul>`
     : '';
 
   // Training environments at the bottom — conditions, not drills.
@@ -5357,7 +5360,7 @@ function hittingPlanPage(user, p, opts) {
       ${prepHtml}
       ${drillTableHtml}
       ${freqLine}
-      ${reminderHtml}
+      ${cuesHtml}
       ${envHtml}
       <p class="editable">Everything is editable based on need, progress, or lack of progress.</p>
     </div>
