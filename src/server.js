@@ -1910,6 +1910,12 @@ function buildHittingPlan(prog) {
     need: prog.adjustment || '',
     why_text: whyText,
     reminder: cues.game || '',
+    // Bobby (Sep 24 2026): Action Plan section on the doc, right after grades.
+    cues: {
+      movement: String(cues.movement || ''),
+      timing: String(cues.timing || ''),
+      game: String(cues.game || ''),
+    },
     drills,
     environments,
     frequency: 'Complete this 3–5x per week. Keep the focus to 1–2 cues per swing.',
@@ -1959,12 +1965,14 @@ function splitProgramBlocks(p) {
   }
   return out;
 }
-// Which Programs sub-tabs an athlete gets (Bobby, Sep 23 2026): Mobility tab
-// only when the program has mobility content AND no lifting program — lifters
-// get mobility paired INSIDE the Lifting tab. Med Ball tab only when they have
-// med ball content, no lifting, AND no mobility (mobility + med ball pair in
-// the Mobility tab for non-lifters). Hitting always; Lifting only when a
-// lifting program with real exercises is assigned.
+// Which Programs sub-tabs an athlete gets (Bobby, Sep 24 2026): training
+// blocks are ONLY mobility, med ball, and lifting (when assigned). The
+// hitting document IS the page — no Hitting tab.
+// Mobility tab only when the program has mobility content AND no lifting
+// program — lifters get mobility paired INSIDE the Lifting tab. Med Ball tab
+// only when they have med ball content, no lifting, AND no mobility
+// (mobility + med ball pair in the Mobility tab for non-lifters). Lifting
+// only when a lifting program with real exercises is assigned.
 // Returns [{ id, label }].
 function programSubTabs(p, lifting) {
   const blocks = splitProgramBlocks(p);
@@ -1981,7 +1989,6 @@ function programSubTabs(p, lifting) {
   // ball work but no mobility blocks to pair it with.
   if (blocks.mobility.length && !hasLifting) tabs.push({ id: 'mobility', label: 'Warm-up' });
   if (!hasLifting && blocks.medball.length && !blocks.mobility.length) tabs.push({ id: 'medball', label: 'Med Ball' });
-  tabs.push({ id: 'hitting', label: 'Hitting' });
   // No Metabolic tab (Sep 2026): speed work lives inside the Lifting tab.
   // Legacy 'Metabolic' blocks in old programs render in the Lifting tab's
   // Speed section instead of getting their own tab.
@@ -2523,7 +2530,10 @@ app.get('/program/lifting', requireLogin, requireWaiver, (req, res) => {
   const lifting = getLifting(liftingId && liftingId.lifting_program_id);
   if (!lifting) return res.send(views.hittingPlanPage(req.user, p)); // No lifting? Show hitting doc
   // Render the lifting sub-tab using the existing programPage view
-  const tabs = [{ id: 'hitting', label: 'Hitting' }, { id: 'lifting', label: 'Lifting' }];
+  // (Bobby Sep 24 2026: training blocks are mobility/med ball/lifting only —
+  // no Hitting tab; the Hitting Plan button at the top of programPage is the
+  // way back to the hitting document.)
+  const tabs = [{ id: 'lifting', label: 'Lifting' }];
   const today = chiToday();
   const checkoffs = getCheckoffs(req.user.id, today);
   const liftDays = Array.isArray(lifting.days) ? lifting.days.filter((d) =>
@@ -4115,9 +4125,30 @@ app.post('/coach/program/:id/hitting-plan', requireCoach, (req, res) => {
     env_variations: String(b.env_variations || '').trim(),
     warmup: [],
     drills: [],
-    medball: [],
     footer: String(b.footer || '').trim(),
+    // Bobby (Sep 24 2026): the editor doesn't touch the eval — carry it over
+    // from the saved plan so a save never wipes grades/strengths/need.
+    strengths: Array.isArray(oldPlan.strengths) ? oldPlan.strengths : [],
+    grades: oldPlan.grades && typeof oldPlan.grades === 'object' ? oldPlan.grades : {},
+    grade_whys: oldPlan.grade_whys && typeof oldPlan.grade_whys === 'object' ? oldPlan.grade_whys : {},
+    need: String(oldPlan.need || ''),
+    why_text: String(oldPlan.why_text || ''),
+    reminder: String(oldPlan.reminder || ''),
   };
+  // Action-plan cues (Bobby Sep 24 2026): editable here and in the program
+  // editor — one canonical copy on prog.cues, mirrored onto the plan.
+  // Guarded: a stale form without the fields must not wipe them.
+  if ('cue_movement' in b || 'cue_timing' in b || 'cue_game' in b) {
+    const cues = {
+      movement: String(b.cue_movement || '').trim().slice(0, 300),
+      timing: String(b.cue_timing || '').trim().slice(0, 300),
+      game: String(b.cue_game || '').trim().slice(0, 300),
+    };
+    plan.cues = cues;
+    p.prog.cues = cues;
+  } else {
+    plan.cues = oldPlan.cues && typeof oldPlan.cues === 'object' ? oldPlan.cues : { movement: '', timing: '', game: '' };
+  }
   // Warmup items: w_name_0, w_detail_0, ...
   for (let i = 0; i < 50; i++) {
     const name = String(b[`w_name_${i}`] || '').trim();
@@ -4153,16 +4184,8 @@ app.post('/coach/program/:id/hitting-plan', requireCoach, (req, res) => {
       why: String(b[`d_why_${i}`] || '').trim(),
     });
   }
-  // Med ball: m_name_0, m_volume_0, m_cues_0, ...
-  for (let i = 0; i < 30; i++) {
-    const name = String(b[`m_name_${i}`] || '').trim();
-    if (!name) continue;
-    plan.medball.push({
-      name,
-      volume: String(b[`m_volume_${i}`] || '').trim(),
-      cues: String(b[`m_cues_${i}`] || '').trim(),
-    });
-  }
+  // (Med-ball editing removed Sep 24 2026 — Bobby: the hitting plan is eval +
+  // drills only. Stored plan.medball, if any, is left untouched.)
   // Training environments picker (Bobby, Sep 24 2026): checked library
   // environments + free-text others become the plan's environment list.
   // Previously the POST rebuilt the plan without `environments`, silently

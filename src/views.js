@@ -5139,8 +5139,8 @@ function mobilityPage(user, p, opts) {
   const prog = (p && p.prog) || {};
   const athleteName = (p && p.athlete_name) || prog.athlete || 'Hitter';
   const o = opts || {};
-  const tabs = o.tabs || [];
-  // Bobby (Sep 23 2026): med ball rotates daily — use todaysMedball if provided
+  // (No tab bar — Bobby Sep 24 2026: training blocks are mobility/med ball/
+  // lifting only, and at most one applies here.)
   const blocks = o.blocks || { mobility: [], medball: [] };
   if (o.todaysMedball) {
     blocks.medball = o.todaysMedball;
@@ -5159,8 +5159,7 @@ function mobilityPage(user, p, opts) {
   return layout({
     title: `Warm-up — ${athleteName}`,
     user,
-    body: `${tabBar}
-    <div class="doc-page">
+    body: `<div class="doc-page">
       <div class="doc-header"><div class="doc-logo">ATKINSON<br>HITTING</div></div>
       <h1 class="doc-sec-title">Warm-up & Med Ball - ${esc(athleteName)}</h1>
       <p style="text-align:center;margin-bottom:20px"><a href="/program/mobility-workout" class="btn" style="display:inline-block;text-decoration:none;padding:12px 24px;background:#111;color:#fff;border-radius:8px;font-weight:700">▶ Start Workout</a></p>
@@ -5195,10 +5194,12 @@ function hittingPlanPage(user, p, opts) {
   const envLib = require('./env_lib');
   // Bobby (Sep 23 2026): tab navigation for Mobility/Hitting
   const tabs = o.tabs || [];
-  const activeSub = o.sub || 'hitting';
-  const tabBar = tabs.length > 1 ? `<div class="prog-tabs">${tabs.map(t =>
-    `<a href="/program?sub=${t.id}" class="prog-tab${t.id === activeSub ? ' active' : ''}">${esc(t.label)}</a>`
-  ).join('')}</div>` : '';
+  // Bobby (Sep 24 2026): training blocks are mobility, med ball, lifting
+  // only — no Hitting tab. The hitting document IS this page; lifters get a
+  // button to their lifting program.
+  const liftBtn = tabs.some((t) => t.id === 'lifting')
+    ? `<p style="text-align:center;margin-bottom:20px"><a href="/program/lifting" class="btn" style="display:inline-block;text-decoration:none;padding:12px 24px;background:#111;color:#fff;border-radius:8px;font-weight:700">💪 Lifting Program</a></p>`
+    : '';
 
   // === EVAL: Hitting Evaluation Report (Bobby's template, Sep 23 2026) ===
   // Key Strengths, Grades (his sheet system), Need. (Overall Grade removed
@@ -5219,13 +5220,26 @@ function hittingPlanPage(user, p, opts) {
          <li><strong>${esc(k)} = ${esc(String(v))}</strong>${gradeWhys[k] ? ` - ${esc(gradeWhys[k])}` : ''}</li>`).join('')}</ul>`
     : '';
 
+  // Bobby (Sep 24 2026): Action Plan — his movement/timing/game cues, right
+  // after the grades.
+  const pc = plan.cues && typeof plan.cues === 'object' ? plan.cues : {};
+  const cueRows = [
+    ['Movement', pc.movement],
+    ['Timing', pc.timing],
+    ['Game', pc.game],
+  ].filter(([, v]) => v && String(v).trim());
+  const actionPlanHtml = cueRows.length
+    ? `<h2 class="doc-sec">Action Plan</h2>
+       <ul class="grade-list">${cueRows.map(([k, v]) => `
+         <li><strong>${esc(k)}:</strong> ${esc(String(v))}</li>`).join('')}</ul>`
+    : '';
   const needHtml = plan.need
     ? `<p class="need"><strong>Need =</strong> ${esc(plan.need)}</p>`
     : '';
 
   const evalHtml = `<div class="eval-section">
       <h1 class="doc-sec-title">Hitting Evaluation Report - ${esc(athleteName)}</h1>
-      ${strengthsHtml}${gradesHtml}${needHtml}
+      ${strengthsHtml}${gradesHtml}${actionPlanHtml}${needHtml}
     </div>`;
 
   // === PLAN: Hitting Program (Bobby's template, Sep 23 2026) ===
@@ -5287,7 +5301,7 @@ function hittingPlanPage(user, p, opts) {
     title: 'Hitting Program',
     user,
     tabs: userTabs('program', user),
-    body: `${tabBar}<div class="doc-page">
+    body: `${liftBtn}<div class="doc-page">
       <div class="doc-header">
         <div class="doc-logo">ATKINSON<br>HITTING</div>
         <div class="doc-title-wrap">
@@ -5443,21 +5457,6 @@ function hittingPlanEditPage(user, p) {
       <input type="text" name="d_why_${i}" value="" placeholder="Why? (what it trains)" maxlength="300">
     </div>`;
   }).join('');
-  const medball = Array.isArray(plan.medball) ? plan.medball : [];
-  const medballRows = medball.map((mb, i) => `
-    <div class="plan-drill">
-      <input type="text" name="m_name_${i}" value="${esc(mb.name || '')}" placeholder="Throw name" maxlength="100" class="drill-name">
-      <input type="text" name="m_volume_${i}" value="${esc(mb.volume || '')}" placeholder="Volume" maxlength="100">
-      <input type="text" name="m_cues_${i}" value="${esc(mb.cues || '')}" placeholder="Cues" maxlength="200">
-    </div>`).join('');
-  const medballBlanks = [0, 1, 2].map((k) => {
-    const i = medball.length + k;
-    return `<div class="plan-drill">
-      <input type="text" name="m_name_${i}" value="" placeholder="Throw name" maxlength="100" class="drill-name">
-      <input type="text" name="m_volume_${i}" value="" placeholder="Volume" maxlength="100">
-      <input type="text" name="m_cues_${i}" value="" placeholder="Cues" maxlength="200">
-    </div>`;
-  }).join('');
 
   return layout({
     title: 'Edit Hitting Plan',
@@ -5476,9 +5475,17 @@ function hittingPlanEditPage(user, p) {
       <h3>The Work — Drills</h3>
       <p class="hint-inline">Drill demos are all in the Remote library. Add the "why" for each.</p>
       ${drillRows}${drillBlanks}
-      <h3>Med Ball (no lifting guys only)</h3>
-      <p class="hint-inline">Only shows on the document if he has no lifting program.</p>
-      ${medballRows}${medballBlanks}
+      <h3>Action Plan — Cues</h3>
+      <p class="hint-inline">Shows on the document right after the grades.</p>
+      <label class="fld">Movement cue
+        <input type="text" name="cue_movement" value="${esc((plan.cues && plan.cues.movement) || '')}" maxlength="300" placeholder="e.g. Stay through it...">
+      </label>
+      <label class="fld">Timing cue
+        <input type="text" name="cue_timing" value="${esc((plan.cues && plan.cues.timing) || '')}" maxlength="300" placeholder="e.g. Slow feet, fast hands...">
+      </label>
+      <label class="fld">Game cue
+        <input type="text" name="cue_game" value="${esc((plan.cues && plan.cues.game) || '')}" maxlength="300" placeholder="e.g. One pitch...">
+      </label>
       <label class="fld">Environment variations (open angle, breaking balls, velo, etc. — leave blank for defaults)
         <textarea name="env_variations" rows="4" placeholder="Custom variations, or blank for default...">${esc(plan.env_variations || '')}</textarea>
       </label>
