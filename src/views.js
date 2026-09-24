@@ -5310,6 +5310,7 @@ function hittingPlanPage(user, p, opts) {
         </div>
         <div class="doc-logo">ATKINSON<br>HITTING</div>
       </div>
+      <p class="doc-note" style="font-size:14px;color:#333;font-style:normal;margin:0 0 16px">Use this program and work with me to develop your own daily routine &mdash; the exact work you do every day to get better.</p>
       ${evalHtml}
       <hr class="doc-rule">
       <h1 class="doc-sec-title">Hitting Program - ${esc(athleteName)}</h1>
