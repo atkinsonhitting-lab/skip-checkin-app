@@ -20,7 +20,7 @@ const data = require('./data');
 const views = require('./views');
 const brain = require('./brain');
 const videoLinks = require('./video_links');
-const { envById } = require('./env_lib');
+const { envById, defaultEnvEntries } = require('./env_lib');
 const { seedUsers, writeCredentialsFile, userCount } = require('./seed');
 
 // Bobby's own organization — his 4 remote hitters, Talk to Skip on, free
@@ -1796,7 +1796,7 @@ function getProgram(id) {
   return { id: row.id, athlete_name: row.athlete_name, updated_at: row.updated_at, prog, session_order: row.session_order || 'hitting_first', component_order: row.component_order || '' };
 }
 // Hitting plan version — bump when buildHittingPlan logic changes to force regen of stale stored plans.
-const HITTING_PLAN_VERSION = 5;
+const HITTING_PLAN_VERSION = 6;
 // Build a hitting-plan document from Bobby's template (Sep 23 2026):
 // Eval (Key Strengths, Grades, Overall Grade, Need) + Plan (2-4 core drills
 // with Why? + sets/reps, frequency line, training environments at the bottom).
@@ -1867,7 +1867,7 @@ function buildHittingPlan(prog) {
 
   // Training environments (conditions, NOT drills) — collected from the sheet,
   // deduplicated, in first-seen order. They render at the bottom of the doc.
-  const isEnvVariation = (name) => /open\s*angle|breaking\s*ball|velo|fastball|curve|slider|changeup|machine\s*work|game\s*swings?/i.test(name || '');
+  const isEnvVariation = (name) => /open\s*angle|breaking\s*ball|velo|fastball|curve|slider|changeup|machine\s*work|game\s*swings?|front\stoss|mixed\sbp/i.test(name || '');
   const environments = [];
   const seenEnv = new Set();
   for (const block of routine) {
@@ -1878,6 +1878,15 @@ function buildHittingPlan(prog) {
         seenEnv.add(norm(nm));
         environments.push(nm);
       }
+    }
+  }
+  // Bobby (Sep 24 2026): default environments go in every remote hitter's
+  // program "for now". Sheet-detected ones first, then defaults in his order.
+  // A coach's per-athlete picker (environments_custom) overrides these.
+  for (const d of defaultEnvEntries()) {
+    if (d && d.name && !seenEnv.has(norm(d.name))) {
+      seenEnv.add(norm(d.name));
+      environments.push(d.name);
     }
   }
 
