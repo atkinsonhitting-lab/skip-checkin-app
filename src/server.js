@@ -3947,6 +3947,31 @@ app.get('/program/routine', requireLogin, requireWaiver, (req, res) => {
   res.send(views.programRoutinePage(req.user, p, videoLibMap()));
 });
 
+// Coach: open a remote hitter's document as he sees it, and edit it from
+// there (Bobby, Sep 24 2026: "I wanna have direct ability to open the doc
+// and edit in it"). The coach bar on top links into the hitting-plan editor.
+app.get('/coach/program/:id/doc', requireCoach, (req, res) => {
+  setApprovalCount(req);
+  const p = getProgram(req.params.id);
+  if (!p) return res.redirect('/coach');
+  if (!p.prog.hitting_plan || (p.prog.hitting_plan._v !== HITTING_PLAN_VERSION && !p.prog.hitting_plan._custom)) {
+    p.prog.hitting_plan = buildHittingPlan(p.prog);
+    db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?')
+      .run(JSON.stringify(p.prog), new Date().toISOString(), p.id);
+  }
+  const liftingId = db.prepare('SELECT lifting_program_id FROM remote_programs WHERE id = ?').get(p.id);
+  const lifting = getLifting(liftingId && liftingId.lifting_program_id);
+  const tabs = programSubTabs(p, lifting);
+  const canEdit = req.user.role === 'coach' && req.user.canEdit !== false;
+  res.send(
+    views.hittingPlanPage(req.user, p, {
+      tabs,
+      layoutTabs: views.coachTabs('home', req.user.approvalCount, req.user),
+      coachBar: views.coachDocBar(p, canEdit),
+    })
+  );
+});
+
 // Coach: edit a remote hitter's program.
 app.get('/coach/program/:id/edit', requireCoach, (req, res) => {
   setApprovalCount(req);

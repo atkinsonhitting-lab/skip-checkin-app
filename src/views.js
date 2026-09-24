@@ -1855,11 +1855,15 @@ function coachHomeManage(user, quiet, latest, pending, pushOn, leads, myGuys, bi
     const d = Math.max(0, Math.round((Date.now() - new Date(p.last).getTime()) / 864e5));
     return d <= 1 ? 'last check-in yesterday' : `last check-in ${d}d ago`;
   };
-  const playerRow = (p) => `<a class="ppl-row" href="/coach/user/${encodeURIComponent(p.email)}">
+  // Bobby (Sep 24 2026): "I wanna have direct ability to open the doc and edit
+  // in it." Remote rows get a 📄 Doc button straight to the athlete document.
+  const playerRow = (p) => `<div class="ppl-row" style="display:flex;align-items:center;padding:0">
+    <a href="/coach/user/${encodeURIComponent(p.email)}" style="display:flex;align-items:center;flex:1;min-width:0;color:inherit;text-decoration:none;padding:10px 0 10px 12px">
       <span class="ppl-dot${p.checkedToday ? ' on' : ''}" aria-hidden="true"></span>
       <span class="ppl-main"><strong>${esc(p.name)}</strong>
         <span class="hint-inline">${p.streak ? p.streak + '-day streak · ' : ''}${esc(lastTxt(p))}</span></span>
-      <span class="org-chev" aria-hidden="true">›</span></a>`;
+      <span class="org-chev" aria-hidden="true">›</span></a>
+    ${p.remoteProgramId && canEdit ? `<a href="/coach/program/${p.remoteProgramId}/doc" class="btn-small" style="text-decoration:none;flex-shrink:0;margin-right:8px">📄 Doc</a>` : ''}</div>`;
   const guySection = (title, list) => {
     if (!list.length) return '';
     return `<div class="dash-sec-head"><h2 class="section-head" style="margin:0">${title}</h2>
@@ -2094,7 +2098,7 @@ function coachHittersPage(user, userStats, opts) {
           <div class="athlete-card-meta">${a.total} check-in${a.total === 1 ? '' : 's'}${a.streak ? ` · 🔥 ${a.streak}-day streak` : ''}${a.weekCount != null ? ` · ${a.weekCount}/7 days` : ''}${a.last ? ` · last ${fmtDate(a.last)}` : ' · none yet'}${a.age != null ? ` · age ${a.age}` : ''}${a.team ? ` · ${esc(a.team)}` : ''}${!o.filterOrg && a.orgName ? ` · ${esc(a.orgName)}` : ''}</div>
         </a>
         <div style="display:flex;gap:8px;margin:8px 0 0;flex-wrap:wrap">
-          ${a.isRemote && a.remoteProgramId && canEdit ? `<a href="/coach/program/${a.remoteProgramId}/hitting-plan" class="btn-small" style="text-decoration:none">📄 Program</a>` : ''}
+          ${a.isRemote && a.remoteProgramId && canEdit ? `<a href="/coach/program/${a.remoteProgramId}/doc" class="btn-small" style="text-decoration:none">📄 Doc</a>` : ''}
           ${o.notifyButton ? `<form method="post" action="/coach/player/${a.id}/notify-checkin" style="margin:0">
             <input type="hidden" name="back" value="${esc(o.tab === 'my-players' ? '/coach/my-players' : '/coach/hitters')}">
             <button class="btn-small btn-quiet" type="submit" title="${a.notifyOn ? 'Log alerts ON — tap to mute' : 'Log alerts OFF — tap to unmute'}">${a.notifyOn ? '🔔 Alerts on' : '🔕 Alerts off'}</button>
@@ -4201,8 +4205,10 @@ function coachUser(user, name, checkins, whatWorks, thread, email, memories, rou
       <input type="hidden" name="id" value="${opts.viewAsId}">
       <button class="btn-small btn-quiet" type="submit" style="margin-left:4px">View as player</button>
     </form>` : '';
+  // Bobby (Sep 24 2026): "open the doc and edit in it" — player page opens the
+  // athlete document; the doc's coach bar carries the Edit button.
   const editProgramLink = opts && opts.remoteProgramId && canEdit
-    ? ` <a href="/coach/program/${opts.remoteProgramId}/hitting-plan" class="btn btn-sm" style="text-decoration:none;margin-left:8px">📄 Edit Hitting Program</a>`
+    ? ` <a href="/coach/program/${opts.remoteProgramId}/doc" class="btn btn-sm" style="text-decoration:none;margin-left:8px">📄 Open Doc</a>`
     : '';
   // Bobby (Sep 23 2026): edit/assign lifting from the hitter's page too.
   const liftingLink = opts && opts.remoteProgramId && canEdit
@@ -5181,6 +5187,27 @@ function mobilityPage(user, p, opts) {
   });
 }
 
+// Coach doc preview bar (Bobby, Sep 24 2026): "I wanna have direct ability to
+// open the doc and edit in it." Sits on top of the exact athlete document;
+// Edit jumps straight into the hitting-plan editor that drives the doc.
+function coachDocBar(p, canEdit) {
+  const id = p && p.id;
+  const athleteName = (p && p.athlete_name) || (p.prog && p.prog.athlete) || 'Hitter';
+  return `<div class="coach-doc-bar">
+    <span>Coach preview &mdash; this is what ${esc(athleteName)} sees</span>
+    <span class="coach-doc-actions">
+      ${canEdit ? `<a href="/coach/program/${id}/hitting-plan" class="btn-small" style="text-decoration:none">✏️ Edit document</a>` : ''}
+      <a href="/coach/my-players" class="btn-small btn-quiet" style="text-decoration:none">‹ Players</a>
+    </span>
+  </div>
+  <style>
+    .coach-doc-bar { display: flex; justify-content: space-between; align-items: center; gap: 8px;
+      background: #111; color: #fff; padding: 10px 14px; border-radius: 10px; margin-bottom: 16px;
+      font-size: 14px; flex-wrap: wrap; }
+    .coach-doc-bar .coach-doc-actions { display: flex; gap: 8px; align-items: center; }
+  </style>`;
+}
+
 function hittingPlanPage(user, p, opts) {
   const prog = (p && p.prog) || {};
   const plan = prog.hitting_plan || {};
@@ -5303,8 +5330,8 @@ function hittingPlanPage(user, p, opts) {
   return layout({
     title: 'Hitting Program',
     user,
-    tabs: userTabs('program', user),
-    body: `${liftBtn}${warmBtn}<div class="doc-page">
+    tabs: o.layoutTabs || userTabs('program', user),
+    body: `${o.coachBar || ''}${liftBtn}${warmBtn}<div class="doc-page">
       <div class="doc-header">
         <div class="doc-logo">ATKINSON<br>HITTING</div>
         <div class="doc-title-wrap">
@@ -5716,5 +5743,6 @@ module.exports = {
   mobilityPage,
   hittingPlanPage,
   hittingPlanEditPage,
+  coachDocBar,
 };
 

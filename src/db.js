@@ -1555,48 +1555,53 @@ CREATE TABLE IF NOT EXISTS settings (
     }
   }
 
-  // Training Environment Library: paired machine+front-toss entries + six new
-  // defaults for everyone (Bobby, Sep 24 2026). Runs once.
-  // 1. The two paired entries ("Open angle machine and front toss",
-  //    "Closed angle machine and front toss") are added to the LIVE library
-  //    file if missing. Render's persistent disk shadows the repo copy, so
-  //    the deploy alone can't deliver them. Add-missing-only — a coach edit
-  //    to an existing entry is never overwritten. Descriptions are composed
-  //    from Bobby's existing machine/front-toss explanations.
-  // 2. The six default environments are appended to every remote hitter's
+  // Training Environment Library: split "Open angle machine and front toss"
+  // into two separate sections (Bobby, Sep 24 2026): "Open angle machine"
+  // (one explanation for machine) + "Front toss". Runs once.
+  // 1. Removes the open paired entry from the LIVE library file if the v1
+  //    migration added it to Render's persistent disk (repo copy no longer
+  //    ships it, so the deploy alone can't remove it).
+  // 2. Renames the live "Open angle" entry to "Open angle machine" — only
+  //    when the name is still the stock one, never a coach edit.
+  // 3. Adds the standalone "Front toss" entry if missing.
+  // 4. Appends the six default environments to every remote hitter's
   //    customized plan (environments_custom) when missing. Non-destructive:
   //    everything else in the program is preserved, and plans without a
   //    custom selection get the defaults from the normal backfill anyway.
   //    The settings flag means a later coach deselect is never re-added.
   {
-    const done = db.prepare("SELECT value FROM settings WHERE key = 'env_lib_paired_defaults_v1'").get();
+    const done = db.prepare("SELECT value FROM settings WHERE key = 'env_lib_split_open_machine_v2'").get();
     if (!done) {
       const envLib = require('./env_lib');
       const now = new Date().toISOString();
-      const PAIRED = [
-        {
-          id: 'open-angle-machine-and-front-toss',
-          name: 'Open angle machine and front toss',
+      let changed = false;
+      const kept = envLib.ENV_LIST.filter((e) => e && e.id !== 'open-angle-machine-and-front-toss');
+      if (kept.length !== envLib.ENV_LIST.length) changed = true;
+      for (const e of kept) {
+        if (e && e.id === 'open-angle' && e.name === 'Open angle') {
+          e.name = 'Open angle machine';
+          const m = Array.isArray(e.match) ? [...e.match] : [];
+          if (!m.includes('open angle machine')) m.push('open angle machine');
+          e.match = m;
+          changed = true;
+        }
+      }
+      if (!kept.some((e) => e && e.id === 'front-toss')) {
+        const frontToss = {
+          id: 'front-toss',
+          name: 'Front toss',
           description:
-            "Pair the machine and front toss from the hitter's open side. Set the machine on the open side and aim it over the plate, then mix in front toss from the same angle. The goal is a line drive through the batter's eye \u2014 pulling it with backspin is good too. Stay in your move and deliver a clean barrel through both looks.",
-          match: ['open angle machine and front toss', 'open angle machine + front toss'],
-        },
-        {
-          id: 'closed-angle-machine-and-front-toss',
-          name: 'Closed angle machine and front toss',
-          description:
-            "Pair the machine and front toss from the hitter's closed side. Set the machine on the closed side and aim it over the plate, then mix in front toss from the same angle. Let it travel and hold your direction as long as possible. We're not forcing the ball anywhere.",
-          match: ['closed angle machine and front toss', 'closed angle machine + front toss'],
-        },
-      ];
-      const haveIds = new Set(envLib.ENV_LIST.map((e) => e.id));
-      const missingEntries = PAIRED.filter((e) => !haveIds.has(e.id));
-      if (missingEntries.length) {
-        envLib.saveEnvLib({
-          environments: [...envLib.ENV_LIST, ...missingEntries],
-          default_ids: [...envLib.DEFAULT_IDS],
-        });
-        console.log(`Env library: added ${missingEntries.length} paired entr${missingEntries.length === 1 ? 'y' : 'ies'}.`);
+            "Toss and angle the ball over the plate. The goal is a line drive through the batter's eye, but pulling it with backspin is good too. Stay in your move and deliver a clean barrel.",
+          match: ['front toss'],
+        };
+        const anchor = kept.findIndex((e) => e && e.id === 'open-angle-front-toss');
+        if (anchor >= 0) kept.splice(anchor + 1, 0, frontToss);
+        else kept.push(frontToss);
+        changed = true;
+      }
+      if (changed) {
+        envLib.saveEnvLib({ environments: kept, default_ids: [...envLib.DEFAULT_IDS] });
+        console.log('Env library: split open-angle machine / front toss into two sections.');
       }
       let touched = 0;
       const rows = db.prepare('SELECT id, program_json FROM remote_programs').all();
@@ -1620,7 +1625,7 @@ CREATE TABLE IF NOT EXISTS settings (
           .run(JSON.stringify(prog), now, r.id);
         touched++;
       }
-      db.prepare("INSERT INTO settings (key, value) VALUES ('env_lib_paired_defaults_v1', '1')").run();
+      db.prepare("INSERT INTO settings (key, value) VALUES ('env_lib_split_open_machine_v2', '1')").run();
       console.log(`Env library migration: appended missing defaults for ${touched} program(s).`);
     }
   }
