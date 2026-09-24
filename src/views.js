@@ -5233,13 +5233,17 @@ function hittingPlanPage(user, p, opts) {
     ? `<p class="why-line"><strong>Why?</strong> ${esc(whyText)}</p>`
     : '';
 
-  // Drill table: Drill / Progression / Coaching Notes | Sets / Reps
+  // Drill table: Drill / Coaching Notes | Sets / Reps
+  // Bobby (Sep 24 2026): no more progression line — each drill shows
+  // "Do this drill on: ..." from his per-drill environment picks.
   const drills = Array.isArray(plan.drills) ? plan.drills : [];
   const drillRows = drills.map((d) => {
-    // Tolerate legacy custom plans (old schema: cues/volume).
-    const prog = d.progression || d.cues || '';
+    // Tolerate legacy custom plans (old schema: single env string, cues/volume).
+    const dEnvs = Array.isArray(d.envs) ? d.envs
+      : d.env ? [(d.env === 'Toss' ? 'Side Toss' : d.env)]
+      : [];
     const left = `<strong>${esc(d.name || '')}</strong>` +
-      (prog ? ` -&gt; ${esc(prog)}` : '') +
+      (dEnvs.length ? `<br><span class="do-on"><strong>Do this drill on:</strong> ${esc(dEnvs.join(', '))}</span>` : '') +
       (d.why ? `<br><span class="why">Why? ${esc(d.why)}</span>` : '');
     const right = esc(d.setsReps || d.volume || '');
     return `<tr><td>${left}</td><td class="vol">${right}</td></tr>`;
@@ -5252,7 +5256,7 @@ function hittingPlanPage(user, p, opts) {
 
   const drillTableHtml = (drillRows || freqRow)
     ? `<table class="drill-table">
-         <thead><tr><th>Drill / Progression / Coaching Notes</th><th>Sets / Reps</th></tr></thead>
+         <thead><tr><th>Drill / Coaching Notes</th><th>Sets / Reps</th></tr></thead>
          <tbody>${drillRows}${freqRow}</tbody>
        </table>`
     : '';
@@ -5262,12 +5266,13 @@ function hittingPlanPage(user, p, opts) {
     : '';
 
   // Training environments at the bottom — conditions, not drills.
-  // Bobby (Sep 24 2026): each environment shows his library description when
-  // the name matches; unmatched names render plain (never invent a description).
+  // Bobby (Sep 24 2026): framed as the environments that will be good for
+  // THIS hitter, each with his library explanation. Unmatched names render
+  // plain (never invent a description).
   const envs = Array.isArray(plan.environments) ? plan.environments.filter(Boolean) : [];
   const envHtml = envs.length
     ? `<hr class="doc-rule">
-       <h1 class="doc-sec-title">Training Environments</h1>
+       <h1 class="doc-sec-title">Training Environments That Will Be Good for You</h1>
        <ul class="std-list">${envs.map((e) => {
          const nm = typeof e === 'string' ? e : (e && e.name) || '';
          const entry = envLib.findEnvEntry(nm);
@@ -5293,7 +5298,6 @@ function hittingPlanPage(user, p, opts) {
       ${evalHtml}
       <hr class="doc-rule">
       <h1 class="doc-sec-title">Hitting Program - ${esc(athleteName)}</h1>
-      <p class="important">⚠️ Important: Complete the assigned drills through the progression types your coach gives you - tee, toss, front toss, BP/machine, or live work.</p>
       ${whyHtml}
       <p class="doc-note">Drill demos: <a href="https://drive.google.com/drive/folders/1exkky5BSQjiXoMF2J25sgW87OeYtwG8i" target="_blank">Google Drive Video Library</a></p>
       ${drillTableHtml}
@@ -5332,6 +5336,7 @@ function hittingPlanPage(user, p, opts) {
       .drill-table .vol { text-align: center; font-weight: 700; white-space: nowrap; }
       .drill-table .freq-row td { background: #f7f7f7; }
       .why { font-size: 13px; color: #333; }
+      .do-on { font-size: 13px; color: #333; }
       .doc-note { font-size: 13px; color: #888; font-style: italic; }
       .rem-list { margin: 8px 0 12px 20px; padding: 0; font-size: 14px; }
       .rem-list li { margin: 4px 0; color: #222; }
@@ -5406,11 +5411,24 @@ function hittingPlanEditPage(user, p) {
     </div>`;
   }).join('');
 
-  const envOpts = (sel) => ['Tee','Toss','Front Toss','BP','Machine','Game'].map((e) => `<option value="${e}"${(sel||'Tee')===e?' selected':''}>${e}</option>`).join('');
+  // Bobby (Sep 24 2026): per-drill environments are multi-select checkboxes —
+  // "do this drill on ..." whatever he picks. Legacy single `env` honored;
+  // old "Toss" maps to "Side Toss"; blank defaults to Tee.
+  const DRILL_ENVS = ['Tee', 'Side Toss', 'Front Toss', 'BP', 'Machine'];
+  const drillEnvChecks = (d, i) => {
+    const sel = new Set(
+      Array.isArray(d.envs) ? d.envs
+      : d.env ? [(d.env === 'Toss' ? 'Side Toss' : d.env)]
+      : ['Tee']
+    );
+    return `<div class="drill-envs"><span class="drill-envs-label">Do this drill on:</span> ` +
+      DRILL_ENVS.map((e) => `<label class="env-check"><input type="checkbox" name="d_envs_${i}" value="${e}"${sel.has(e) ? ' checked' : ''}> ${e}</label>`).join(' ') +
+      `</div>`;
+  };
   const drillRows = drills.map((d, i) => `
     <div class="plan-drill">
       <input type="text" name="d_name_${i}" value="${esc(d.name || '')}" placeholder="Drill name" maxlength="100" class="drill-name">
-      <select name="d_env_${i}">${envOpts(d.env)}</select>
+      ${drillEnvChecks(d, i)}
       <input type="text" name="d_volume_${i}" value="${esc(d.volume || '')}" placeholder="Volume (e.g. 2x5)" maxlength="100">
       <input type="text" name="d_cues_${i}" value="${esc(d.cues || '')}" placeholder="Cues" maxlength="200">
       <input type="text" name="d_why_${i}" value="${esc(d.why || '')}" placeholder="Why? (what it trains)" maxlength="300">
@@ -5419,7 +5437,7 @@ function hittingPlanEditPage(user, p) {
     const i = drills.length + k;
     return `<div class="plan-drill">
       <input type="text" name="d_name_${i}" value="" placeholder="Drill name" maxlength="100" class="drill-name">
-      <select name="d_env_${i}">${envOpts('Tee')}</select>
+      ${drillEnvChecks({}, i)}
       <input type="text" name="d_volume_${i}" value="" placeholder="Volume (e.g. 2x5)" maxlength="100">
       <input type="text" name="d_cues_${i}" value="" placeholder="Cues" maxlength="200">
       <input type="text" name="d_why_${i}" value="" placeholder="Why? (what it trains)" maxlength="300">
@@ -5475,6 +5493,10 @@ function hittingPlanEditPage(user, p) {
       .plan-drill { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; padding: 10px; background: #f9f9f9; border-radius: 6px; }
       .plan-drill input { padding: 8px; }
       .plan-drill .drill-name { grid-column: 1 / -1; font-weight: 600; }
+      .drill-envs { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; font-size: 14px; }
+      .drill-envs-label { font-weight: 600; }
+      .env-check { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; }
+      .env-check input { width: 16px; height: 16px; }
       .env-picker { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 4px; }
       .env-pick { display: flex; gap: 10px; align-items: flex-start; padding: 10px; background: #f9f9f9; border-radius: 8px; cursor: pointer; }
       .env-pick input { margin-top: 3px; width: 18px; height: 18px; flex-shrink: 0; }

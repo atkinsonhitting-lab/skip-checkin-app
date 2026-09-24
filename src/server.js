@@ -1797,6 +1797,9 @@ function getProgram(id) {
 }
 // Hitting plan version — bump when buildHittingPlan logic changes to force regen of stale stored plans.
 const HITTING_PLAN_VERSION = 6;
+// Per-drill environment options (Bobby, Sep 24 2026): multi-select —
+// "do this drill on ..." whatever he picks.
+const DRILL_ENVS = ['Tee', 'Side Toss', 'Front Toss', 'BP', 'Machine'];
 // Build a hitting-plan document from Bobby's template (Sep 23 2026):
 // Eval (Key Strengths, Grades, Overall Grade, Need) + Plan (2-4 core drills
 // with Why? + sets/reps, frequency line, training environments at the bottom).
@@ -4121,13 +4124,30 @@ app.post('/coach/program/:id/hitting-plan', requireCoach, (req, res) => {
     if (!name) continue;
     plan.warmup.push({ name, detail: String(b[`w_detail_${i}`] || '').trim() });
   }
-  // Drills: d_name_0, d_env_0, d_volume_0, d_cues_0, d_why_0, ...
+  // Drills: d_name_0, d_envs_0 (multi-checkbox), d_volume_0, d_cues_0, d_why_0, ...
+  const oldDrills = Array.isArray(oldPlan.drills) ? oldPlan.drills : [];
   for (let i = 0; i < 100; i++) {
     const name = String(b[`d_name_${i}`] || '').trim();
     if (!name) continue;
+    // Bobby (Sep 24 2026): one or more environments per drill.
+    const rawDEnvs = b[`d_envs_${i}`];
+    let dEnvs = (rawDEnvs === undefined ? [] : Array.isArray(rawDEnvs) ? rawDEnvs : [rawDEnvs])
+      .map((x) => String(x).trim())
+      .filter((v) => DRILL_ENVS.includes(v));
+    // Preserve legacy selections the checkboxes don't offer (e.g. "Game",
+    // or "Toss" from the old dropdown) so a save never silently drops them.
+    const oldD = oldDrills[i] || {};
+    const legacyEnvs = [];
+    const carry = (v) => {
+      const val = v === 'Toss' ? 'Side Toss' : String(v || '').trim();
+      if (val && !DRILL_ENVS.includes(val) && !legacyEnvs.includes(val) && !dEnvs.includes(val)) legacyEnvs.push(val);
+    };
+    if (oldD.env) carry(oldD.env);
+    if (Array.isArray(oldD.envs)) oldD.envs.forEach(carry);
+    dEnvs = [...dEnvs, ...legacyEnvs];
     plan.drills.push({
       name,
-      env: String(b[`d_env_${i}`] || 'Tee').trim() || 'Tee',
+      envs: dEnvs,
       volume: String(b[`d_volume_${i}`] || '').trim(),
       cues: String(b[`d_cues_${i}`] || '').trim(),
       why: String(b[`d_why_${i}`] || '').trim(),
