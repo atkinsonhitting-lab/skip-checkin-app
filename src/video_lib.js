@@ -16,6 +16,12 @@ const path = require('path');
 const LIB_PATH = path.join(__dirname, '..', 'data', 'exercise_video_library.json');
 const REPO_MAP = path.join(__dirname, 'exercise_videos.json');
 
+// Video groups beyond Mobility / Med Ball — Bobby (Sep 24 2026): the library
+// holds ALL video types (drill demos, approach, field work, ...), not just
+// warm-up videos. Groups are coach-created; each is a named list of rows.
+// Stored as {"Group Name": [rows]} under the `categories` key.
+const DEFAULT_CATEGORIES = ['Drill Demos', 'Approach', 'Field Work'];
+
 // Med-ball exercises Bobby programs that have no YouTube link yet — they get
 // blank rows so he can paste links straight into the library.
 const PENDING_MEDBALL = [
@@ -80,32 +86,47 @@ function loadVideoLib() {
         }
       }
       void seed;
-      return { raw: { mobility: mob, medball: med }, file: LIB_PATH };
+      const rawCats = raw.categories && typeof raw.categories === 'object' ? raw.categories : {};
+      const cats = Object.keys(rawCats).map((name) => ({ name, rows: cleanRows(rawCats[name]) }));
+      for (const name of DEFAULT_CATEGORIES) {
+        if (!cats.some((c) => c.name.toLowerCase() === name.toLowerCase())) cats.push({ name, rows: [] });
+      }
+      return { raw: { mobility: mob, medball: med, categories: cats }, file: LIB_PATH };
     }
   } catch (e) { /* fall through to seed */ }
-  return { raw: seedFromRepoMap(), file: LIB_PATH };
+  const s = seedFromRepoMap();
+  s.categories = DEFAULT_CATEGORIES.map((name) => ({ name, rows: [] }));
+  return { raw: s, file: LIB_PATH };
 }
 
 const LOADED = loadVideoLib();
 const MOBILITY_LIST = LOADED.raw.mobility;
 const MEDBALL_LIST = LOADED.raw.medball;
+const CATEGORIES = LOADED.raw.categories || [];
 
 // Persist the library (Bobby's coach edits). Writes the same file loadVideoLib
 // reads and refreshes the in-memory lists in place — no restart needed.
 function saveVideoLib(doc) {
   const mobility = cleanRows(doc.mobility);
   const medball = cleanRows(doc.medball);
+  const cats = (Array.isArray(doc.categories) ? doc.categories : [])
+    .map((c) => ({ name: String((c && c.name) || '').trim().slice(0, 40), rows: cleanRows(c && c.rows) }))
+    .filter((c) => c.name);
   const out = {
     mobility,
     medball,
+    categories: {},
     updated: new Date().toISOString().slice(0, 10),
   };
+  for (const c of cats) out.categories[c.name] = c.rows;
   fs.mkdirSync(path.dirname(LIB_PATH), { recursive: true });
   fs.writeFileSync(LIB_PATH, JSON.stringify(out, null, 2) + '\n', 'utf8');
   MOBILITY_LIST.length = 0;
   mobility.forEach((e) => MOBILITY_LIST.push(e));
   MEDBALL_LIST.length = 0;
   medball.forEach((e) => MEDBALL_LIST.push(e));
+  CATEGORIES.length = 0;
+  cats.forEach((c) => CATEGORIES.push(c));
   return out;
 }
 
@@ -121,4 +142,4 @@ function findVideoUrl(kind, name) {
   return '';
 }
 
-module.exports = { MOBILITY_LIST, MEDBALL_LIST, findVideoUrl, saveVideoLib, slugify, LIB_PATH };
+module.exports = { MOBILITY_LIST, MEDBALL_LIST, CATEGORIES, findVideoUrl, saveVideoLib, slugify, LIB_PATH };

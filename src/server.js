@@ -4425,38 +4425,62 @@ app.get('/coach/video-library', requireCoach, (req, res) => {
 
 app.post('/coach/video-library', requireCoach, (req, res) => {
   const b = req.body || {};
-  const kind = String(b.kind) === 'medball' ? 'medball' : 'mobility';
   const action = String(b.action || '');
-  const list = (kind === 'medball' ? videoLib.MEDBALL_LIST : videoLib.MOBILITY_LIST).map((e) => ({ ...e }));
-  if (action === 'add') {
-    const name = String(b.name || '').trim();
-    const url = String(b.url || '').trim();
-    if (name) {
-      let id = videoLib.slugify(name);
-      let n = 2;
-      while (list.some((e) => e.id === id)) id = `${videoLib.slugify(name)}-${n++}`;
-      list.push({ id, name, url });
+  const rawKind = String(b.kind || 'mobility');
+  const isCat = rawKind.startsWith('cat:');
+  const catName = isCat ? rawKind.slice(4) : null;
+  const kind = rawKind === 'medball' ? 'medball' : isCat ? 'cat' : 'mobility';
+  // Deep copies so edits never mutate the live lists before save.
+  const cats = videoLib.CATEGORIES.map((c) => ({ name: c.name, rows: c.rows.map((e) => ({ ...e })) }));
+  const catRows = catName ? (cats.find((c) => c.name === catName) || {}).rows : null;
+  if (action === 'new_category') {
+    const name = String(b.category_name || '').trim().slice(0, 40);
+    if (name && !cats.some((c) => c.name.toLowerCase() === name.toLowerCase())) cats.push({ name, rows: [] });
+  } else if (action === 'delete_category' && catName) {
+    const i = cats.findIndex((c) => c.name === catName);
+    if (i >= 0 && cats[i].rows.length === 0) cats.splice(i, 1);
+  } else if (catRows || kind !== 'cat') {
+    const list = kind === 'medball' ? videoLib.MEDBALL_LIST.map((e) => ({ ...e }))
+      : kind === 'mobility' ? videoLib.MOBILITY_LIST.map((e) => ({ ...e }))
+      : catRows;
+    if (action === 'add') {
+      const name = String(b.name || '').trim();
+      const url = String(b.url || '').trim();
+      if (name) {
+        let id = videoLib.slugify(name);
+        let n = 2;
+        while (list.some((e) => e.id === id)) id = `${videoLib.slugify(name)}-${n++}`;
+        list.push({ id, name, url });
+      }
+    } else if (action === 'update') {
+      const e = list.find((x) => x.id === String(b.id || ''));
+      if (e) {
+        e.name = String(b.name || '').trim() || e.name;
+        e.url = String(b.url || '').trim();
+      }
+    } else if (action === 'delete') {
+      const idx = list.findIndex((x) => x.id === String(b.id || ''));
+      if (idx >= 0) list.splice(idx, 1);
+    } else if (action === 'move') {
+      const idx = list.findIndex((x) => x.id === String(b.id || ''));
+      const j = idx + (String(b.dir || '') === 'down' ? 1 : -1);
+      if (idx >= 0 && j >= 0 && j < list.length) {
+        const [e] = list.splice(idx, 1);
+        list.splice(j, 0, e);
+      }
     }
-  } else if (action === 'update') {
-    const e = list.find((x) => x.id === String(b.id || ''));
-    if (e) {
-      e.name = String(b.name || '').trim() || e.name;
-      e.url = String(b.url || '').trim();
-    }
-  } else if (action === 'delete') {
-    const idx = list.findIndex((x) => x.id === String(b.id || ''));
-    if (idx >= 0) list.splice(idx, 1);
-  } else if (action === 'move') {
-    const idx = list.findIndex((x) => x.id === String(b.id || ''));
-    const j = idx + (String(b.dir || '') === 'down' ? 1 : -1);
-    if (idx >= 0 && j >= 0 && j < list.length) {
-      const [e] = list.splice(idx, 1);
-      list.splice(j, 0, e);
-    }
+    videoLib.saveVideoLib({
+      mobility: kind === 'mobility' ? list : videoLib.MOBILITY_LIST,
+      medball: kind === 'medball' ? list : videoLib.MEDBALL_LIST,
+      categories: cats,
+    });
+    res.redirect('/coach/video-library?saved=1');
+    return;
   }
   videoLib.saveVideoLib({
-    mobility: kind === 'mobility' ? list : videoLib.MOBILITY_LIST,
-    medball: kind === 'medball' ? list : videoLib.MEDBALL_LIST,
+    mobility: videoLib.MOBILITY_LIST,
+    medball: videoLib.MEDBALL_LIST,
+    categories: cats,
   });
   res.redirect('/coach/video-library?saved=1');
 });
@@ -4466,7 +4490,11 @@ app.post('/coach/video-library', requireCoach, (req, res) => {
 // copy is refreshed from here before pushes.
 app.get('/api/video-lib', (req, res) => {
   if (!checkApiKey(req, res)) return;
-  res.json({ mobility: videoLib.MOBILITY_LIST, medball: videoLib.MEDBALL_LIST });
+  res.json({
+    mobility: videoLib.MOBILITY_LIST,
+    medball: videoLib.MEDBALL_LIST,
+    categories: Object.fromEntries(videoLib.CATEGORIES.map((c) => [c.name, c.rows])),
+  });
 });
 
 // Raw library JSON for the deploy-sync workflow (API key auth). The library

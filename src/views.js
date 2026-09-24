@@ -5721,14 +5721,15 @@ function trainingEnvironmentsPage(user, programs, lib, saved) {
 // Environment Library: fix a bad link here and every hitter's Watch button
 // updates. Rows with no link show "No video yet" so he knows what's missing.
 function videoLibraryPage(user, lib, saved) {
-  const section = (kind, title, blurb, rows) => {
+  const section = (kind, title, blurb, rows, noun) => {
+    const n = noun || 'exercise';
     const rowHtml = rows.map((e) => `
     <div class="card lib-entry">
       <form method="post" action="/coach/video-library" class="form" style="margin:0">
         <input type="hidden" name="kind" value="${kind}">
         <input type="hidden" name="action" value="update">
         <input type="hidden" name="id" value="${esc(e.id)}">
-        <label class="fld">Exercise name<input type="text" name="name" value="${esc(e.name)}" maxlength="80" required></label>
+        <label class="fld">${n[0].toUpperCase() + n.slice(1)} name<input type="text" name="name" value="${esc(e.name)}" maxlength="80" required></label>
         <label class="fld">YouTube link<input type="url" name="url" value="${esc(e.url || '')}" maxlength="300" placeholder="https://www.youtube.com/watch?v=...">${e.url ? '' : '<span class="hint-inline">No video yet — paste a link and save.</span>'}</label>
         <div style="display:flex;gap:8px;align-items:center">
           <button type="submit" class="btn-small">Save</button>
@@ -5755,22 +5756,42 @@ function videoLibraryPage(user, lib, saved) {
       <form method="post" action="/coach/video-library" class="form" style="margin:0">
         <input type="hidden" name="kind" value="${kind}">
         <input type="hidden" name="action" value="add">
-        <label class="fld">New exercise name<input type="text" name="name" maxlength="80" placeholder="e.g. Med Ball Hip Toss" required></label>
+        <label class="fld">New ${n} name<input type="text" name="name" maxlength="80" placeholder="e.g. Med Ball Hip Toss" required></label>
         <label class="fld">YouTube link<input type="url" name="url" maxlength="300" placeholder="https://www.youtube.com/watch?v=..."></label>
         <button type="submit" class="btn-small">Add video</button>
       </form>
     </div>
     ${rowHtml}`;
   };
+  const catSections = (lib.CATEGORIES || []).map((c) => {
+    const kind = 'cat:' + c.name;
+    const emptyDel = c.rows.length ? '' : `
+    <form method="post" action="/coach/video-library" style="margin-top:12px" onsubmit="return confirm('Delete the &quot;${esc(c.name)}&quot; group?');">
+      <input type="hidden" name="kind" value="${esc(kind)}">
+      <input type="hidden" name="action" value="delete_category">
+      <button type="submit" class="btn-small btn-quiet">Delete group</button>
+    </form>`;
+    return section(esc(kind), esc(c.name) + ' videos', 'Your ' + esc(c.name.toLowerCase()) + ' video collection.', c.rows, 'video') + emptyDel;
+  }).join('');
   return layout({
     title: 'Exercise Video Library',
     user,
     tabs: coachTabs('video-library', user.approvalCount, user),
     body: `<h1 class="page-title">Exercise Video Library</h1>
     ${saved ? '<div class="card" style="border-color:var(--ok)"><strong>Saved.</strong> Hitters see the new links right away.</div>' : ''}
-    <p class="hint-inline">These are the <strong>Watch</strong> buttons on the Warm-up tab and the guided workout. Fix a wrong link or paste a missing one here — no code changes, no redeploy.</p>
-    ${section('mobility', 'Mobility videos', 'Every exercise in the warm-up mobility block should be listed here.', lib.MOBILITY_LIST || [])}
-    ${section('medball', 'Med ball videos', 'Every med-ball exercise in the programs should be listed here.', lib.MEDBALL_LIST || [])}
+    <p class="hint-inline">Every video type lives here — mobility, med ball, drill demos, approach, field work, and any group you add. The <strong>Watch</strong> buttons on the Warm-up tab and the guided workout pull from the Mobility and Med Ball groups.</p>
+    ${section('mobility', 'Mobility videos', 'Every exercise in the warm-up mobility block should be listed here.', lib.MOBILITY_LIST || [], 'exercise')}
+    ${section('medball', 'Med ball videos', 'Every med-ball exercise in the programs should be listed here.', lib.MEDBALL_LIST || [], 'exercise')}
+    ${catSections}
+    <h2 class="section-head" style="margin-top:28px">New video group</h2>
+    <p class="hint-inline">Add your own group — e.g. Pitching, Baserunning, Mental Game.</p>
+    <div class="card">
+      <form method="post" action="/coach/video-library" class="form" style="margin:0">
+        <input type="hidden" name="action" value="new_category">
+        <label class="fld">Group name<input type="text" name="category_name" maxlength="40" placeholder="e.g. Pitching" required></label>
+        <button type="submit" class="btn-small">Add group</button>
+      </form>
+    </div>
     <style>
       .lib-entry { margin-top: 12px; }
     </style>`,
