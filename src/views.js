@@ -31,16 +31,9 @@ function normWarmup(w) {
   return [];
 }
 
-// Bobby (Sep 24 2026): YouTube videos for mobility + med ball warm-up rows.
-const exVideos = (() => { try { return require('./exercise_videos.json'); } catch (e) { return {}; } })();
-const _normVn = (n) => String(n || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-function findExVideo(map, name) {
-  const m = (map && typeof map === 'object') ? map : {};
-  if (m[name]) return m[name];
-  const nn = _normVn(name);
-  for (const k of Object.keys(m)) if (_normVn(k) === nn) return m[k];
-  return '';
-}
+// Bobby (Sep 24 2026): YouTube videos for mobility + med ball warm-up rows —
+// from the coach-editable Exercise Video Library (/coach/video-library).
+const videoLib = require('./video_lib');
 function esc(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;')
@@ -284,6 +277,7 @@ function coachTabs(active, approvalCount, user) {
     tabs.splice(6, 0, { href: '/coach/lifting', label: 'Lifting', active: active === 'lifting' });
     tabs.splice(7, 0, { href: '/coach/finances', label: 'Finances', active: active === 'finances' });
     tabs.splice(8, 0, { href: '/coach/mental-questions', label: 'Questionnaire', active: active === 'mental-questions' });
+    tabs.splice(9, 0, { href: '/coach/video-library', label: 'Exercise Videos', active: active === 'video-library' });
   }
   return tabs;
 }
@@ -2494,8 +2488,8 @@ function programPage(user, p, opts) {
       ? real.map((it) => `<div class="guide-row"><span class="routine-name">${esc(it.drill || '')}</span>${it.volume || it.prescription ? `<span class="hint-inline">${esc(it.volume || it.prescription)}</span>` : ''}</div>`).join('')
       : real.map((it) => {
         const v = it.video || (kind === 'mob'
-          ? findExVideo(exVideos.mobility_youtube, it.drill)
-          : kind === 'med' ? findExVideo(exVideos.medball_youtube, it.drill) : '');
+          ? videoLib.findVideoUrl('mobility', it.drill)
+          : kind === 'med' ? videoLib.findVideoUrl('medball', it.drill) : '');
         return checkRow(kind, `${kind}::${dayScope || ''}::${cat}::${it.drill}`, it.drill, it.volume, v, extra);
       }).join('');
     return `<details class="card routine-group" open><summary class="routine-summary"><span class="routine-station">${esc(cat)}</span></summary>${rows}</details>`;
@@ -5130,8 +5124,9 @@ function mobilityWorkoutPage(user, p, opts) {
   return layout({
     title: `Warm-up Workout — ${athleteName}`,
     user,
+    tabs: userTabs('program', user),
     body: `<h1 class="page-title">Warm-up & Med Ball</h1>
-    <p><a href="/program/mobility">← Back</a></p>
+    <p><a href="/program/mobility">← Back to Warm-up</a> · <a href="/program">Program home</a></p>
     <p class="hint">Tap through each exercise. Log your med ball weight.</p>
     <div class="wo-list">${exHtml || '<div class="empty">No mobility exercises found.</div>'}</div>
     <script src="/mobility-workout.js"></script>
@@ -5176,6 +5171,7 @@ function mobilityPage(user, p, opts) {
   return layout({
     title: `Warm-up — ${athleteName}`,
     user,
+    tabs: userTabs('program', user),
     body: `<div class="doc-page">
       <div class="doc-header"><div class="doc-logo">ATKINSON<br>HITTING</div></div>
       <h1 class="doc-sec-title">Warm-up & Med Ball - ${esc(athleteName)}</h1>
@@ -5719,8 +5715,70 @@ function trainingEnvironmentsPage(user, programs, lib, saved) {
     </style>`,
   });
 }
+
+// Exercise Video Library (Bobby, Sep 24 2026): coach-editable YouTube links
+// for the Warm-up — Mobility + Med Ball. Same editing pattern as the Training
+// Environment Library: fix a bad link here and every hitter's Watch button
+// updates. Rows with no link show "No video yet" so he knows what's missing.
+function videoLibraryPage(user, lib, saved) {
+  const section = (kind, title, blurb, rows) => {
+    const rowHtml = rows.map((e) => `
+    <div class="card lib-entry">
+      <form method="post" action="/coach/video-library" class="form" style="margin:0">
+        <input type="hidden" name="kind" value="${kind}">
+        <input type="hidden" name="action" value="update">
+        <input type="hidden" name="id" value="${esc(e.id)}">
+        <label class="fld">Exercise name<input type="text" name="name" value="${esc(e.name)}" maxlength="80" required></label>
+        <label class="fld">YouTube link<input type="url" name="url" value="${esc(e.url || '')}" maxlength="300" placeholder="https://www.youtube.com/watch?v=...">${e.url ? '' : '<span class="hint-inline">No video yet — paste a link and save.</span>'}</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button type="submit" class="btn-small">Save</button>
+          ${e.url ? `<a class="btn-small btn-quiet" href="${esc(e.url)}" target="_blank" rel="noopener">Test link</a>` : ''}
+        </div>
+      </form>
+      <form method="post" action="/coach/video-library" style="margin:8px 0 0" onsubmit="return confirm('Delete this video link?');">
+        <input type="hidden" name="kind" value="${kind}">
+        <input type="hidden" name="action" value="delete">
+        <input type="hidden" name="id" value="${esc(e.id)}">
+        <button type="submit" class="btn-small btn-quiet">Delete</button>
+      </form>
+      <form method="post" action="/coach/video-library" style="margin:8px 0 0;display:flex;gap:8px" aria-label="Reorder">
+        <input type="hidden" name="kind" value="${kind}">
+        <input type="hidden" name="action" value="move">
+        <input type="hidden" name="id" value="${esc(e.id)}">
+        <button type="submit" name="dir" value="up" class="btn-small btn-quiet" aria-label="Move up">↑</button>
+        <button type="submit" name="dir" value="down" class="btn-small btn-quiet" aria-label="Move down">↓</button>
+      </form>
+    </div>`).join('');
+    return `<h2 class="section-head" style="margin-top:28px">${title}</h2>
+    <p class="hint-inline">${blurb}</p>
+    <div class="card">
+      <form method="post" action="/coach/video-library" class="form" style="margin:0">
+        <input type="hidden" name="kind" value="${kind}">
+        <input type="hidden" name="action" value="add">
+        <label class="fld">New exercise name<input type="text" name="name" maxlength="80" placeholder="e.g. Med Ball Hip Toss" required></label>
+        <label class="fld">YouTube link<input type="url" name="url" maxlength="300" placeholder="https://www.youtube.com/watch?v=..."></label>
+        <button type="submit" class="btn-small">Add video</button>
+      </form>
+    </div>
+    ${rowHtml}`;
+  };
+  return layout({
+    title: 'Exercise Video Library',
+    user,
+    tabs: coachTabs('video-library', user.approvalCount, user),
+    body: `<h1 class="page-title">Exercise Video Library</h1>
+    ${saved ? '<div class="card" style="border-color:var(--ok)"><strong>Saved.</strong> Hitters see the new links right away.</div>' : ''}
+    <p class="hint-inline">These are the <strong>Watch</strong> buttons on the Warm-up tab and the guided workout. Fix a wrong link or paste a missing one here — no code changes, no redeploy.</p>
+    ${section('mobility', 'Mobility videos', 'Every exercise in the warm-up mobility block should be listed here.', lib.MOBILITY_LIST || [])}
+    ${section('medball', 'Med ball videos', 'Every med-ball exercise in the programs should be listed here.', lib.MEDBALL_LIST || [])}
+    <style>
+      .lib-entry { margin-top: 12px; }
+    </style>`,
+  });
+}
 module.exports = {
   trainingEnvironmentsPage,
+  videoLibraryPage,
   layout,
   userTabs,
   coachTabs,

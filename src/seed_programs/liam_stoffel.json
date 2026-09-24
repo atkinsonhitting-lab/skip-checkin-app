@@ -122,5 +122,35 @@
     "timing": "Load early. Get the barrel going fast early.",
     "game": "See it. Barrel fast."
   },
-  "mental_framework": "PREPARED → PRESENT → COMPETE"
+  "mental_framework": "PREPARED → PRESENT → COMPETE",
+  "mobility": [
+    {
+      "drill": "Hamstring Floss",
+      "volume": "10 each side"
+    },
+    {
+      "drill": "90/90 Hip Switch",
+      "volume": "8 each side"
+    },
+    {
+      "drill": "Open Books",
+      "volume": "8 each side"
+    },
+    {
+      "drill": "Elbow to Elbow",
+      "volume": "8 each side"
+    },
+    {
+      "drill": "Hip Circles",
+      "volume": "3 each way, each side"
+    },
+    {
+      "drill": "Squat to Stand",
+      "volume": "10 total"
+    },
+    {
+      "drill": "Hip Airplane",
+      "volume": "8 each side"
+    }
+  ]
 }

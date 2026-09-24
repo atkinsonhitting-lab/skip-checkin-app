@@ -859,6 +859,58 @@ db.exec(`CREATE TABLE IF NOT EXISTS intake_custom_questions (
     } catch (e) { /* best effort */ }
     db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('migration_medball_youtube', ?)").run(`${fixed}f/${purged}p`);
   }
+  // Bobby (Sep 24 2026): the Warm-up uses ONLY mobility exercises that have
+  // videos. Normalize every remote program's Mobility block to the 7
+  // video-backed exercises (same list as the seed programs). Programs with no
+  // Mobility block get one, right after Daily Routine. Per-item video links
+  // are dropped — the Exercise Video Library is the single source now.
+  const mobExFlag = db.prepare("SELECT value FROM settings WHERE key = 'migration_mobility_video_exercises'").get();
+  if (!mobExFlag) {
+    const CANON = [
+      ['Hamstring Floss', '10 each side'],
+      ['90/90 Hip Switch', '8 each side'],
+      ['Open Books', '8 each side'],
+      ['Elbow to Elbow', '8 each side'],
+      ['Hip Circles', '3 each way, each side'],
+      ['Squat to Stand', '10 total'],
+      ['Hip Airplane', '8 each side'],
+    ].map(([drill, volume]) => ({ drill, volume }));
+    let touched = 0;
+    try {
+      const rows = db.prepare('SELECT id, program_json FROM remote_programs').all();
+      const upd = db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?');
+      for (const row of rows) {
+        let prog;
+        try { prog = JSON.parse(row.program_json || '{}'); } catch (e) { continue; }
+        let changed = false;
+        const blocks = Array.isArray(prog.routine) ? prog.routine : [];
+        let found = false;
+        for (const c of blocks) {
+          if (/mobility/i.test(String((c && c.category) || ''))) {
+            c.items = CANON.map((x) => ({ ...x }));
+            found = true;
+            changed = true;
+          }
+        }
+        if (!found) {
+          const nb = { category: 'Mobility', items: CANON.map((x) => ({ ...x })) };
+          const di = blocks.findIndex((c) => /daily routine/i.test(String((c && c.category) || '')));
+          blocks.splice(di >= 0 ? di + 1 : 0, 0, nb);
+          prog.routine = blocks;
+          changed = true;
+        }
+        if (Array.isArray(prog.mobility)) {
+          prog.mobility = CANON.map((x) => ({ ...x }));
+          changed = true;
+        }
+        if (changed) {
+          upd.run(JSON.stringify(prog), new Date().toISOString(), row.id);
+          touched++;
+        }
+      }
+    } catch (e) { /* best effort */ }
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('migration_mobility_video_exercises', ?)").run(String(touched));
+  }
 }
 // NOTE: starter lifting templates are seeded after the settings table is
 // created below (guarded by a settings flag).

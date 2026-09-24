@@ -1,0 +1,87 @@
+{
+  "mobility": [
+    {
+      "id": "hamstring-floss",
+      "name": "Hamstring Floss",
+      "url": "https://www.youtube.com/watch?v=hEykoofS5vk"
+    },
+    {
+      "id": "90-90-hip-switch",
+      "name": "90/90 Hip Switch",
+      "url": "https://www.youtube.com/watch?v=Z2ZwVZD78fo"
+    },
+    {
+      "id": "open-books",
+      "name": "Open Books",
+      "url": "https://www.youtube.com/watch?v=XwYRaloCdr8"
+    },
+    {
+      "id": "elbow-to-elbow",
+      "name": "Elbow to Elbow",
+      "url": "https://www.youtube.com/watch?v=7TPgxsoC2NU"
+    },
+    {
+      "id": "hip-circles",
+      "name": "Hip Circles",
+      "url": "https://www.youtube.com/watch?v=Uq8QR1_N65U"
+    },
+    {
+      "id": "squat-to-stand",
+      "name": "Squat to Stand",
+      "url": "https://www.youtube.com/watch?v=IQ24uy6oncc"
+    },
+    {
+      "id": "hip-airplane",
+      "name": "Hip Airplane",
+      "url": "https://www.youtube.com/watch?v=uWOQj9VmSDQ"
+    }
+  ],
+  "medball": [
+    {
+      "id": "med-ball-overhead-slam",
+      "name": "Med Ball Overhead Slam",
+      "url": "https://www.youtube.com/watch?v=EsAhU1jHpiQ"
+    },
+    {
+      "id": "med-ball-rotational-slam",
+      "name": "Med Ball Rotational Slam",
+      "url": "https://www.youtube.com/watch?v=e-5zS54APWU"
+    },
+    {
+      "id": "med-ball-rotational-throw",
+      "name": "Med Ball Rotational Throw",
+      "url": "https://www.youtube.com/watch?v=o9BC7lgN1bo"
+    },
+    {
+      "id": "med-ball-scoop-toss",
+      "name": "Med Ball Scoop Toss",
+      "url": "https://www.youtube.com/watch?v=KT7iAYA3g7Y"
+    },
+    {
+      "id": "med-ball-shotput",
+      "name": "Med Ball Shotput",
+      "url": "https://www.youtube.com/watch?v=EXV9UhUMTiY"
+    },
+    {
+      "id": "med-ball-shotput-throw",
+      "name": "Med Ball Shotput Throw",
+      "url": "https://www.youtube.com/watch?v=EXV9UhUMTiY"
+    },
+    {
+      "id": "med-ball-split-stance-rotational-throw",
+      "name": "Med Ball Split Stance Rotational Throw",
+      "url": ""
+    },
+    {
+      "id": "med-ball-hip-toss",
+      "name": "Med Ball Hip Toss",
+      "url": ""
+    },
+    {
+      "id": "med-ball-step-back-scoop-toss",
+      "name": "Med Ball Step Back Scoop Toss",
+      "url": ""
+    }
+  ],
+  "updated": "2026-09-24"
+}

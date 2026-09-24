@@ -21,6 +21,7 @@ const views = require('./views');
 const brain = require('./brain');
 const videoLinks = require('./video_links');
 const envLib = require('./env_lib');
+const videoLib = require('./video_lib');
 const { envById, defaultEnvEntries } = envLib;
 const { seedUsers, writeCredentialsFile, userCount } = require('./seed');
 
@@ -2445,26 +2446,9 @@ app.get('/program/mobility-workout', requireLogin, requireWaiver, (req, res) => 
   if (!p) return res.redirect('/');
   const blocks = splitProgramBlocks(p);
   const today = chiToday();
-  // Bobby (Sep 24 2026): exercise video links from the repo-bundled map
-  // (src/exercise_videos.json) — the workspace registry is not on Render.
-  let mobilityVideos = {}, medballVideos = {};
-  try {
-    const fs = require('fs');
-    const path = require('path');
-    const evPath = path.join(__dirname, 'exercise_videos.json');
-    if (fs.existsSync(evPath)) {
-      const ev = JSON.parse(fs.readFileSync(evPath, 'utf8'));
-      mobilityVideos = ev.mobility_youtube || {};
-      medballVideos = ev.medball_youtube || {};
-    }
-  } catch (e) { /* no videos */ }
-  const normName = (n) => String(n || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-  const findVideo = (map, name) => {
-    if (map[name]) return map[name];
-    const nn = normName(name);
-    for (const k of Object.keys(map)) if (normName(k) === nn) return map[k];
-    return null;
-  };
+  // Bobby (Sep 24 2026): exercise video links from the coach-editable
+  // Exercise Video Library (/coach/video-library).
+  const findVideo = (kind, name) => videoLib.findVideoUrl(kind, name);
   // Build flat list of mobility + medball exercises
   const exercises = [];
   for (const b of blocks.mobility) {
@@ -2476,7 +2460,7 @@ app.get('/program/mobility-workout', requireLogin, requireWaiver, (req, res) => 
         volume: it.volume || '',
         type: 'mobility',
         key,
-        video: findVideo(mobilityVideos, it.drill),
+        video: findVideo('mobility', it.drill),
         last: lastLiftLog(req.user.id, key, today),
         history: liftHistory(req.user.id, key, 8),
       });
@@ -2493,7 +2477,7 @@ app.get('/program/mobility-workout', requireLogin, requireWaiver, (req, res) => 
         volume: it.volume || '',
         type: 'medball',
         key,
-        video: findVideo(medballVideos, it.drill),
+        video: findVideo('medball', it.drill),
         last: lastLiftLog(req.user.id, key, today),
         history: liftHistory(req.user.id, key, 8),
       });
@@ -4429,6 +4413,61 @@ function propagateEnvDelete(id, name) {
     }
   }
 }
+
+// ---- Exercise Video Library (Bobby, Sep 24 2026) ----
+// Coach-editable YouTube links for Warm-up mobility + med ball, same pattern
+// as the Training Environment Library. Fix a wrong link here and every
+// hitter's Watch button updates — no code changes, no redeploy.
+app.get('/coach/video-library', requireCoach, (req, res) => {
+  setApprovalCount(req);
+  res.send(views.videoLibraryPage(req.user, videoLib, req.query.saved === '1'));
+});
+
+app.post('/coach/video-library', requireCoach, (req, res) => {
+  const b = req.body || {};
+  const kind = String(b.kind) === 'medball' ? 'medball' : 'mobility';
+  const action = String(b.action || '');
+  const list = (kind === 'medball' ? videoLib.MEDBALL_LIST : videoLib.MOBILITY_LIST).map((e) => ({ ...e }));
+  if (action === 'add') {
+    const name = String(b.name || '').trim();
+    const url = String(b.url || '').trim();
+    if (name) {
+      let id = videoLib.slugify(name);
+      let n = 2;
+      while (list.some((e) => e.id === id)) id = `${videoLib.slugify(name)}-${n++}`;
+      list.push({ id, name, url });
+    }
+  } else if (action === 'update') {
+    const e = list.find((x) => x.id === String(b.id || ''));
+    if (e) {
+      e.name = String(b.name || '').trim() || e.name;
+      e.url = String(b.url || '').trim();
+    }
+  } else if (action === 'delete') {
+    const idx = list.findIndex((x) => x.id === String(b.id || ''));
+    if (idx >= 0) list.splice(idx, 1);
+  } else if (action === 'move') {
+    const idx = list.findIndex((x) => x.id === String(b.id || ''));
+    const j = idx + (String(b.dir || '') === 'down' ? 1 : -1);
+    if (idx >= 0 && j >= 0 && j < list.length) {
+      const [e] = list.splice(idx, 1);
+      list.splice(j, 0, e);
+    }
+  }
+  videoLib.saveVideoLib({
+    mobility: kind === 'mobility' ? list : videoLib.MOBILITY_LIST,
+    medball: kind === 'medball' ? list : videoLib.MEDBALL_LIST,
+  });
+  res.redirect('/coach/video-library?saved=1');
+});
+
+// Raw library JSON for the deploy-sync workflow (API key auth), mirroring
+// /api/env-lib: the library is coach-editable in production, so the repo
+// copy is refreshed from here before pushes.
+app.get('/api/video-lib', (req, res) => {
+  if (!checkApiKey(req, res)) return;
+  res.json({ mobility: videoLib.MOBILITY_LIST, medball: videoLib.MEDBALL_LIST });
+});
 
 // Raw library JSON for the deploy-sync workflow (API key auth). The library
 // is coach-editable in production, so the repo copy is refreshed from here
