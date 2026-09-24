@@ -5459,6 +5459,19 @@ function hittingPlanEditPage(user, p) {
     </div>`;
   }).join('');
 
+  // Bobby (Sep 24 2026): grades are entered in the hitting plan and show up on
+  // the athlete's program document. plan.grades is canonical for the doc;
+  // fall back to prog.grades for plans saved before the mirror existed.
+  const _g = (plan.grades && typeof plan.grades === 'object' && Object.keys(plan.grades).length ? plan.grades : prog.grades) || {};
+  const _gw = (plan.grade_whys && typeof plan.grade_whys === 'object' && Object.keys(plan.grade_whys).length ? plan.grade_whys : prog.grade_whys) || {};
+  const gradeRows = ['Load', 'Path', 'Connection', 'Timing', 'Power Production'].map((g) => {
+    const key = g.replace(/ /g, '_');
+    return `<div class="grade-edit-block">
+      <label class="fld fld-inline">Grade — ${esc(g)}<input type="text" name="grade_${key}" value="${esc(_g[g] || '')}" maxlength="4" placeholder="B+"></label>
+      <label class="fld">Why this grade?<input type="text" name="grade_why_${key}" value="${esc(_gw[g] || '')}" maxlength="200" placeholder="e.g. Late load, rushes forward..."></label>
+    </div>`;
+  }).join('');
+
   return layout({
     title: 'Edit Hitting Plan',
     user,
@@ -5466,6 +5479,9 @@ function hittingPlanEditPage(user, p) {
     body: `<h1 class="page-title">Hitting Plan — ${esc(athleteName)}</h1>
     <p><a href="/coach/program/${p.id}/edit" class="hint-inline">‹ Back to program editor</a></p>
     <form method="post" action="/coach/program/${p.id}/hitting-plan" class="form">
+      <h3>Grades</h3>
+      <p class="hint-inline">Show on his program right after the key strengths.</p>
+      <div class="grade-edit-row">${gradeRows}</div>
       <label class="fld">Training environments note (leave blank for the standard explainer)
         <textarea name="environments_note" rows="6" placeholder="Custom note, or blank for default...">${esc(plan.environments_note || '')}</textarea>
       </label>

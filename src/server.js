@@ -3997,6 +3997,13 @@ app.post('/coach/program/:id/save', requireCoach, (req, res) => {
   }
   prog.grades = grades;
   prog.grade_whys = gradeWhys;
+  // Bobby (Sep 24 2026): grades show on the program document, which reads
+  // hitting_plan.grades — keep the saved hitting plan in sync so an edit
+  // here reaches the athlete's program too.
+  if (prog.hitting_plan && typeof prog.hitting_plan === 'object') {
+    prog.hitting_plan.grades = grades;
+    prog.hitting_plan.grade_whys = gradeWhys;
+  }
   prog.strengths = String(b.strengths || '')
     .split('\n')
     .map((x) => x.trim())
@@ -4128,13 +4135,33 @@ app.post('/coach/program/:id/hitting-plan', requireCoach, (req, res) => {
     footer: String(b.footer || '').trim(),
     // Bobby (Sep 24 2026): the editor doesn't touch the eval — carry it over
     // from the saved plan so a save never wipes grades/strengths/need.
+    // Grades ARE editable here (Bobby Sep 24 2026): they go in the hitting
+    // plan and show up on the athlete's program. Guarded: a stale form
+    // without the fields must not wipe them.
     strengths: Array.isArray(oldPlan.strengths) ? oldPlan.strengths : [],
-    grades: oldPlan.grades && typeof oldPlan.grades === 'object' ? oldPlan.grades : {},
-    grade_whys: oldPlan.grade_whys && typeof oldPlan.grade_whys === 'object' ? oldPlan.grade_whys : {},
     need: String(oldPlan.need || ''),
     why_text: String(oldPlan.why_text || ''),
     reminder: String(oldPlan.reminder || ''),
   };
+  const GRADES = ['Load', 'Path', 'Connection', 'Timing', 'Power Production'];
+  if (GRADES.some((g) => ('grade_' + g.replace(/ /g, '_')) in b)) {
+    const grades = {};
+    const gradeWhys = {};
+    for (const g of GRADES) {
+      const v = String(b['grade_' + g.replace(/ /g, '_')] || '').trim().slice(0, 4);
+      if (v) grades[g] = v;
+      const why = String(b['grade_why_' + g.replace(/ /g, '_')] || '').trim().slice(0, 200);
+      if (why) gradeWhys[g] = why;
+    }
+    plan.grades = grades;
+    plan.grade_whys = gradeWhys;
+    // Mirror onto prog so the whole-program editor reads the same grades.
+    p.prog.grades = grades;
+    p.prog.grade_whys = gradeWhys;
+  } else {
+    plan.grades = oldPlan.grades && typeof oldPlan.grades === 'object' ? oldPlan.grades : {};
+    plan.grade_whys = oldPlan.grade_whys && typeof oldPlan.grade_whys === 'object' ? oldPlan.grade_whys : {};
+  }
   // Action-plan cues (Bobby Sep 24 2026): editable here and in the program
   // editor — one canonical copy on prog.cues, mirrored onto the plan.
   // Guarded: a stale form without the fields must not wipe them.
