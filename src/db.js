@@ -859,13 +859,12 @@ db.exec(`CREATE TABLE IF NOT EXISTS intake_custom_questions (
     } catch (e) { /* best effort */ }
     db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('migration_medball_youtube', ?)").run(`${fixed}f/${purged}p`);
   }
-  // Bobby (Sep 24 2026): the Warm-up uses ONLY mobility exercises that have
-  // videos. Normalize every remote program's Mobility block to the 7
-  // video-backed exercises (same list as the seed programs). Programs with no
-  // Mobility block get one, right after Daily Routine. Per-item video links
-  // are dropped — the Exercise Video Library is the single source now.
-  const mobExFlag = db.prepare("SELECT value FROM settings WHERE key = 'migration_mobility_video_exercises'").get();
-  if (!mobExFlag) {
+  // Bobby (Sep 24 2026): the warm-up is a ~10 minute workout — ONE Mobility
+  // block with the 7 video-backed exercises. (The earlier
+  // migration_mobility_video_exercises wrote the 7 into EVERY 'Mobility — X'
+  // block, multiplying them to ~28; this collapses them back to one.)
+  const mobSingleFlag = db.prepare("SELECT value FROM settings WHERE key = 'migration_mobility_single_block'").get();
+  if (!mobSingleFlag) {
     const CANON = [
       ['Hamstring Floss', '10 each side'],
       ['90/90 Hip Switch', '8 each side'],
@@ -884,15 +883,14 @@ db.exec(`CREATE TABLE IF NOT EXISTS intake_custom_questions (
         try { prog = JSON.parse(row.program_json || '{}'); } catch (e) { continue; }
         let changed = false;
         const blocks = Array.isArray(prog.routine) ? prog.routine : [];
-        let found = false;
-        for (const c of blocks) {
-          if (/mobility/i.test(String((c && c.category) || ''))) {
-            c.items = CANON.map((x) => ({ ...x }));
-            found = true;
-            changed = true;
-          }
-        }
-        if (!found) {
+        if (blocks.some((c) => /mobility/i.test(String((c && c.category) || '')))) {
+          const kept = blocks.filter((c) => !/mobility/i.test(String((c && c.category) || '')));
+          const nb = { category: 'Mobility', items: CANON.map((x) => ({ ...x })) };
+          const di = kept.findIndex((c) => /daily routine/i.test(String((c && c.category) || '')));
+          kept.splice(di >= 0 ? di + 1 : 0, 0, nb);
+          prog.routine = kept;
+          changed = true;
+        } else {
           const nb = { category: 'Mobility', items: CANON.map((x) => ({ ...x })) };
           const di = blocks.findIndex((c) => /daily routine/i.test(String((c && c.category) || '')));
           blocks.splice(di >= 0 ? di + 1 : 0, 0, nb);
@@ -909,8 +907,11 @@ db.exec(`CREATE TABLE IF NOT EXISTS intake_custom_questions (
         }
       }
     } catch (e) { /* best effort */ }
-    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('migration_mobility_video_exercises', ?)").run(String(touched));
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('migration_mobility_single_block', ?)").run(String(touched));
   }
+  // Superseded by migration_mobility_single_block above (kept for history):
+  // the earlier migration_mobility_video_exercises normalized items per block
+  // instead of collapsing to one block.
 }
 // NOTE: starter lifting templates are seeded after the settings table is
 // created below (guarded by a settings flag).

@@ -5055,7 +5055,7 @@ function buildIntakeProgram(a, athleteName) {
     hasMobilityDay = true;
   }
   for (; fi < freeDays.length; fi++) prog.schedule.push([freeDays[fi], 'OFF']);
-  if (has('mobility')) for (const b of mobilityBlocks(tags)) prog.routine.push(b);
+  if (has('mobility')) prog.routine.push(mobilityCanonBlock());
   if (has('hitting')) for (const b of buildHittingBase(a, useDays.length, env)) prog.routine.push(b);
   if (hasRecovery) prog.routine.push(recoveryDayBlock());
   // Med ball: lifters get it bundled inside the Lifting tab (the block lives
@@ -5431,26 +5431,22 @@ function rampNote(ex) {
   if (eq.includes('dumbbell') || eq.includes('kettlebell')) return 'Ramp: 1 light set x12 → 1 medium set x8 → work sets';
   return 'Ramp: 1 easy set x10 → work sets';
 }
-// Baseball mobility template (Sep 2026): rotational-athlete mobility, not
-// generic. Hips / t-spine / shoulders / ankles — the baseball kinetic chain.
-const MOBILITY_TEMPLATE = [
-  { section: 'Hips', items: [
-    ['90/90 Hip Switches', '8 each side'], ['Pigeon Stretch', '45 sec each side'],
-    ['Half-Kneeling Hip Flexor Stretch', '30 sec each side'], ['Deep Squat Hold w/ Elbow Press', '30 sec'],
-  ]},
-  { section: 'T-Spine (rotation)', items: [
-    ['Open Books', '8 each side'], ['Quadruped Thoracic Rotations', '8 each side'],
-    ['Cat-Cow', '10'], ['Thread the Needle', '6 each side'],
-  ]},
-  { section: 'Shoulders', items: [
-    ['Sleeper Stretch', '30 sec each side'], ['Cross-Body Shoulder Stretch', '30 sec each side'],
-    ['Wall Slides', '10'], ['Band Pull-Aparts', '15'],
-  ]},
-  { section: 'Ankles', items: [
-    ['Knee-to-Wall', '10 each side'], ['Half-Kneeling Calf Stretch', '30 sec each side'],
-    ['Ankle Circles', '10 each direction'],
-  ]},
+// Warm-up mobility (Bobby, Sep 24 2026): the warm-up is a ~10 minute workout —
+// ONE Mobility block with the 7 video-backed exercises, not the old 4-section
+// template. The wider menu of mobility exercises lives in the Exercise Video
+// Library (/coach/video-library); the warm-up prescribes only these.
+const MOBILITY_CANON = [
+  ['Hamstring Floss', '10 each side'],
+  ['90/90 Hip Switch', '8 each side'],
+  ['Open Books', '8 each side'],
+  ['Elbow to Elbow', '8 each side'],
+  ['Hip Circles', '3 each way, each side'],
+  ['Squat to Stand', '10 total'],
+  ['Hip Airplane', '8 each side'],
 ];
+function mobilityCanonBlock() {
+  return { category: 'Mobility', items: MOBILITY_CANON.map(([drill, volume]) => ({ drill, volume })) };
+}
 // Bobby's exact registry drill names (Sep 2026) so his YouTube links attach
 // by exact match. Only drills with a Bobby-specified video belong here —
 // no guessing, no placeholders.
@@ -5464,14 +5460,6 @@ const METABOLIC_TEMPLATE = [
   ['Jump Rope Intervals', '8 x 1 min on / 30 sec off', '', ['rope']],
   ['Bike Intervals', '8 x 30 sec hard / 90 sec easy', '', []],
 ];
-function mobilityBlocks(tags) {
-  return MOBILITY_TEMPLATE.map((sec) => ({
-    category: 'Mobility — ' + sec.section,
-    items: sec.items
-      .filter(([name]) => name !== 'Band Pull-Aparts' || tags.has('bands'))
-      .map(([drill, volume]) => ({ drill, volume })),
-  }));
-}
 function medballBlocks(tags) {
   if (!tags.has('medball')) {
     return [{ category: 'Med Ball', items: [
