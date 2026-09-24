@@ -2313,12 +2313,10 @@ function dailyRoutineBlocks(prog) {
 
 // Hitter-facing: their training program, read-only.
 // Athlete Programs tab (Sep 2026): program-first, today-first.
-// One tab, four ordered sub-tabs (data-driven): MOBILITY -> MED BALL ->
-// Programs sub-tab order per Bobby: lifters get MOBILITY -> HITTING ->
-// LIFTING, with med ball work living INSIDE the Lifting tab (ahead of the
-// lifts); everyone else gets MOBILITY -> MED BALL -> HITTING. Prep work stays
-// with Hitting. Items check off per day; lifts log weight + RPE with target
-// RPE, last-time, and history inline.
+// Bobby (Sep 24 2026): training blocks are mobility, med ball, and lifting
+// only — never a Hitting block. The hitting document IS the program page;
+// lifters reach lifting from the button on the document, non-lifters reach
+// Warm-up (mobility + med ball) the same way. No tab bar.
 // Athlete-facing rule (Bobby): blank rows he leaves empty in the editor never
 // reach the athlete — only items with real content render, and a block with
 // no real items doesn't appear at all.
@@ -2376,7 +2374,8 @@ function programPage(user, p, opts) {
   const meta = [prog.date_range, prog.phase_emphasis].filter(Boolean).map(esc).join(' · ');
   const progNotes = Array.isArray(prog.notes) ? prog.notes.filter(Boolean) : [];
 
-  // Sub-tab nav: MOBILITY -> MED BALL -> HITTING -> LIFTING (only what he has).
+  // Training-block nav (Bobby Sep 24 2026): mobility / med ball / lifting
+  // only. The hitting document is this page, not a tab.
   const tabHtml = `<nav class="prog-subtabs">${tabs
     .map(
       (t) =>
@@ -5145,9 +5144,6 @@ function mobilityPage(user, p, opts) {
   if (o.todaysMedball) {
     blocks.medball = o.todaysMedball;
   }
-  const tabBar = tabs.length > 1 ? `<div class="prog-tabs">${tabs.map(t =>
-    `<a href="/program?sub=${t.id}" class="prog-tab${t.id === 'mobility' ? ' active' : ''}">${esc(t.label)}</a>`
-  ).join('')}</div>` : '';
   const renderBlock = (b) => {
     const items = (b.items || []).map(it =>
       `<div class="mob-row"><span class="mob-name">${esc(it.drill || '')}</span><span class="mob-vol">${esc(it.volume || '')}</span></div>`
@@ -5162,6 +5158,7 @@ function mobilityPage(user, p, opts) {
     body: `<div class="doc-page">
       <div class="doc-header"><div class="doc-logo">ATKINSON<br>HITTING</div></div>
       <h1 class="doc-sec-title">Warm-up & Med Ball - ${esc(athleteName)}</h1>
+      <p style="text-align:center;margin:-8px 0 16px"><a href="/program/hitting-plan" style="color:#666;font-size:14px">‹ Hitting Program</a></p>
       <p style="text-align:center;margin-bottom:20px"><a href="/program/mobility-workout" class="btn" style="display:inline-block;text-decoration:none;padding:12px 24px;background:#111;color:#fff;border-radius:8px;font-weight:700">▶ Start Workout</a></p>
       ${mobilityHtml}
       ${medballHtml}
@@ -5199,6 +5196,12 @@ function hittingPlanPage(user, p, opts) {
   // button to their lifting program.
   const liftBtn = tabs.some((t) => t.id === 'lifting')
     ? `<p style="text-align:center;margin-bottom:20px"><a href="/program/lifting" class="btn" style="display:inline-block;text-decoration:none;padding:12px 24px;background:#111;color:#fff;border-radius:8px;font-weight:700">💪 Lifting Program</a></p>`
+    : '';
+  // Bobby (Sep 24 2026): non-lifters get a button to their Warm-up page
+  // (mobility + med ball). No tab bar — training blocks are reached from
+  // the document, not presented as tabs next to it.
+  const warmBtn = tabs.some((t) => t.id === 'mobility' || t.id === 'medball')
+    ? `<p style="text-align:center;margin-bottom:20px"><a href="/program/mobility" class="btn" style="display:inline-block;text-decoration:none;padding:12px 24px;background:#111;color:#fff;border-radius:8px;font-weight:700">▶ Warm-up</a></p>`
     : '';
 
   // === EVAL: Hitting Evaluation Report (Bobby's template, Sep 23 2026) ===
@@ -5301,7 +5304,7 @@ function hittingPlanPage(user, p, opts) {
     title: 'Hitting Program',
     user,
     tabs: userTabs('program', user),
-    body: `${liftBtn}<div class="doc-page">
+    body: `${liftBtn}${warmBtn}<div class="doc-page">
       <div class="doc-header">
         <div class="doc-logo">ATKINSON<br>HITTING</div>
         <div class="doc-title-wrap">

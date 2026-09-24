@@ -2385,7 +2385,7 @@ app.get('/program', requireLogin, requireWaiver, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
   if (!req.user.remoteProgramId) return res.redirect('/');
   const sub = String(req.query.sub || 'hitting');
-  // Bobby (Sep 23 2026): Program tab defaults to hitting document (which has Mobility/Hitting tabs).
+  // Bobby (Sep 24 2026): Program tab defaults to the hitting document.
   // ?sub=mobility goes to the mobility page.
   if (sub === 'mobility') {
     return res.redirect('/program/mobility');
