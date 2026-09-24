@@ -20,6 +20,7 @@ const data = require('./data');
 const views = require('./views');
 const brain = require('./brain');
 const videoLinks = require('./video_links');
+const { envById } = require('./env_lib');
 const { seedUsers, writeCredentialsFile, userCount } = require('./seed');
 
 // Bobby's own organization — his 4 remote hitters, Talk to Skip on, free
@@ -2291,17 +2292,49 @@ function syncProgramsFromSheets() {
       if (sheet.adjustment) progJson.adjustment = sheet.adjustment;
       if (sheet.phase_emphasis) progJson.phase_emphasis = sheet.phase_emphasis;
       if (sheet.mental_framework) progJson.mental_framework = sheet.mental_framework;
-      if (sheet.days) {
-        // Map sheet days -> routine blocks
-        // Bobby (Sep 23 2026): days use 'section', not 'category'
-        progJson.routine = sheet.days.map(d => ({
-          category: d.category || d.section || '',
-          items: (d.items || []).map(it => ({
+      if (sheet.days || sheet.routine) {
+        // Map sheet blocks -> routine.
+        // Bobby (Sep 24 2026): the program is the same every training day —
+        // Day 1/2/3 grouping is gone except for med ball, which keeps its
+        // Day 1/2/3 titles so the app rotates it daily (todaysMedballBlocks).
+        const routineBlocks = [];
+        const seenCat = new Set();
+        const pushBlock = (b, keepTitle) => {
+          const items = (b.items || []).map((it) => ({
             drill: it.drill || '',
             volume: it.volume || '',
-            note: it.note || ''
-          }))
-        }));
+            note: it.note || '',
+          }));
+          // Bobby's rule: blocks with no real items (blank rows he left
+          // empty) don't exist for the athlete.
+          if (!items.some((it) => String(it.drill || '').trim())) return;
+          const blk = { category: b.category || b.section || '', items };
+          if (keepTitle && b.title) blk.title = b.title;
+          routineBlocks.push(blk);
+        };
+        if (Array.isArray(sheet.routine)) {
+          for (const b of sheet.routine) {
+            const cat = b.category || b.section || '';
+            if (seenCat.has(cat)) continue;
+            seenCat.add(cat);
+            pushBlock(b, false);
+          }
+        }
+        if (Array.isArray(sheet.days)) {
+          for (const d of sheet.days) {
+            const sec = String(d.category || d.section || '');
+            const isMed = /med\s*ball/i.test(sec);
+            const isPregame = /pregame/i.test(String(d.title || ''));
+            if (!isMed && !isPregame) {
+              // Stale shape fallback: day-grouped non-med blocks dedupe to one.
+              const cat = d.category || d.section || '';
+              if (seenCat.has(cat)) continue;
+              seenCat.add(cat);
+            }
+            pushBlock(d, isMed || isPregame);
+          }
+        }
+        if (routineBlocks.length) progJson.routine = routineBlocks;
       }
       // Bobby (Sep 23 2026): preserve top-level mobility from sheets
       if (sheet.mobility && !progJson.mobility) {
@@ -2454,7 +2487,9 @@ app.get('/program/hitting-plan', requireLogin, requireWaiver, (req, res) => {
   if (!p) return res.redirect('/');
   // Lazy-backfill: if no hitting_plan yet OR version is stale, (re)generate from routine blocks.
   // Bobby (Sep 23 2026): stored plans don't auto-update when the builder changes — version check forces it.
-  if (!p.prog.hitting_plan || p.prog.hitting_plan._v !== HITTING_PLAN_VERSION) {
+  // Bobby (Sep 24 2026): NEVER regenerate a coach-customized plan — the backfill
+  // previously wiped coach edits on next view because saves didn't stamp _v.
+  if (!p.prog.hitting_plan || (p.prog.hitting_plan._v !== HITTING_PLAN_VERSION && !p.prog.hitting_plan._custom)) {
     p.prog.hitting_plan = buildHittingPlan(p.prog);
     db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?')
       .run(JSON.stringify(p.prog), new Date().toISOString(), p.id);
@@ -4045,6 +4080,14 @@ app.get('/coach/program/:id/hitting-plan', requireCoach, (req, res) => {
   const p = getProgram(req.params.id);
   if (!p) return res.redirect('/coach/programs');
   if (!p.prog.hitting_plan) p.prog.hitting_plan = buildHittingPlan(p.prog);
+  // Bobby (Sep 24 2026): plans saved before the environment picker existed may
+  // have no environments (the old POST wiped them). Pre-fill the picker from
+  // the sheet auto-collect — transient, not persisted — so a save keeps them.
+  const _hp = p.prog.hitting_plan;
+  if ((!_hp.environments || !_hp.environments.length) && !_hp.environments_custom) {
+    try { _hp._auto_env_names = buildHittingPlan(p.prog).environments || []; }
+    catch (e) { _hp._auto_env_names = []; }
+  }
   res.send(views.hittingPlanEditPage(req.user, p));
 });
 
@@ -4052,8 +4095,10 @@ app.post('/coach/program/:id/hitting-plan', requireCoach, (req, res) => {
   const p = getProgram(req.params.id);
   if (!p) return res.redirect('/coach/programs');
   const b = req.body || {};
+  const oldPlan = (p.prog && p.prog.hitting_plan) || {};
   const plan = {
     _custom: true, // Bobby (Sep 23 2026): coach edit — sheet sync must preserve this
+    _v: HITTING_PLAN_VERSION, // Bobby (Sep 24 2026): saved plans must not trip the lazy backfill
     environments_note: String(b.environments_note || '').trim(),
     env_variations: String(b.env_variations || '').trim(),
     warmup: [],
@@ -4088,6 +4133,26 @@ app.post('/coach/program/:id/hitting-plan', requireCoach, (req, res) => {
       volume: String(b[`m_volume_${i}`] || '').trim(),
       cues: String(b[`m_cues_${i}`] || '').trim(),
     });
+  }
+  // Training environments picker (Bobby, Sep 24 2026): checked library
+  // environments + free-text others become the plan's environment list.
+  // Previously the POST rebuilt the plan without `environments`, silently
+  // wiping the Training Environments section on every coach save.
+  if (b.env_picker) {
+    const rawIds = b.env_ids === undefined ? [] : (Array.isArray(b.env_ids) ? b.env_ids : [b.env_ids]);
+    const pickedIds = rawIds.map((x) => String(x)).filter((id) => envById(id));
+    const others = String(b.env_other || '').split('\n').map((s) => s.trim()).filter(Boolean);
+    plan.environments_custom = pickedIds;
+    plan.environments_other = others;
+    plan.environments = [
+      ...pickedIds.map((id) => envById(id).name),
+      ...others,
+    ];
+  } else {
+    // Form without the picker (shouldn't happen) — preserve whatever was there.
+    plan.environments = oldPlan.environments || [];
+    if (oldPlan.environments_custom) plan.environments_custom = oldPlan.environments_custom;
+    if (oldPlan.environments_other) plan.environments_other = oldPlan.environments_other;
   }
   p.prog.hitting_plan = plan;
   db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?')
@@ -8051,6 +8116,69 @@ app.post('/api/remote-programs/extend-month', (req, res) => {
     progId
   );
   res.json({ athlete_name: row.athlete_name, old_range: oldRange, new_range: newRange });
+});
+
+// POST /api/remote-programs/link — link a signed-up athlete to their remote
+// program (and to the Remote Development org when they're orgless).
+// Body: { "athlete": "<name>" }. Auth: SKIP_API_KEY (x-api-key header or ?key=).
+// Name matching mirrors the boot backfill (first + last, case-insensitive),
+// with a loose fallback when the signup name doesn't match exactly.
+// Returns { ok, email, status, program, org_joined, already_linked }.
+// 400 = missing athlete, 401 = bad key, 404 = no program or no account.
+app.post('/api/remote-programs/link', (req, res) => {
+  if (!checkApiKey(req, res)) return;
+  const name = String((req.body || {}).athlete || '').trim();
+  if (!name) return res.status(400).json({ error: 'athlete is required' });
+  const progId = remoteProgramForName(name);
+  if (!progId) return res.status(404).json({ error: 'no remote program for athlete' });
+  const prog = db.prepare('SELECT athlete_name FROM remote_programs WHERE id = ?').get(progId);
+  const target = name.toLowerCase();
+  const athletes = db
+    .prepare(
+      `SELECT id, email, first_name, last_name, status, remote_program_id, organization_id
+       FROM users WHERE role = 'athlete'`
+    )
+    .all();
+  const full = (u) => `${u.first_name || ''} ${u.last_name || ''}`.trim().toLowerCase();
+  let user = athletes.find((u) => full(u) === target);
+  if (!user) {
+    // Loose fallback: same first name and last name contained (handles
+    // middle names, suffixes, "Sam"/"Samuel" style mismatches).
+    const parts = target.split(/\s+/);
+    const cands = athletes.filter((u) => {
+      const f = full(u);
+      return f.startsWith(parts[0] + ' ') && parts.slice(1).every((p) => f.includes(p));
+    });
+    if (cands.length === 1) user = cands[0];
+    else {
+      return res.status(404).json({
+        error: 'no athlete account matching name',
+        candidates: cands.map((u) => u.email),
+      });
+    }
+  }
+  const alreadyLinked = user.remote_program_id === progId;
+  if (!alreadyLinked) {
+    db.prepare('UPDATE users SET remote_program_id = ? WHERE id = ?').run(progId, user.id);
+  }
+  let orgJoined = false;
+  if (!user.organization_id) {
+    const org = db
+      .prepare("SELECT id FROM organizations WHERE LOWER(name) = 'atkinson hitting remote development'")
+      .get();
+    if (org) {
+      db.prepare('UPDATE users SET organization_id = ? WHERE id = ?').run(org.id, user.id);
+      orgJoined = true;
+    }
+  }
+  res.json({
+    ok: true,
+    email: user.email,
+    status: user.status,
+    program: prog.athlete_name,
+    org_joined: orgJoined,
+    already_linked: alreadyLinked,
+  });
 });
 
 // ---- Talk to Skip (AI chat) ----

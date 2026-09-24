@@ -5189,6 +5189,9 @@ function hittingPlanPage(user, p, opts) {
   const plan = prog.hitting_plan || {};
   const athleteName = (p && p.athlete_name) || prog.athlete || 'Hitter';
   const o = opts || {};
+  // Bobby (Sep 24 2026): environment descriptions from his Training
+  // Environment Library — conditions, not drills.
+  const envLib = require('./env_lib');
   // Bobby (Sep 23 2026): tab navigation for Mobility/Hitting
   const tabs = o.tabs || [];
   const activeSub = o.sub || 'hitting';
@@ -5259,11 +5262,18 @@ function hittingPlanPage(user, p, opts) {
     : '';
 
   // Training environments at the bottom — conditions, not drills.
+  // Bobby (Sep 24 2026): each environment shows his library description when
+  // the name matches; unmatched names render plain (never invent a description).
   const envs = Array.isArray(plan.environments) ? plan.environments.filter(Boolean) : [];
   const envHtml = envs.length
     ? `<hr class="doc-rule">
        <h1 class="doc-sec-title">Training Environments</h1>
-       <ul class="std-list">${envs.map((e) => `<li>${esc(e)}</li>`).join('')}</ul>
+       <ul class="std-list">${envs.map((e) => {
+         const nm = typeof e === 'string' ? e : (e && e.name) || '';
+         const entry = envLib.findEnvEntry(nm);
+         const desc = entry ? entry.description : (e && typeof e === 'object' && e.desc) || '';
+         return `<li><strong>${esc(nm)}</strong>${desc ? `<br><span class="env-desc">${esc(desc)}</span>` : ''}</li>`;
+       }).join('')}</ul>
        <p class="env-note">These aren't drills &mdash; they're conditions. Run your drills above in these environments to make the work game-like.</p>`
     : '';
 
@@ -5351,6 +5361,37 @@ function hittingPlanEditPage(user, p) {
   const warmup = Array.isArray(plan.warmup) ? plan.warmup : [];
   const drills = Array.isArray(plan.drills) ? plan.drills : [];
 
+  // Bobby (Sep 24 2026): environment picker state. Explicit picks win;
+  // otherwise pre-fill from the saved plan (or the sheet auto-collect for
+  // plans saved before the picker existed).
+  const envLib = require('./env_lib');
+  const _envNames = (Array.isArray(plan.environments) && plan.environments.length
+    ? plan.environments
+    : (plan._auto_env_names || [])
+  ).map((e) => (typeof e === 'string' ? e : (e && e.name) || '')).filter(Boolean);
+  const _pickedIds = new Set(
+    Array.isArray(plan.environments_custom)
+      ? plan.environments_custom.map(String)
+      : _envNames.map((nm) => { const en = envLib.findEnvEntry(nm); return en ? en.id : null; }).filter(Boolean)
+  );
+  const _otherEnvs = Array.isArray(plan.environments_other)
+    ? plan.environments_other
+    : _envNames.filter((nm) => !envLib.findEnvEntry(nm));
+  const envPickerHtml = `
+      <h3>Training Environments</h3>
+      <p class="hint-inline">Tap the environments for his program. Descriptions come from your library.</p>
+      <div class="env-picker">
+        ${envLib.ENV_LIST.map((e) => `
+        <label class="env-pick">
+          <input type="checkbox" name="env_ids" value="${esc(e.id)}"${_pickedIds.has(e.id) ? ' checked' : ''}>
+          <span class="env-pick-body"><strong>${esc(e.name)}</strong><span class="env-pick-desc">${esc(e.description)}</span></span>
+        </label>`).join('')}
+      </div>
+      <input type="hidden" name="env_picker" value="1">
+      <label class="fld">Other environments (one per line — anything not in the library)
+        <textarea name="env_other" rows="3" placeholder="e.g. Game Swings">${esc(_otherEnvs.join('\n'))}</textarea>
+      </label>`;
+
   const warmupRows = warmup.map((w, i) => `
     <div class="plan-row">
       <input type="text" name="w_name_${i}" value="${esc(w.name || '')}" placeholder="Prep movement" maxlength="100">
@@ -5410,6 +5451,7 @@ function hittingPlanEditPage(user, p) {
       <label class="fld">Training environments note (leave blank for the standard explainer)
         <textarea name="environments_note" rows="6" placeholder="Custom note, or blank for default...">${esc(plan.environments_note || '')}</textarea>
       </label>
+      ${envPickerHtml}
       <h3>Warmup — Prep Work</h3>
       <p class="hint-inline">Bobby's prep work for them. Demos live in the Remote library.</p>
       ${warmupRows}${warmupBlanks}
@@ -5433,6 +5475,12 @@ function hittingPlanEditPage(user, p) {
       .plan-drill { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; padding: 10px; background: #f9f9f9; border-radius: 6px; }
       .plan-drill input { padding: 8px; }
       .plan-drill .drill-name { grid-column: 1 / -1; font-weight: 600; }
+      .env-picker { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 4px; }
+      .env-pick { display: flex; gap: 10px; align-items: flex-start; padding: 10px; background: #f9f9f9; border-radius: 8px; cursor: pointer; }
+      .env-pick input { margin-top: 3px; width: 18px; height: 18px; flex-shrink: 0; }
+      .env-pick-body { display: flex; flex-direction: column; gap: 2px; }
+      .env-pick-desc { font-size: 13px; color: #555; line-height: 1.4; }
+      .env-desc { font-size: 14px; color: #444; }
     </style>`,
   });
 }
