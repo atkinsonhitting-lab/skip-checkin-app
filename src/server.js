@@ -2445,20 +2445,26 @@ app.get('/program/mobility-workout', requireLogin, requireWaiver, (req, res) => 
   if (!p) return res.redirect('/');
   const blocks = splitProgramBlocks(p);
   const today = chiToday();
-  // Bobby (Sep 23 2026): mobility exercise video links from drill registry
-  let mobilityVideos = {};
+  // Bobby (Sep 24 2026): exercise video links from the repo-bundled map
+  // (src/exercise_videos.json) — the workspace registry is not on Render.
+  let mobilityVideos = {}, medballVideos = {};
   try {
     const fs = require('fs');
     const path = require('path');
-    const regPath = path.join(__dirname, '..', 'atkinson-hitting', 'programs', 'drill_links.json');
-    // Try workspace path first, then local
-    const wsPath = '/home/hatch/workspace/atkinson-hitting/programs/drill_links.json';
-    const rp = fs.existsSync(wsPath) ? wsPath : regPath;
-    if (fs.existsSync(rp)) {
-      const reg = JSON.parse(fs.readFileSync(rp, 'utf8'));
-      mobilityVideos = reg.mobility_youtube || {};
+    const evPath = path.join(__dirname, 'exercise_videos.json');
+    if (fs.existsSync(evPath)) {
+      const ev = JSON.parse(fs.readFileSync(evPath, 'utf8'));
+      mobilityVideos = ev.mobility_youtube || {};
+      medballVideos = ev.medball_youtube || {};
     }
   } catch (e) { /* no videos */ }
+  const normName = (n) => String(n || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const findVideo = (map, name) => {
+    if (map[name]) return map[name];
+    const nn = normName(name);
+    for (const k of Object.keys(map)) if (normName(k) === nn) return map[k];
+    return null;
+  };
   // Build flat list of mobility + medball exercises
   const exercises = [];
   for (const b of blocks.mobility) {
@@ -2470,7 +2476,7 @@ app.get('/program/mobility-workout', requireLogin, requireWaiver, (req, res) => 
         volume: it.volume || '',
         type: 'mobility',
         key,
-        video: mobilityVideos[it.drill] || null,
+        video: findVideo(mobilityVideos, it.drill),
         last: lastLiftLog(req.user.id, key, today),
         history: liftHistory(req.user.id, key, 8),
       });
@@ -2487,7 +2493,7 @@ app.get('/program/mobility-workout', requireLogin, requireWaiver, (req, res) => 
         volume: it.volume || '',
         type: 'medball',
         key,
-        video: null, // Med ball videos come from drill registry
+        video: findVideo(medballVideos, it.drill),
         last: lastLiftLog(req.user.id, key, today),
         history: liftHistory(req.user.id, key, 8),
       });
