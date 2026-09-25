@@ -1683,6 +1683,53 @@ CREATE TABLE IF NOT EXISTS settings (
     }
   }
 
+  // Mixed BP off every program (Bobby, Sep 25 2026): "Why is mixed BP on
+  // every hitters program w no explanation" / "Take it out". It was in
+  // default_ids, so it auto-appended to all hitters. Take it out of the
+  // defaults and strip it off every saved program. The library entry stays
+  // so he can re-add it per-hitter later. Runs once.
+  {
+    const done = db.prepare("SELECT value FROM settings WHERE key = 'mixed_bp_off_programs_v1'").get();
+    if (!done) {
+      const now = new Date().toISOString();
+      if (envLib.DEFAULT_IDS.includes('mixed-bp')) {
+        envLib.saveEnvLib({
+          environments: envLib.ENV_LIST.map((e) => ({ ...e })),
+          default_ids: envLib.DEFAULT_IDS.filter((d) => d !== 'mixed-bp'),
+        });
+        console.log('Env library: removed mixed-bp from default_ids.');
+      }
+      let touched = 0;
+      const rows = db.prepare('SELECT id, program_json FROM remote_programs').all();
+      for (const r of rows) {
+        let prog = null;
+        try { prog = JSON.parse(r.program_json || '{}'); } catch (e) { continue; }
+        const hp = prog.hitting_plan;
+        if (!hp) continue;
+        let changed = false;
+        if (Array.isArray(hp.environments_custom) && hp.environments_custom.map(String).includes('mixed-bp')) {
+          hp.environments_custom = hp.environments_custom.map(String).filter((x) => x !== 'mixed-bp');
+          hp.environments = [
+            ...hp.environments_custom.map((x) => { const e = envLib.envById(x); return e ? e.name : null; }).filter(Boolean),
+            ...(Array.isArray(hp.environments_other) ? hp.environments_other : []),
+          ];
+          changed = true;
+        } else if (Array.isArray(hp.environments) && hp.environments.includes('Mixed BP')) {
+          hp.environments = hp.environments.filter((n) => n !== 'Mixed BP');
+          changed = true;
+        }
+        if (changed) {
+          hp._custom = true; // keep the lazy backfill from rebuilding and re-adding defaults
+          db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?')
+            .run(JSON.stringify(prog), now, r.id);
+          touched++;
+        }
+      }
+      db.prepare("INSERT INTO settings (key, value) VALUES ('mixed_bp_off_programs_v1', '1')").run();
+      console.log(`Env migration: removed Mixed BP from ${touched} program(s).`);
+    }
+  }
+
   // Hitting-plan eval repair (Bobby, Sep 24 2026): "Still don't see Dylan's
   // eval." The old hitting-plan editor POST rebuilt the plan without the
   // eval fields, wiping grades/strengths/need from saved plans (the doc
