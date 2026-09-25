@@ -1689,6 +1689,7 @@ CREATE TABLE IF NOT EXISTS settings (
   // defaults and strip it off every saved program. The library entry stays
   // so he can re-add it per-hitter later. Runs once.
   {
+    const envLib = require('./env_lib');
     const done = db.prepare("SELECT value FROM settings WHERE key = 'mixed_bp_off_programs_v1'").get();
     if (!done) {
       const now = new Date().toISOString();
