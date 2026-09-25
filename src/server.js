@@ -4409,6 +4409,20 @@ app.post('/coach/training-environments', requireCoach, (req, res) => {
       const [e] = list.splice(idx, 1);
       list.splice(j, 0, e);
     }
+  } else if (action === 'reorder') {
+    // Bobby (Sep 25 2026): drag-to-reorder posts the full id order.
+    const ids = String(b.order || '').split(',').map((s) => s.trim()).filter(Boolean);
+    if (ids.length) {
+      const byId = new Map(list.map((e) => [e.id, e]));
+      const next = [];
+      for (const id of ids) {
+        const e = byId.get(id);
+        if (e) { next.push(e); byId.delete(id); }
+      }
+      for (const e of list) if (byId.has(e.id)) next.push(e); // safety: keep unlisted ids
+      list.length = 0;
+      next.forEach((e) => list.push(e));
+    }
   }
   // A deleted environment comes out of default_ids too, so a stale id can
   // never be re-appended to a hitter's program by a later migration.
@@ -4419,6 +4433,7 @@ app.post('/coach/training-environments', requireCoach, (req, res) => {
   // Propagate AFTER the save so name recomputes resolve against the new list.
   if (renamed) propagateEnvRename(renamed.oldName, renamed.newName);
   if (deleted) propagateEnvDelete(deleted.id, deleted.name);
+  if (String(b.ajax || '') === '1') return res.json({ ok: true });
   res.redirect('/coach/training-environments?saved=1');
 });
 

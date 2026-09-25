@@ -5874,7 +5874,8 @@ function trainingEnvironmentsPage(user, programs, lib, saved) {
   const headCells = programs.map((pr) => `<th>${esc(firstName(pr.athlete_name))}</th>`).join('');
   // Library editor: add form + per-entry edit/delete, every explanation shown.
   const libRows = envs.map((e) => `
-    <div class="card lib-entry">
+    <div class="card lib-entry" data-env-id="${esc(e.id)}">
+      <div class="drag-handle" title="Drag to reorder"><span aria-hidden="true">⋮⋮</span><span class="drag-hint">drag</span></div>
       <form method="post" action="/coach/training-environments" class="form" style="margin:0">
         <input type="hidden" name="action" value="update">
         <input type="hidden" name="id" value="${esc(e.id)}">
@@ -5888,12 +5889,6 @@ function trainingEnvironmentsPage(user, programs, lib, saved) {
         <input type="hidden" name="action" value="delete">
         <input type="hidden" name="id" value="${esc(e.id)}">
         <button type="submit" class="btn-small btn-quiet">Delete</button>
-      </form>
-      <form method="post" action="/coach/training-environments" style="margin:8px 0 0;display:flex;gap:8px" aria-label="Reorder">
-        <input type="hidden" name="action" value="move">
-        <input type="hidden" name="id" value="${esc(e.id)}">
-        <button type="submit" name="dir" value="up" class="btn-small btn-quiet" aria-label="Move up">↑</button>
-        <button type="submit" name="dir" value="down" class="btn-small btn-quiet" aria-label="Move down">↓</button>
       </form>
     </div>`).join('');
   return layout({
@@ -5920,7 +5915,108 @@ function trainingEnvironmentsPage(user, programs, lib, saved) {
         <button type="submit" class="btn-small">Add environment</button>
       </form>
     </div>
-    ${libRows}
+    ${libRows ? `<div id="env-lib-list">${libRows}</div>
+    <div id="env-reorder-saved" class="card" style="display:none;border-color:var(--ok);margin-top:12px"><strong>Saved.</strong> New order is live.</div>` : ''}
+    <script>
+    // Bobby (Sep 25 2026): drag-to-reorder for the environment library.
+    // Pointer Events (not HTML5 DnD) so it works with touch on iPhone.
+    (function () {
+      var list = document.getElementById('env-lib-list');
+      if (!list) return;
+      var savedNote = document.getElementById('env-reorder-saved');
+      var saveTimer = null;
+      function showSaved() {
+        if (!savedNote) return;
+        savedNote.style.display = '';
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(function () { savedNote.style.display = 'none'; }, 2500);
+      }
+      function currentOrder() {
+        return Array.prototype.map.call(
+          list.querySelectorAll('.lib-entry'),
+          function (el) { return el.getAttribute('data-env-id'); }
+        ).filter(Boolean);
+      }
+      var baseline = currentOrder().join(',');
+      function saveOrder() {
+        var order = currentOrder();
+        if (order.join(',') === baseline) return;
+        baseline = order.join(',');
+        var body = new URLSearchParams();
+        body.append('action', 'reorder');
+        body.append('ajax', '1');
+        body.append('order', order.join(','));
+        fetch('/coach/training-environments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+          body: body.toString(),
+          credentials: 'same-origin'
+        }).then(function (r) { return r.json(); }).then(function (d) {
+          if (d && d.ok) showSaved(); else location.reload();
+        }).catch(function () { location.reload(); });
+      }
+      var dragEl = null, placeholder = null, grabDY = 0, activePointer = null;
+      function moveCard(x, y) {
+        dragEl.style.top = (y - grabDY) + 'px';
+        var under = document.elementFromPoint(x, y);
+        var over = under && under.closest ? under.closest('.lib-entry') : null;
+        if (over && over !== dragEl) {
+          var r = over.getBoundingClientRect();
+          var before = (y < r.top + r.height / 2);
+          if (before) over.parentNode.insertBefore(placeholder, over);
+          else over.parentNode.insertBefore(placeholder, over.nextSibling);
+        }
+      }
+      function onPointerMove(e) {
+        if (!dragEl || e.pointerId !== activePointer) return;
+        e.preventDefault();
+        moveCard(e.clientX, e.clientY);
+      }
+      function onPointerUp(e) {
+        var h = e.target && e.target.closest ? e.target.closest('.drag-handle') : null;
+        if (h) h.removeEventListener('pointermove', onPointerMove);
+        if (!dragEl) return;
+        placeholder.parentNode.insertBefore(dragEl, placeholder);
+        placeholder.remove();
+        dragEl.classList.remove('env-dragging');
+        dragEl.style.position = '';
+        dragEl.style.left = '';
+        dragEl.style.top = '';
+        dragEl.style.width = '';
+        dragEl.style.marginTop = '';
+        dragEl.style.pointerEvents = '';
+        dragEl = null; placeholder = null; activePointer = null;
+        saveOrder();
+      }
+      list.addEventListener('pointerdown', function (e) {
+        var handle = e.target && e.target.closest ? e.target.closest('.drag-handle') : null;
+        if (!handle || !list.contains(handle)) return;
+        var card = handle.closest('.lib-entry');
+        if (!card) return;
+        e.preventDefault();
+        dragEl = card;
+        activePointer = e.pointerId;
+        try { handle.setPointerCapture(e.pointerId); } catch (err) {}
+        var rect = card.getBoundingClientRect();
+        grabDY = e.clientY - rect.top;
+        placeholder = document.createElement('div');
+        placeholder.className = 'env-drop-placeholder';
+        placeholder.style.height = rect.height + 'px';
+        card.parentNode.insertBefore(placeholder, card);
+        card.classList.add('env-dragging');
+        card.style.position = 'fixed';
+        card.style.left = rect.left + 'px';
+        card.style.top = rect.top + 'px';
+        card.style.width = rect.width + 'px';
+        card.style.marginTop = '0';
+        card.style.pointerEvents = 'none';
+        moveCard(e.clientX, e.clientY);
+        handle.addEventListener('pointermove', onPointerMove);
+        handle.addEventListener('pointerup', onPointerUp, { once: true });
+        handle.addEventListener('pointercancel', onPointerUp, { once: true });
+      });
+    })();
+    </script>
     <style>
       .mx-wrap { overflow-x: auto; margin: 0 -16px; padding: 0 16px; }
       .mx-table { border-collapse: collapse; min-width: 100%; }
@@ -5931,7 +6027,12 @@ function trainingEnvironmentsPage(user, programs, lib, saved) {
       .mx-desc { font-size: 12px; color: var(--muted); margin-top: 2px; line-height: 1.4; }
       .mx-cell { text-align: center; }
       .mx-cell input { width: 22px; height: 22px; accent-color: var(--red); }
-      .lib-entry { margin-top: 12px; }
+      .lib-entry { margin-top: 12px; position: relative; }
+      .drag-handle { position: absolute; top: 6px; right: 8px; min-width: 56px; height: 44px; display: flex; align-items: center; justify-content: center; gap: 4px; font-size: 18px; letter-spacing: 2px; color: var(--muted); cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+      .drag-handle:active { cursor: grabbing; }
+      .drag-handle .drag-hint { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; }
+      .lib-entry.env-dragging { opacity: 0.96; box-shadow: 0 12px 32px rgba(0,0,0,.35); z-index: 60; }
+      .env-drop-placeholder { border: 2px dashed var(--muted); border-radius: 8px; margin-top: 12px; }
     </style>`,
   });
 }
