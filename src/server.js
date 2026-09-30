@@ -8161,9 +8161,18 @@ app.post('/coach/user/:email/delete', requireCoach, (req, res) => {
   try {
     const em = (req.params.email || '').toLowerCase();
     const user = db
-      .prepare("SELECT id FROM users WHERE email = ? AND role != 'coach'")
+      .prepare("SELECT id, remote_program_id FROM users WHERE email = ? AND role != 'coach'")
       .get(em);
-    if (user) deleteHitter(user.id);
+    if (user) {
+      // Take their remote program with them (nobody else is linked to it).
+      if (user.remote_program_id) {
+        const others = db
+          .prepare('SELECT COUNT(*) AS n FROM users WHERE remote_program_id = ? AND id != ?')
+          .get(user.remote_program_id, user.id).n;
+        if (!others) db.prepare('DELETE FROM remote_programs WHERE id = ?').run(user.remote_program_id);
+      }
+      deleteHitter(user.id);
+    }
     res.redirect('/coach');
   } catch (e) {
     // Never 500 silently: surface the reason so the coach UI (or automation)
@@ -8180,13 +8189,17 @@ function deleteHitter(userId) {
   // Hardened Sep 30 2026: the delete 500'd in production while working on a
   // fresh DB, so guard each table (exists + has user_id) and keep going past
   // any single-table failure instead of aborting the whole delete.
+  // NOTE: node:sqlite enforces FOREIGN KEYs, so every table with
+  // REFERENCES users(id) must be emptied here or the final users DELETE
+  // fails with "FOREIGN KEY constraint failed". The mental/intake/notebook
+  // tables were missing from this list — that was the production 500.
   let tables = [];
   try {
     tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r) => r.name);
   } catch (e) {
     console.error('deleteHitter: could not list tables:', e.message);
   }
-  for (const t of ['chat_messages', 'checkins', 'routine_drills', 'password_reset_tokens', 'hitter_memory', 'learning_notes', 'study_players', 'pre_checkins', 'push_subscriptions', 'mental_keys', 'mental_baseline', 'user_subscriptions']) {
+  for (const t of ['chat_messages', 'checkins', 'routine_drills', 'password_reset_tokens', 'hitter_memory', 'learning_notes', 'study_players', 'pre_checkins', 'push_subscriptions', 'mental_keys', 'mental_baseline', 'user_subscriptions', 'notebook_reads', 'mental_daily_done', 'mental_card_done', 'mental_routines', 'mental_answers', 'intake_responses', 'message_recipients', 'program_checkoffs']) {
     try {
       if (!tables.includes(t)) continue;
       const cols = db.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name);
