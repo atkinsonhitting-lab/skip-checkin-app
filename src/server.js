@@ -8158,20 +8158,43 @@ app.get('/coach/user/:email/delete', requireCoach, (req, res) => {
 });
 
 app.post('/coach/user/:email/delete', requireCoach, (req, res) => {
-  const em = (req.params.email || '').toLowerCase();
-  const user = db
-    .prepare("SELECT id FROM users WHERE email = ? AND role != 'coach'")
-    .get(em);
-  if (user) deleteHitter(user.id);
-  res.redirect('/coach');
+  try {
+    const em = (req.params.email || '').toLowerCase();
+    const user = db
+      .prepare("SELECT id FROM users WHERE email = ? AND role != 'coach'")
+      .get(em);
+    if (user) deleteHitter(user.id);
+    res.redirect('/coach');
+  } catch (e) {
+    // Never 500 silently: surface the reason so the coach UI (or automation)
+    // can report it instead of a blank Internal Server Error.
+    console.error('delete hitter failed:', e && e.message);
+    res.redirect('/coach?delete_error=' + encodeURIComponent((e && e.message) || 'unknown'));
+  }
 });
 
 // Remove a hitter and everything they created: check-ins, chats, routine, tokens.
 function deleteHitter(userId) {
   // Every user-scoped table must go — including pre_checkins (Bobby's rule:
   // a deleted hitter leaves nothing behind).
+  // Hardened Sep 30 2026: the delete 500'd in production while working on a
+  // fresh DB, so guard each table (exists + has user_id) and keep going past
+  // any single-table failure instead of aborting the whole delete.
+  let tables = [];
+  try {
+    tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r) => r.name);
+  } catch (e) {
+    console.error('deleteHitter: could not list tables:', e.message);
+  }
   for (const t of ['chat_messages', 'checkins', 'routine_drills', 'password_reset_tokens', 'hitter_memory', 'learning_notes', 'study_players', 'pre_checkins', 'push_subscriptions', 'mental_keys', 'mental_baseline', 'user_subscriptions']) {
-    db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(userId);
+    try {
+      if (!tables.includes(t)) continue;
+      const cols = db.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name);
+      if (!cols.includes('user_id')) continue;
+      db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(userId);
+    } catch (e) {
+      console.error(`deleteHitter: skipping ${t}:`, e.message);
+    }
   }
   db.prepare('DELETE FROM users WHERE id = ?').run(userId);
 }
