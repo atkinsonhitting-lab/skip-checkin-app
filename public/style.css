@@ -554,6 +554,16 @@ a.btn-ghost { text-decoration: none; display: inline-block; }
 .grade-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .grade-chip { background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; font-size: 14px; }
 .grade-chip strong { margin-right: 6px; }
+/* Item tags (Oct 2026): small chips after the volume on athlete rows. */
+.tag-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 6px; vertical-align: middle; }
+.tag-chip { background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 1px 7px; font-size: 11px; color: var(--muted); }
+/* Program editor: structured item rows (Oct 2026) — one row per drill. */
+.prog-item-row { display: grid; grid-template-columns: 1fr 110px; gap: 6px; margin-bottom: 8px; }
+.prog-item-row .fld { margin-bottom: 0; }
+.prog-item-row .fld input { width: 100%; box-sizing: border-box; }
+.prog-item-row .prog-item-sub { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 140px auto; gap: 6px; align-items: end; }
+.prog-item-row .prog-item-sub .fld { margin-bottom: 0; }
+.prog-item-row .prog-item-sub .fld input { width: 100%; box-sizing: border-box; }
 .grade-edit-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; }
 .fld-inline { margin-bottom: 0; }
 .cue-list { display: grid; gap: 10px; }

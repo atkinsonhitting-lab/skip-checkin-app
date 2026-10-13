@@ -484,11 +484,94 @@ window.SkipMic = (function () {
     if (want) show(want);
   })();
 
-  // ---- Coach program editor: add/remove training blocks (CSP-safe) ----
+  // ---- Coach program editor: add/remove training blocks + structured
+  // item rows (CSP-safe) ----
+  // Each block renders one row per item (exercise, sets/reps, video/link,
+  // tags). The raw textarea stays the form transport: rows sync into it on
+  // every keystroke, and the textarea stays visible if this JS never runs.
   (function progEditor() {
     var wrap = document.getElementById('prog-cats');
     if (!wrap) return;
     var next = parseInt(wrap.getAttribute('data-next') || '0', 10);
+    function makeRow(item) {
+      var row = document.createElement('div');
+      row.className = 'prog-item-row';
+      row.setAttribute('data-item', '');
+      function fld(label, key, ph) {
+        var l = document.createElement('label');
+        l.className = 'fld';
+        l.appendChild(document.createTextNode(label));
+        var inp = document.createElement('input');
+        inp.type = 'text';
+        inp.setAttribute('data-f', key);
+        inp.placeholder = ph || '';
+        inp.value = item[key] || '';
+        l.appendChild(inp);
+        return l;
+      }
+      row.appendChild(fld('Exercise', 'drill', 'e.g. Tee — Middle'));
+      row.appendChild(fld('Sets / reps', 'volume', 'e.g. 3 x 10'));
+      var sub = document.createElement('div');
+      sub.className = 'prog-item-sub';
+      sub.appendChild(fld('Video / link', 'video', 'YouTube or Drive link'));
+      sub.appendChild(fld('Tags', 'tags', '#tag1 #tag2'));
+      var rm = document.createElement('button');
+      rm.type = 'button';
+      rm.className = 'btn btn-sm btn-danger';
+      rm.setAttribute('data-remove-item', '');
+      rm.textContent = '✕';
+      rm.title = 'Remove item';
+      sub.appendChild(rm);
+      row.appendChild(sub);
+      return row;
+    }
+    function parseItems(text) {
+      return String(text || '').split('\n').map(function (line) {
+        var parts = line.split('|');
+        return {
+          drill: (parts[0] || '').trim(),
+          volume: (parts[1] || '').trim(),
+          video: (parts[2] || '').trim(),
+          tags: (parts[3] || '').trim(),
+        };
+      }).filter(function (it) { return it.drill; });
+    }
+    function serializeItems(items) {
+      return items.map(function (it) {
+        var parts = [it.drill];
+        if (it.volume || it.video || it.tags) parts.push(it.volume || '');
+        if (it.video || it.tags) parts.push(it.video || '');
+        if (it.tags) parts.push(it.tags);
+        return parts.join(' | ');
+      }).join('\n');
+    }
+    function readRows(block) {
+      var items = [];
+      block.querySelectorAll('[data-item]').forEach(function (r) {
+        var get = function (k) { var el = r.querySelector('[data-f="' + k + '"]'); return el ? el.value.trim() : ''; };
+        var drill = get('drill');
+        if (!drill) return;
+        items.push({ drill: drill, volume: get('volume'), video: get('video'), tags: get('tags') });
+      });
+      return items;
+    }
+    function syncBlock(block) {
+      var ta = block.querySelector('textarea');
+      if (ta) ta.value = serializeItems(readRows(block));
+    }
+    function renderBlock(block) {
+      var ta = block.querySelector('textarea');
+      var holder = block.querySelector('[data-items]');
+      if (!ta || !holder) return;
+      var items = parseItems(ta.value);
+      holder.innerHTML = '';
+      if (!items.length) items = [{ drill: '', volume: '', video: '', tags: '' }];
+      items.forEach(function (it) { holder.appendChild(makeRow(it)); });
+      var fb = block.querySelector('.prog-items-fallback');
+      if (fb) fb.hidden = true;
+    }
+    function initBlock(block) { renderBlock(block); }
+    wrap.querySelectorAll('[data-cat]').forEach(initBlock);
     function addCat(presetName) {
       var div = document.createElement('div');
       div.className = 'card routine-group prog-cat';
@@ -499,11 +582,14 @@ window.SkipMic = (function () {
         '<button type="button" class="btn btn-sm" data-move-cat="1" title="Move block down">↓</button></span></div>' +
         '<label class="fld">Category<input type="text" name="cat_' + next + '_name" maxlength="60" value="' +
         String(presetName || '').replace(/"/g, '&quot;') + '"></label>' +
-        '<label class="fld">Drills — one per line, as <em>Drill</em> or <em>Drill | volume</em>' +
+        '<div class="prog-items" data-items></div>' +
+        '<p><button type="button" class="btn btn-sm" data-add-item>+ Add item</button></p>' +
+        '<label class="fld prog-items-fallback">Drills — one per line, as <em>Drill</em> or <em>Drill | volume</em>' +
         '<textarea name="cat_' + next + '_items" rows="4"></textarea></label>' +
         '<button type="button" class="btn btn-danger btn-sm" data-remove-cat>Remove category</button>';
       wrap.appendChild(div);
       next++;
+      initBlock(div);
       div.scrollIntoView({ block: 'nearest' });
     }
     var addBtn = document.getElementById('prog-add-cat');
@@ -511,7 +597,34 @@ window.SkipMic = (function () {
     document.querySelectorAll('[data-addcat-name]').forEach(function (b) {
       b.addEventListener('click', function () { addCat(b.getAttribute('data-addcat-name')); });
     });
+    wrap.addEventListener('input', function (e) {
+      var block = e.target && e.target.closest ? e.target.closest('[data-cat]') : null;
+      if (block) syncBlock(block);
+    });
     wrap.addEventListener('click', function (e) {
+      if (e.target && e.target.hasAttribute('data-add-item')) {
+        var block = e.target.closest('[data-cat]');
+        if (!block) return;
+        var holder = block.querySelector('[data-items]');
+        if (!holder) return;
+        holder.appendChild(makeRow({ drill: '', volume: '', video: '', tags: '' }));
+        var inp = holder.lastElementChild.querySelector('[data-f="drill"]');
+        if (inp) inp.focus();
+        return;
+      }
+      if (e.target && e.target.hasAttribute('data-remove-item')) {
+        var row = e.target.closest('[data-item]');
+        var blk = e.target.closest('[data-cat]');
+        if (row) row.remove();
+        if (blk) {
+          if (!blk.querySelector('[data-item]')) {
+            var h = blk.querySelector('[data-items]');
+            if (h) h.appendChild(makeRow({ drill: '', volume: '', video: '', tags: '' }));
+          }
+          syncBlock(blk);
+        }
+        return;
+      }
       if (e.target && e.target.hasAttribute('data-remove-cat')) {
         var card = e.target.closest('[data-cat]');
         if (card) card.remove();
@@ -527,6 +640,8 @@ window.SkipMic = (function () {
         var sib = dir < 0 ? card.previousElementSibling : card.nextElementSibling;
         while (sib && !sib.hasAttribute('data-cat')) sib = dir < 0 ? sib.previousElementSibling : sib.nextElementSibling;
         if (!sib) return;
+        syncBlock(card);
+        syncBlock(sib);
         var aName = card.querySelector('input[name$="_name"]');
         var aItems = card.querySelector('textarea');
         var bName = sib.querySelector('input[name$="_name"]');
@@ -537,7 +652,13 @@ window.SkipMic = (function () {
         if (aItems) aItems.value = bItems ? bItems.value : '';
         bName.value = t1;
         if (bItems) bItems.value = t2;
+        renderBlock(card);
+        renderBlock(sib);
       }
+    });
+    var form = wrap.closest('form');
+    if (form) form.addEventListener('submit', function () {
+      wrap.querySelectorAll('[data-cat]').forEach(syncBlock);
     });
   })();
 

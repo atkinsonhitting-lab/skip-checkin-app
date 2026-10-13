@@ -1977,6 +1977,11 @@ function splitProgramBlocks(p) {
 // Returns [{ id, label }].
 function programSubTabs(p, lifting) {
   const blocks = splitProgramBlocks(p);
+  // Per-hitter section labels (Bobby, Oct 2026) — the tabs show this
+  // athlete's renamed sections; other hitters keep their own.
+  const prog = (p && p.prog) || {};
+  const sl = (prog.section_labels && typeof prog.section_labels === 'object') ? prog.section_labels : {};
+  const tabLabel = (key, dflt) => String(sl[key] || '').trim() || dflt;
   const tabs = [];
   const liftDays = lifting && Array.isArray(lifting.days) ? lifting.days : [];
   const hasLifting = liftDays.some((d) =>
@@ -1988,13 +1993,13 @@ function programSubTabs(p, lifting) {
   // inside the Lifting tab; non-lifters get mobility + med ball paired in one
   // flow (the Mobility tab). A lone Med Ball tab only appears when there's med
   // ball work but no mobility blocks to pair it with.
-  if (blocks.mobility.length && !hasLifting) tabs.push({ id: 'mobility', label: 'Warm-up' });
-  if (!hasLifting && blocks.medball.length && !blocks.mobility.length) tabs.push({ id: 'medball', label: 'Med Ball' });
+  if (blocks.mobility.length && !hasLifting) tabs.push({ id: 'mobility', label: tabLabel('movement', 'Warm-up') });
+  if (!hasLifting && blocks.medball.length && !blocks.mobility.length) tabs.push({ id: 'medball', label: tabLabel('medball', 'Med Ball') });
   // No Metabolic tab (Sep 2026): speed work lives inside the Lifting tab.
   // Legacy 'Metabolic' blocks in old programs render in the Lifting tab's
   // Speed section instead of getting their own tab.
   if (hasLifting) {
-    tabs.push({ id: 'lifting', label: 'Lifting' });
+    tabs.push({ id: 'lifting', label: tabLabel('lifting', 'Lifting') });
   }
   return tabs;
 }
@@ -2565,7 +2570,9 @@ app.get('/program/lifting', requireLogin, requireWaiver, (req, res) => {
   // (Bobby Sep 24 2026: training blocks are mobility/med ball/lifting only —
   // no Hitting tab; the Hitting Plan button at the top of programPage is the
   // way back to the hitting document.)
-  const tabs = [{ id: 'lifting', label: 'Lifting' }];
+  // Per-hitter section label (Bobby, Oct 2026).
+  const liftLabel = (p.prog && p.prog.section_labels && String(p.prog.section_labels.lifting || '').trim()) || 'Lifting';
+  const tabs = [{ id: 'lifting', label: liftLabel }];
   const today = chiToday();
   const checkoffs = getCheckoffs(req.user.id, today);
   const liftDays = Array.isArray(lifting.days) ? lifting.days.filter((d) =>
@@ -2726,9 +2733,16 @@ function buildSessionDay(userId, p, dayLabel, checkoffs, lifting, ldayIdx, video
   }
 
   const comps = {};
+  // Per-hitter section labels (Bobby, Oct 2026) — the guided session shows
+  // this athlete's renamed sections; other hitters keep their own.
+  const sl = (prog.section_labels && typeof prog.section_labels === 'object') ? prog.section_labels : {};
+  const compLabel = (id, dflt) => {
+    const key = id === 'mobility' ? 'movement' : id;
+    return String(sl[key] || '').trim() || dflt;
+  };
   const def = (id, items) => {
     const meta = SESSION_COMPS.find((c) => c.id === id) || {};
-    comps[id] = { id, label: meta.label || id, icon: meta.icon || '', tag: meta.tag || '', items };
+    comps[id] = { id, label: compLabel(id, meta.label || id), icon: meta.icon || '', tag: meta.tag || '', items };
   };
   def('mobility', mobilityItems);
   def('medball', medballItems);
@@ -4161,6 +4175,15 @@ app.post('/coach/program/:id/save', requireCoach, (req, res) => {
           const rawLink = (parts[2] || '').trim().slice(0, 300);
           const link = /^https?:\/\//i.test(rawLink) ? rawLink : '';
           if (link) item.video = link;
+          // Free-text tags (Bobby, Oct 2026): 4th segment, `#tag1 #tag2`
+          // or comma/space separated. The submitted line is the source of
+          // truth — tags live and die with the line.
+          const tags = String(parts[3] || '')
+            .split(/[\s,]+/)
+            .map((t) => String(t || '').replace(/^#+/, '').trim().slice(0, 30))
+            .filter(Boolean)
+            .slice(0, 8);
+          if (tags.length) item.tags = tags;
           const prev = pool.find((pp) => !pp.used && pp.drill === drill);
           if (prev) {
             prev.used = true;
@@ -4182,6 +4205,15 @@ app.post('/coach/program/:id/save', requireCoach, (req, res) => {
   prog.schedule = schedDays
     .map((day, i) => [day, String(b['sched_' + i] || '').trim().slice(0, 40)])
     .filter(([, label]) => label);
+  // Per-hitter section labels (Bobby, Oct 2026): stored on this athlete's
+  // program only — renaming here never touches another hitter. Blank =
+  // default, so blank fields are dropped, not stored.
+  const secLabels = {};
+  for (const [key, field] of [['movement', 'label_movement'], ['hitting', 'label_hitting'], ['medball', 'label_medball'], ['lifting', 'label_lifting']]) {
+    const v = String(b[field] || '').trim().slice(0, 40);
+    if (v) secLabels[key] = v;
+  }
+  prog.section_labels = secLabels;
   prog.notes = String(b.notes || '')
     .split('\n')
     .map((x) => x.trim())
@@ -6418,6 +6450,24 @@ app.get('/videos/watch/:id', requireLogin, requireRemote, (req, res) => {
   const v = db.prepare('SELECT * FROM video_library WHERE id = ? AND hidden = 0').get(req.params.id);
   if (!v) return res.redirect('/videos');
   res.send(views.videoWatchPage(req.user, v));
+});
+
+// In-app Drive preview (Oct 2026, Bobby): a program item links to a Drive
+// file that isn't in the video library — render the Drive preview player
+// inside the app instead of dumping the hitter to a raw Drive URL.
+app.get('/videos/drive/:fileId', requireLogin, requireRemote, (req, res) => {
+  const fileId = String(req.params.fileId || '').trim();
+  if (!/^[a-zA-Z0-9_-]+$/.test(fileId)) return res.redirect('/program');
+  res.send(views.driveWatchPage(req.user, fileId));
+});
+
+// In-app link page (Oct 2026, Bobby): a program item links somewhere that
+// isn't a video — the hitter lands on a clean in-app page with one Open
+// button. Only http(s) URLs; anything else goes back to the program.
+app.get('/videos/out', requireLogin, (req, res) => {
+  const u = String(req.query.u || '').trim();
+  if (!/^https?:\/\//i.test(u)) return res.redirect('/program');
+  res.send(views.externalLinkPage(req.user, u));
 });
 
 // ---- View as hitter ----
@@ -9096,6 +9146,9 @@ async function askSkip(user, userMessage, opts = {}) {
 
 app.get('/chat', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
+  // Talk to Skip is journaling-only: remote-program athletes train from
+  // their program, so they never see the chat — they go to their program.
+  if (req.user.remoteProgramId) return res.redirect('/program');
   // Organizations can turn Talk to Skip off for their players.
   if (req.user.skipChatDisabled) return res.redirect('/');
   const messages = db
@@ -9130,6 +9183,8 @@ function extractMentalKey(message) {
 app.post('/api/chat', requireLogin, async (req, res) => {
   if (req.user.role !== 'athlete') return res.status(403).json({ error: 'Forbidden' });
   if (req.user.skipChatDisabled) return res.status(403).json({ error: 'Talk to Skip is turned off for your program.' });
+  // Talk to Skip is journaling-only: remote-program athletes don't chat.
+  if (req.user.remoteProgramId) return res.status(403).json({ error: 'Talk to Skip is not part of the remote program.' });
   const message = typeof req.body.message === 'string' ? req.body.message.trim() : '';
   if (!message) return res.status(400).json({ error: 'Message is empty.' });
   if (message.length > 2000) return res.status(400).json({ error: 'Keep it under 2000 characters.' });

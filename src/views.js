@@ -61,9 +61,33 @@ function liftVideoHtml(video, watchLink) {
   if (!id) return watchLink(video);
   return ` <button type="button" class="watch-link yt-toggle" data-yt="${esc(id)}" aria-label="Watch video">&#9654; <span>Watch</span></button>`;
 }
+// Program video button (Oct 2026, Bobby): every video/link on a program item
+// opens cleanly in-app — nothing dumps a raw Drive URL into the browser.
+// YouTube → inline embed toggle; Drive in the library → the in-app watch
+// page; Drive not in the library → the in-app Drive preview page; anything
+// else → the in-app link page. Hidden library videos get no button at all.
+// `cls` is the button class for the page's styling; `span` adds the Watch
+// label used by the program/today/routine rows; `extra` injects extra
+// attributes (e.g. onclick) on the rendered element.
+function programVideoButton(url, videoLib, cls, span, extra) {
+  const u = String(url || '').trim();
+  if (!u) return '';
+  const at = extra ? ' ' + extra : '';
+  const id = ytIdOf(u);
+  if (id) return ` <button type="button" class="${cls || 'watch-link'} yt-toggle" data-yt="${esc(id)}" aria-label="Watch video"${at}>&#9654;${span ? ' <span>Watch</span>' : ''}</button>`;
+  const dm = /drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/.exec(u);
+  if (dm) {
+    const v = (videoLib || {})[dm[1]];
+    if (v && v.hidden) return '';
+    const href = v ? '/videos/watch/' + v.id : '/videos/drive/' + encodeURIComponent(dm[1]);
+    return ` <a class="${cls || 'watch-link'}" href="${esc(href)}" aria-label="Watch video"${at}>&#9654;${span ? ' <span>Watch</span>' : ''}</a>`;
+  }
+  if (!/^https?:\/\//i.test(u)) return '';
+  return ` <a class="${cls || 'watch-link'}" href="/videos/out?u=${encodeURIComponent(u)}" aria-label="Open link"${at}>&#9654;${span ? ' <span>Watch</span>' : ''}</a>`;
+}
 const YT_TOGGLE_SCRIPT = `<script>(function(){document.addEventListener('click',function(e){
   var b=e.target.closest?e.target.closest('.yt-toggle'):null;if(!b)return;
-  var host=b.closest('.lift-ex')||b.closest('.spd-row')||b.closest('form');if(!host)return;
+  var host=b.closest('.lift-ex')||b.closest('.spd-row')||b.closest('form')||b.parentElement;if(!host)return;
   var open=host.querySelector('.yt-embed');
   if(open){open.remove();b.classList.remove('open');return;}
   if(host.tagName==='DETAILS'&&!host.open)host.open=true;
@@ -73,7 +97,27 @@ const YT_TOGGLE_SCRIPT = `<script>(function(){document.addEventListener('click',
   inner.appendChild(d);b.classList.add('open');
 });})();</script>`;
 
-// Message bodies: escape HTML, then make http(s) URLs tappable links
+// Free-text tags on a program item (Oct 2026, Bobby) — small chips after
+// the volume. Stored per item on the athlete's program.
+function tagChips(tags) {
+  const list = (Array.isArray(tags) ? tags : []).map((t) => String(t || '').trim()).filter(Boolean).slice(0, 8);
+  if (!list.length) return '';
+  return `<span class="tag-chips">${list.map((t) => `<span class="tag-chip">${esc(t)}</span>`).join('')}</span>`;
+}
+
+// Per-hitter section labels (Oct 2026, Bobby): Bobby can rename the four
+// program sections for one athlete — stored on that athlete's program,
+// never global. Blank = the default label.
+function sectionLabelsOf(prog) {
+  const s = (prog && prog.section_labels && typeof prog.section_labels === 'object') ? prog.section_labels : {};
+  const clean = (v, dflt) => String(v || '').trim() || dflt;
+  return {
+    movement: clean(s.movement, 'Movement'),
+    hitting: clean(s.hitting, 'Hitting'),
+    medball: clean(s.medball, 'Med Ball'),
+    lifting: clean(s.lifting, 'Lifting'),
+  };
+}
 // (Bobby, Sep 17 2026 — booking links in messages must be clickable).
 function linkify(text) {
   return esc(text).replace(/https?:\/\/[^\s<>"')\]]+/g, (u) => {
@@ -221,10 +265,13 @@ function onboardingOverlay(user) {
     { icon: '💬', title: 'Talk to Skip anytime', text: 'Struggling? Skip has seen every session you\u2019ve logged. He\u2019ll point you back to what works for YOU.' },
     { icon: '🧠', title: 'New: your questionnaire', text: 'Everything\u2019s fresh in here. Fill out the new mental-game questionnaire so Skip can build your plan.', cta: 'Fill it out →', href: '/mental-game/questionnaire' },
   ];
+  // Talk to Skip is journaling-only: remote-program athletes don't get the
+  // chat slide — their program is the coaching surface.
+  const showSlides = user && user.remoteProgramId ? slides.filter((s) => s.title !== 'Talk to Skip anytime') : slides;
   return `<div id="onboard" hidden>
     <div class="onboard-card">
-      <div class="onboard-slides">${slides.map((s, i) => `<div class="onboard-slide" data-slide="${i}"${s.cta ? ` data-cta="${esc(s.cta)}" data-href="${esc(s.href)}"` : ''}${i ? ' hidden' : ''}><div class="onboard-icon">${s.icon}</div><h2>${s.title}</h2><p>${s.text}</p></div>`).join('')}</div>
-      <div class="onboard-dots">${slides.map((_, i) => `<span class="onboard-dot${i ? '' : ' active'}" data-dot="${i}"></span>`).join('')}</div>
+      <div class="onboard-slides">${showSlides.map((s, i) => `<div class="onboard-slide" data-slide="${i}"${s.cta ? ` data-cta="${esc(s.cta)}" data-href="${esc(s.href)}"` : ''}${i ? ' hidden' : ''}><div class="onboard-icon">${s.icon}</div><h2>${s.title}</h2><p>${s.text}</p></div>`).join('')}</div>
+      <div class="onboard-dots">${showSlides.map((_, i) => `<span class="onboard-dot${i ? '' : ' active'}" data-dot="${i}"></span>`).join('')}</div>
       <div class="onboard-nav"><button type="button" id="onboard-skip" class="btn-ghost">Skip</button><button type="button" id="onboard-next" class="btn-primary">Next</button></div>
     </div>
   </div>`;
@@ -245,9 +292,11 @@ function userTabs(active, user) {
   );
   // Bobby (Sep 23 2026): Settings back in the sidebar drawer (not the bottom bar).
   tabs.push({ href: '/settings', label: 'Settings', active: active === 'settings' });
-  // Organizations can turn Talk to Skip off for their players: no tab, no FAB,
-  // no bottom-bar icon (all three key off this tab list).
-  if (user && user.skipChatDisabled) {
+  // Talk to Skip is journaling-only: remote-program athletes train from
+  // their program, not the chat — and org-disabled players keep the same
+  // behavior as before. No tab, no FAB, no bottom-bar icon (all three
+  // key off this tab list).
+  if (user && (user.skipChatDisabled || user.remoteProgramId)) {
     return tabs.filter((t) => t.href !== '/chat');
   }
   return tabs;
@@ -1289,7 +1338,7 @@ function scorePage(user, c, streak) {
       ${skipReadBlock(c)}
       <div class="score-actions">
         <a href="/notebook" class="btn-primary">See your notebook</a>
-        <p class="hint" style="text-align:center"><a href="/chat">Talk it through with Skip →</a></p>
+        ${user && user.remoteProgramId ? '' : '<p class="hint" style="text-align:center"><a href="/chat">Talk it through with Skip →</a></p>'}
         <p class="hint" style="text-align:center"><a href="/checkin">Log another session</a></p>
       </div>
     </div>`,
@@ -1868,17 +1917,21 @@ function coachHomeManage(user, quiet, latest, pending, pushOn, leads, myGuys, bi
   };
   // Bobby (Sep 24 2026): "I wanna have direct ability to open the doc and edit
   // in it." Remote rows get a 📄 Doc button straight to the athlete document.
+  // Bobby (Oct 2026): programs are the main focus of the dashboard — every
+  // remote row gets a direct Edit button straight into the program editor
+  // (full coaches only; view-only coaches see the rows read-only).
   const playerRow = (p) => `<div class="ppl-row" style="display:flex;align-items:center;padding:0">
     <a href="/coach/user/${encodeURIComponent(p.email)}" style="display:flex;align-items:center;flex:1;min-width:0;color:inherit;text-decoration:none;padding:10px 0 10px 12px">
       <span class="ppl-dot${p.checkedToday ? ' on' : ''}" aria-hidden="true"></span>
       <span class="ppl-main"><strong>${esc(p.name)}</strong>
         <span class="hint-inline">${p.streak ? p.streak + '-day streak · ' : ''}${esc(lastTxt(p))}</span></span>
       <span class="org-chev" aria-hidden="true">›</span></a>
+    ${p.remoteProgramId && canEdit ? `<a href="/coach/program/${p.remoteProgramId}/edit" class="btn-small" style="text-decoration:none;flex-shrink:0;margin-right:8px">✏️ Edit</a>` : ''}
     ${p.remoteProgramId && canEdit ? `<a href="/coach/program/${p.remoteProgramId}/doc" class="btn-small" style="text-decoration:none;flex-shrink:0;margin-right:8px">📄 Doc</a>` : ''}</div>`;
-  const guySection = (title, list) => {
+  const guySection = (title, list, manageHref) => {
     if (!list.length) return '';
     return `<div class="dash-sec-head"><h2 class="section-head" style="margin:0">${title}</h2>
-      <a class="hint-inline" href="/coach/my-players">Manage →</a></div>
+      <a class="hint-inline" href="${manageHref || '/coach/my-players'}">Manage →</a></div>
       <div class="card ppl-list">${list.map(playerRow).join('')}</div>`;
   };
   const pendingRow = pending && pending.length
@@ -1930,7 +1983,7 @@ function coachHomeManage(user, quiet, latest, pending, pushOn, leads, myGuys, bi
     body: `<h1 class="page-title">Coach Dashboard</h1>
     ${pushOn ? '' : '<div class="card push-card"><p style="margin:0 0 10px"><strong>Turn on notifications</strong> <span class="hint">so you never miss an approval, a check-in, or a message.</span></p><p style="margin:0"><button type="button" class="btn-primary" id="push-enable-btn" style="margin-top:0">Turn on notifications</button></p></div>'}
     ${attention}
-    ${guySection('Remote program', g.remote)}
+    ${guySection('Programs', g.remote, '/coach/programs')}
     ${guySection('In-person hitters', g.inPerson)}
     ${bibleRows ? `<div class="dash-sec-head"><h2 class="section-head" style="margin:0">📖 Bible Study</h2></div>
       <div class="card ppl-list">${bibleRows}</div>` : ''}
@@ -2357,6 +2410,9 @@ function todayProgramPage(user, p, opts) {
   const videoLib = o.videoLib || {};
   const today = o.today || '';
   const weekday = o.weekday || '';
+  // Per-hitter section labels (Bobby, Oct 2026) — renamed for this athlete
+  // only, stored on their program.
+  const secLabels = sectionLabelsOf(prog);
 
   // Schedule: [weekday, label] pairs (or {weekday, day_label} objects).
   const schedEntry = (s) => Array.isArray(s)
@@ -2389,28 +2445,8 @@ function todayProgramPage(user, p, opts) {
   };
   const isMovementCat = (cat) => /daily routine/i.test(String(cat || '')) || kindOf(cat) === 'mobility' || kindOf(cat) === 'prep';
 
-  // Resolve a stored item video URL to its href: Drive URLs open the in-app
-  // library watch page when the video is in Bobby's library (and visible);
-  // YouTube and anything else open directly. Hidden library videos show no
-  // link at all. (Same rule as programPage.)
-  const videoHref = (url) => {
-    const u = String(url || '').trim();
-    if (!u) return '';
-    const dm = /drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/.exec(u);
-    if (dm) {
-      const v = videoLib[dm[1]];
-      if (v && !v.hidden) return '/videos/watch/' + v.id;
-      if (v && v.hidden) return '';
-      return u;
-    }
-    return u;
-  };
-  const watchLink = (video) => {
-    const href = videoHref(video);
-    if (!href) return '';
-    const ext = /^https?:\/\//i.test(href);
-    return ` <a class="td-watch" href="${esc(href)}"${ext ? ' target="_blank" rel="noopener"' : ''} aria-label="Watch video">&#9654; <span>Watch</span></a>`;
-  };
+  // Program item videos open cleanly in-app (see programVideoButton).
+  const watchLink = (video) => programVideoButton(video, videoLib, 'td-watch', true);
 
   let totalItems = 0;
   let doneItems = 0;
@@ -2419,7 +2455,7 @@ function todayProgramPage(user, p, opts) {
   // `{kind}::{dayPrefix}::{category}::{drill}`; lifting items use the
   // /program/lifting formats (`lift::{label}::{name}`,
   // `spd::::{label}::{name}`, `med::::{label}::{name}`).
-  const checkRow = (kind, key, name, volume, video, extra) => {
+  const checkRow = (kind, key, name, volume, video, extra, tags) => {
     const done = !!checkoffs[key];
     totalItems += 1;
     if (done) doneItems += 1;
@@ -2437,7 +2473,7 @@ function todayProgramPage(user, p, opts) {
       <input type="hidden" name="item_key" value="${esc(key)}">
       <span class="td-drag" title="Drag to reorder (preview only — order does not save yet)">≡</span>
       <button type="submit" class="td-checkbtn" aria-label="${done ? 'Mark not done' : 'Mark done'}">${done ? '☑' : '☐'}</button>
-      <span class="td-rowmain"><span class="td-rowname">${esc(shown || '')}</span>${volume ? `<span class="td-vol">${esc(volume)}</span>` : ''}${subBadge}</span>
+      <span class="td-rowmain"><span class="td-rowname">${esc(shown || '')}</span>${volume ? `<span class="td-vol">${esc(volume)}</span>` : ''}${tagChips(tags)}${subBadge}</span>
       ${watchLink(video)}
       ${subLink}
     </form>`;
@@ -2461,10 +2497,10 @@ function todayProgramPage(user, p, opts) {
   const liftExtra = `<input type="hidden" name="lday" value="${ldayIdx}">`;
 
   const movementHtml = movementBlocks.map((c) =>
-    realItems(c.items).map((it) => checkRow('mob', `mob::${dayPrefix(c.category)}::${c.category}::${it.drill}`, it.drill, it.volume || '', it.video || '')).join('')
+    realItems(c.items).map((it) => checkRow('mob', `mob::${dayPrefix(c.category)}::${c.category}::${it.drill}`, it.drill, it.volume || '', it.video || '', '', it.tags)).join('')
   ).join('');
   const hittingHtml = hittingBlocks.map((c) =>
-    realItems(c.items).map((it) => checkRow('hit', `hit::${dayPrefix(c.category)}::${c.category}::${it.drill}`, it.drill, it.volume || '', it.video || '')).join('')
+    realItems(c.items).map((it) => checkRow('hit', `hit::${dayPrefix(c.category)}::${c.category}::${it.drill}`, it.drill, it.volume || '', it.video || '', '', it.tags)).join('')
   ).join('');
 
   // Med ball: the lifting day's med ball is the source of truth when a
@@ -2479,7 +2515,7 @@ function todayProgramPage(user, p, opts) {
       [s.volume, s.notes].filter(Boolean).join(' — '), s.video || '', liftExtra)).join('') + heldHtml(heldMed);
   } else {
     medHtml = routineMedBlocks.map((c) =>
-      realItems(c.items).map((it) => checkRow('med', `med::${dayPrefix(c.category)}::${c.category}::${it.drill}`, it.drill, it.volume || '', it.video || '')).join('')
+      realItems(c.items).map((it) => checkRow('med', `med::${dayPrefix(c.category)}::${c.category}::${it.drill}`, it.drill, it.volume || '', it.video || '', '', it.tags)).join('')
     ).join('');
   }
 
@@ -2514,10 +2550,12 @@ function todayProgramPage(user, p, opts) {
   if (isRestDay) {
     content = `<div class="td-card"><p style="margin:0"><strong>Rest day — recover.</strong></p><p class="td-hint" style="margin:6px 0 0">No work scheduled today. Walk, stretch, sleep — the rest is the work.</p></div>`;
   } else {
-    content = sectionHtml('Movement · Warm-up', movementHtml)
-      + sectionHtml('Hitting', hittingHtml)
-      + sectionHtml('Med Ball', medHtml)
-      + (curDay ? sectionHtml(`Lifting · ${esc(liftDayLabel)}`, liftHtml) : (lifting ? `<section class="td-sec"><div class="td-sec-head"><span>Lifting</span></div><div class="td-card"><p style="margin:0">No lifting today — rest day on the lifting calendar.</p></div></section>` : ''));
+    content = sectionHtml(`${esc(secLabels.movement)} · Warm-up`, movementHtml)
+      + sectionHtml(esc(secLabels.hitting), hittingHtml)
+      + sectionHtml(esc(secLabels.medball), medHtml)
+      // Blank sections never render: no lifting day means no Lifting
+      // section at all (Bobby, Oct 2026) — no empty header, no blank card.
+      + (curDay ? sectionHtml(`${esc(secLabels.lifting)} · ${esc(liftDayLabel)}`, liftHtml) : '');
     if (!totalItems) {
       content = `<div class="td-card"><p style="margin:0"><strong>No program yet.</strong></p><p class="td-hint" style="margin:6px 0 0">Nothing scheduled for today. Your coach will add your program here.</p></div>`;
     }
@@ -2528,7 +2566,8 @@ function todayProgramPage(user, p, opts) {
     { href: '/program/today', label: 'Today', active: true },
     { href: '/program/hitting-plan', label: 'Program' },
     { href: '/videos', label: 'Videos' },
-    { href: '/chat', label: 'Messages' },
+    // No Messages tab: it used to point at Talk to Skip, which remote
+    // athletes don't get, and there is no athlete inbox page.
   ];
 
   return layout({
@@ -2597,12 +2636,13 @@ ${content}
     sec.addEventListener('drop', function (e) { e.preventDefault(); dragged = null; });
   });
 })();
-</script>`,
+</script>${YT_TOGGLE_SCRIPT}`,
   });
 }
 
 function programPage(user, p, opts) {
   const prog = p.prog || {};
+  const secLabels = sectionLabelsOf(prog);
   const o = opts || {};
   const tabs = o.tabs || [{ id: 'hitting', label: 'Hitting' }];
   const sub = o.sub || 'hitting';
@@ -2616,28 +2656,8 @@ function programPage(user, p, opts) {
   const isToday = !!o.isToday;
   const videoLib = o.videoLib || {};
 
-  // Resolve a stored item video URL to its href: Drive URLs open the in-app
-  // library watch page when the video is in Bobby's library (and visible);
-  // YouTube and anything else open directly. Hidden library videos show no
-  // link at all.
-  const videoHref = (url) => {
-    const u = String(url || '').trim();
-    if (!u) return '';
-    const dm = /drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/.exec(u);
-    if (dm) {
-      const v = videoLib[dm[1]];
-      if (v && !v.hidden) return '/videos/watch/' + v.id;
-      if (v && v.hidden) return '';
-      return u;
-    }
-    return u;
-  };
-  const watchLink = (video) => {
-    const href = videoHref(video);
-    if (!href) return '';
-    const ext = /^https?:\/\//i.test(href);
-    return ` <a class="watch-link" href="${esc(href)}"${ext ? ' target="_blank" rel="noopener"' : ''} aria-label="Watch video">&#9654; <span>Watch</span></a>`;
-  };
+  // Program item videos open cleanly in-app (see programVideoButton).
+  const watchLink = (video) => programVideoButton(video, videoLib, 'watch-link', true);
   // (yt helpers live at module scope: ytIdOf, intentBadgeHtml, liftVideoHtml, YT_TOGGLE_SCRIPT)
 
 
@@ -2727,7 +2747,7 @@ function programPage(user, p, opts) {
   };
 
   // One check-off row (hitting / mobility / med ball / prep).
-  const checkRow = (kind, key, drill, volume, video, extra, badge) => {
+  const checkRow = (kind, key, drill, volume, video, extra, badge, tags) => {
     const done = !!checkoffs[key];
     const swapped = (o.subs || {})[key];
     const shown = swapped ? String(swapped.sub_name || drill) : drill;
@@ -2743,7 +2763,7 @@ function programPage(user, p, opts) {
       ${extra || ''}
       <input type="hidden" name="item_key" value="${esc(key)}">
       <button type="submit" class="checkbtn" aria-label="${done ? 'Mark not done' : 'Mark done'}">${done ? '☑' : '☐'}</button>
-      <span class="routine-name">${esc(shown || '')}</span>${badge || ''}${volume ? `<span class="hint-inline">${esc(volume)}</span>` : ''}${watchLink(video)}${subBadge}
+      <span class="routine-name">${esc(shown || '')}</span>${badge || ''}${volume ? `<span class="hint-inline">${esc(volume)}</span>` : ''}${tagChips(tags)}${watchLink(video)}${subBadge}
     </form>`;
   };
   const blockCard = (cat, items, kind, dayScope, extra, guide) => {
@@ -2757,7 +2777,7 @@ function programPage(user, p, opts) {
         const v = it.video || (kind === 'mob'
           ? videoLib.findVideoUrl('mobility', it.drill)
           : kind === 'med' ? videoLib.findVideoUrl('medball', it.drill) : '');
-        return checkRow(kind, `${kind}::${dayScope || ''}::${cat}::${it.drill}`, it.drill, it.volume, v, extra);
+        return checkRow(kind, `${kind}::${dayScope || ''}::${cat}::${it.drill}`, it.drill, it.volume, v, extra, '', it.tags);
       }).join('');
     return `<details class="card routine-group" open><summary class="routine-summary"><span class="routine-station">${esc(cat)}</span></summary>${rows}</details>`;
   };
@@ -2769,12 +2789,14 @@ function programPage(user, p, opts) {
     // without a lifting program — med ball work renders below the mobility.
     const medBlocks = routine.filter((c) => kindOf(c.category) === 'medball' && realItems(c.items).length);
     const medHtmlMob = medBlocks.length
-      ? `<h3 class="prog-h3"><span class="flow-num">2</span> \U0001f4a5 Med Ball — explosive throws</h3>` +
+      ? `<h3 class="prog-h3"><span class="flow-num">2</span> 💥 ${esc(secLabels.medball)} — explosive throws</h3>` +
         medBlocks.map((c) => blockCard(c.category, c.items, 'med', dayPrefix(c.category))).join('')
       : '';
+    // Blank sections never render (Bobby, Oct 2026): no mobility blocks
+    // means no mobility section at all — no empty header, no blank card.
     content = `${dayHead(false)}
       <p class="lede">Do this first, every day — then get after the work below.</p>
-      ${blocks.map((c) => blockCard(c.category, c.items, 'mob')).join('') || '<div class="card empty">No mobility work in your program.</div>'}${medHtmlMob}`;
+      ${blocks.map((c) => blockCard(c.category, c.items, 'mob')).join('')}${medHtmlMob}`;
   } else if (sub === 'medball') {
     const blocks = routine.filter((c) => kindOf(c.category) === 'medball' && realItems(c.items).length);
     const todays = day ? blocks.filter((c) => inDay(c.category, day)) : blocks;
@@ -2783,7 +2805,7 @@ function programPage(user, p, opts) {
       ${(todays.length || others.length
         ? todays.map((c) => blockCard(c.category, c.items, 'med', dayPrefix(c.category))).join('') +
           others.map((c) => blockCard(c.category, c.items, 'med', dayPrefix(c.category))).join('')
-        : '<div class="card empty">No med ball work in your program.</div>')}`;
+        : '')}`;
   } else if (sub === 'lifting' && lifting) {
     const days = (Array.isArray(lifting.days) ? lifting.days : []).filter((d) => realExercises(d.exercises).length);
     // Different Animal v4 (Sep 2026): 1. SPEED → 2. POWER (jumps + med ball) →
@@ -2868,7 +2890,7 @@ function programPage(user, p, opts) {
       // Mobility tab for lifters. Mobility blocks render first, as the warm-up.
       const mobBlocks = routine.filter((c) => kindOf(c.category) === 'mobility' && realItems(c.items).length);
       const mobHtml = mobBlocks.length
-        ? `<h3 class=\"prog-h3\"><span class=\"flow-num\">0</span> \U0001f9d8 Mobility — move first, then work</h3>` +
+        ? `<h3 class=\"prog-h3\"><span class=\"flow-num\">0</span> 🧘 Mobility — move first, then work</h3>` +
           mobBlocks.map((c) => blockCard(c.category, c.items, 'mob')).join('')
         : '';
       content = `${topStartBtn}${phaseBanner}${mobHtml}${speedHtml}${medHtml}${liftSubTab(user, lifting, days, effLday, sub, checkoffs, today, o.liftData || {}, o.subs || {}, secBase, o.todayLdayIdx, o.sched, o.weekday)}${YT_TOGGLE_SCRIPT}`;
@@ -2889,7 +2911,6 @@ function programPage(user, p, opts) {
       ${isRest && isToday ? '<div class="card"><p style="margin:0">No work scheduled — rest, recover, come back tomorrow.</p></div>' : `
       ${prepToday.map((c) => blockCard(c.category, c.items, 'hit', day)).join('')}
       ${hitToday.map((c) => blockCard(c.category, c.items, 'hit', day)).join('')}
-      ${!daySpecific.length && !flat.length ? '<div class="card empty">Nothing scheduled for this day.</div>' : ''}
       ${flat.length ? `<h3 class="prog-h3">Every day</h3>${flat.map((c) => blockCard(c.category, c.items, 'hit', '', null, c.guide)).join('')}` : ''}
       ${pregame.length ? `<h3 class="prog-h3">Pregame</h3>${pregame.map((c) => blockCard(c.category, c.items, 'hit', dayPrefix(c.category))).join('')}` : ''}`}
       ${programSection('The focus', prog.adjustment ? `<p>${esc(prog.adjustment)}</p>` : '', 'focus')}
@@ -2943,7 +2964,7 @@ function programPage(user, p, opts) {
     })()}
     ${content}
     <div class="card finish-card"><p style="margin:0 0 8px">Done with the work? <a href="/checkin"><strong>Log your session →</strong></a></p>
-    <p class="hint-inline" style="margin:0">Work first, journal second.</p></div>`,
+    <p class="hint-inline" style="margin:0">Work first, journal second.</p></div>${YT_TOGGLE_SCRIPT}`,
   });
 }
 
@@ -3382,7 +3403,7 @@ function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftDat
             <span class="lift-name">${esc(shown)}${intentBadgeHtml(ex.intent)}</span>
             ${sumSub ? `<span class="lift-sum-sub">${sumSub}</span>` : ''}
           </span>
-          ${(() => { const id = ytIdOf(ex.video); return id ? `<button type="button" class="watch-link yt-toggle" data-yt="${esc(id)}" aria-label="Watch video" onclick="event.stopPropagation()">&#9654;</button>` : (ex.video ? `<a class="watch-link" href="${esc(ex.video)}" target="_blank" rel="noopener" aria-label="Watch video" onclick="event.stopPropagation()">&#9654;</a>` : ''); })()}
+          ${programVideoButton(ex.video, null, 'watch-link', false, 'onclick="event.stopPropagation()"')}
         </summary>
         <div class="lift-main">
           <div class="lift-name-row">
@@ -3628,32 +3649,15 @@ function programRoutinePage(user, p, videoLib) {
   const prog = p.prog || {};
   const blocks = dailyRoutineBlocks(prog);
   const lib = videoLib || {};
-  const routineHref = (url) => {
-    const u = String(url || '').trim();
-    if (!u) return '';
-    const dm = /drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/.exec(u);
-    if (dm) {
-      const v = lib[dm[1]];
-      if (v && !v.hidden) return '/videos/watch/' + v.id;
-      if (v && v.hidden) return '';
-      return u;
-    }
-    return u;
-  };
   const sectionCard = (name, items) => {
     const real = realItems(items);
     if (!real.length) return '';
     const rows = real
       .map((it) => {
-        const href = routineHref(it.video);
-        const ext = /^https?:\/\//i.test(href);
+        const btn = programVideoButton(it.video, lib, 'watch-link', true);
         return `<div class="routine-row"><span class="routine-name">${esc(it.drill || '')}</span>${
           it.volume ? `<span class="hint-inline">${esc(it.volume)}</span>` : ''
-        }${
-          href
-            ? ` <a class="watch-link" href="${esc(href)}"${ext ? ' target="_blank" rel="noopener"' : ''} aria-label="Watch video">&#9654; <span>Watch</span></a>`
-            : ''
-        }</div>`;
+        }${tagChips(it.tags)}${btn}</div>`;
       })
       .join('');
     return `<details class="card routine-group" open><summary class="routine-summary"><span class="routine-station">${esc(name || 'Training')}</span></summary>${rows}</details>`;
@@ -3992,7 +3996,7 @@ function mentalGamePage(user, data) {
     ${saved ? '<div class="notice">Saved — your plan is below.</div>' : ''}
     ${planFailed ? '<div class="notice">Baseline saved, but the plan didn\u2019t come through — tap the button again.</div>' : ''}
     ${cardsHtml}
-    ${b.plan ? `
+    ${b.plan && !(user && user.remoteProgramId) ? `
     <div class="card">
       <p style="margin:0">Feeling sped up or rushing in a game? <a href="/chat">Talk to Coach Skip →</a> — he'll give you one thing to lock back in.</p>
     </div>
@@ -4259,8 +4263,12 @@ function programEditPage(user, p, profileEmail, hasLifting, progression, opts) {
   const routine = Array.isArray(prog.routine) ? prog.routine : [];
   const itemLine = (it) => {
     const parts = [it.drill || ''];
-    if (it.volume || it.video) parts.push(it.volume || '');
-    if (it.video) parts.push(it.video);
+    // Tags serialize with a # prefix (the save handler strips it) so the
+    // editor round-trips them exactly: Drill | volume | video | #tag1 #tag2
+    const tags = (Array.isArray(it.tags) ? it.tags : []).map((t) => String(t || '').trim()).filter(Boolean).map((t) => (t.startsWith('#') ? t : '#' + t)).join(' ');
+    if (it.volume || it.video || tags) parts.push(it.volume || '');
+    if (it.video || tags) parts.push(it.video || '');
+    if (tags) parts.push(tags);
     return parts.join(' | ');
   };
   const linkStatus = (items) => {
@@ -4289,7 +4297,9 @@ function programEditPage(user, p, profileEmail, hasLifting, progression, opts) {
           </span>
         </div>
         <label class="fld">Category<input type="text" name="cat_${i}_name" value="${esc(c.category || '')}" maxlength="60"></label>
-        <label class="fld">Drills — one per line, as <em>Drill</em>, <em>Drill | volume</em>, or <em>Drill | volume | video link</em>
+        <div class="prog-items" data-items></div>
+        <p><button type="button" class="btn btn-sm" data-add-item>+ Add item</button></p>
+        <label class="fld prog-items-fallback">Drills — one per line, as <em>Drill</em>, <em>Drill | volume</em>, <em>Drill | volume | video link</em>, or <em>Drill | volume | video link | #tag1 #tag2</em>
           <textarea name="cat_${i}_items" rows="4">${esc((c.items || []).map(itemLine).join('\n'))}</textarea>
         </label>
         <div class="hint-inline">🔗 ${statusBits.join(' · ') || 'no drills'}. Paste a YouTube or library URL after the last | to set a link; delete a link to keep it blank. New library videos auto-link on their own — your links are never overwritten.</div>
@@ -4298,6 +4308,16 @@ function programEditPage(user, p, profileEmail, hasLifting, progression, opts) {
     })
     .join('');
   const cues = prog.cues && typeof prog.cues === 'object' ? prog.cues : {};
+  // Section names (Bobby, Oct 2026): rename the four sections for THIS
+  // hitter only — stored on his program, never global. Blank = default.
+  const secRaw = prog.section_labels && typeof prog.section_labels === 'object' ? prog.section_labels : {};
+  const secNameCard = `<div class="card routine-group"><h2 class="routine-station">Section names</h2>
+    <p class="hint">Rename the sections for this hitter only — other hitters keep their own labels. Leave blank for the default.</p>
+    <label class="fld">Movement<input type="text" name="label_movement" value="${esc(String(secRaw.movement || ''))}" maxlength="40" placeholder="Movement"></label>
+    <label class="fld">Hitting<input type="text" name="label_hitting" value="${esc(String(secRaw.hitting || ''))}" maxlength="40" placeholder="Hitting"></label>
+    <label class="fld">Med Ball<input type="text" name="label_medball" value="${esc(String(secRaw.medball || ''))}" maxlength="40" placeholder="Med Ball"></label>
+    <label class="fld">Lifting<input type="text" name="label_lifting" value="${esc(String(secRaw.lifting || ''))}" maxlength="40" placeholder="Lifting"></label>
+  </div>`;
   const editSchedMap = {};
   for (const pair of Array.isArray(prog.schedule) ? prog.schedule : []) {
     if (Array.isArray(pair) && pair[0]) editSchedMap[String(pair[0])] = String(pair[1] || '');
@@ -4440,6 +4460,7 @@ function programEditPage(user, p, profileEmail, hasLifting, progression, opts) {
         <label class="fld">Timing<input type="text" name="cue_timing" value="${esc(cues.timing || '')}" maxlength="300"></label>
         <label class="fld">Game<input type="text" name="cue_game" value="${esc(cues.game || '')}" maxlength="300"></label>
       </div>
+      ${secNameCard}
       <div class="card routine-group"><h2 class="routine-station">Weekly schedule</h2><p class="hint"><strong>Tap a day, then tap another day to swap their workouts.</strong> Or pick a workout from each day's dropdown. This is the athlete's week.</p><div class="sched-cal">${schedFields}</div></div>${schedCalScript}
       <div class="card routine-group">
         <label class="fld">Notes — one per line
@@ -4573,6 +4594,46 @@ function videoWatchPage(user, v) {
       <iframe src="${preview}" title="${esc(disp)}" allow="autoplay; fullscreen" allowfullscreen style="width:100%;aspect-ratio:16/9;border:0;background:#000"></iframe>
     </div>
     <p class="hint">Use the fullscreen button on the player for the biggest view. <a href="https://drive.google.com/file/d/${fileId}/view" target="_blank" rel="noopener">Open in Drive</a> if it won't play.</p>`,
+  });
+}
+
+// In-app Drive preview (Oct 2026, Bobby): a program item links to a Drive
+// file that isn't in the video library — the hitter still watches it
+// inside the app instead of getting dumped to a raw Drive URL.
+function driveWatchPage(user, fileId) {
+  const safe = encodeURIComponent(String(fileId || ''));
+  const preview = `https://drive.google.com/file/d/${safe}/preview`;
+  return layout({
+    title: 'Video',
+    user,
+    tabs: userTabs('program', user),
+    body: `<p><a href="/program">\u2190 Back to program</a></p>
+    <h1 class="page-title">Video</h1>
+    <div class="video-player">
+      <iframe src="${preview}" title="Video" allow="autoplay; fullscreen" allowfullscreen style="width:100%;aspect-ratio:16/9;border:0;background:#000"></iframe>
+    </div>
+    <p class="hint">Use the fullscreen button on the player for the biggest view. <a href="https://drive.google.com/file/d/${safe}/view" target="_blank" rel="noopener">Open in Drive</a> if it won't play.</p>`,
+  });
+}
+
+// In-app link page (Oct 2026, Bobby): a program item links somewhere that
+// isn't a video — the hitter lands on this clean in-app page first, with
+// one big Open button, instead of getting dumped straight to the raw URL.
+function externalLinkPage(user, url) {
+  const safe = String(url || '');
+  let host = '';
+  try { host = new URL(safe).hostname; } catch (e) { host = ''; }
+  return layout({
+    title: 'Open link',
+    user,
+    tabs: userTabs('program', user),
+    body: `<p><a href="/program">\u2190 Back to program</a></p>
+    <h1 class="page-title">Open link</h1>
+    <div class="card">
+      <p style="margin:0 0 4px"><strong>${esc(host || 'External link')}</strong></p>
+      <p class="hint" style="margin:0 0 16px;word-break:break-all">${esc(safe)}</p>
+      <p style="margin:0"><a class="btn-primary" href="${esc(safe)}" target="_blank" rel="noopener">Open link →</a></p>
+    </div>`,
   });
 }
 
@@ -5589,9 +5650,7 @@ function mobilityWorkoutPage(user, p, opts) {
       ? `<div class="last-perf">Last: ${last.weight ? esc(String(last.weight)) + ' lbs' : ''} ${last.sets ? esc(JSON.stringify(last.sets)) : ''}</div>`
       : '';
     const isMedball = ex.type === 'medball';
-    const videoLink = ex.video
-      ? ` <a href="${esc(ex.video)}" target="_blank" rel="noopener" class="wo-video" aria-label="Watch video">▶ <span>Watch</span></a>`
-      : '';
+    const videoLink = programVideoButton(ex.video, null, 'wo-video', true);
     return `<div class="wo-ex" data-key="${esc(ex.key)}" data-idx="${i}">
       <div class="wo-ex-head">
         <span class="wo-ex-num">${i + 1}</span>
@@ -6439,6 +6498,8 @@ module.exports = {
   coachMentalQuestionsPage,
   videosPage,
   videoWatchPage,
+  driveWatchPage,
+  externalLinkPage,
   coachLibraryPage,
   esc,
   linkify,
