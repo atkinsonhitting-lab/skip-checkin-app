@@ -214,7 +214,10 @@ function bottomTabbar(user, tabs) {
     const unread = Number(user.unreadMessages || 0);
     const items = [
       { href: hasTodayLayout(user) ? '/program/today' : '/program', label: 'Today', key: 'today', badge: null },
-      { href: '/program', label: 'Program', key: 'program', badge: null },
+      // Program must NOT point at /program for the gated Today user:
+      // /program bounces them straight back to Today, so the tab looked
+      // dead. The full program doc lives at /program/hitting-plan.
+      { href: hasTodayLayout(user) ? '/program/hitting-plan' : '/program', label: 'Program', key: 'program', badge: null },
       { href: '/videos', label: 'Videos', key: 'videos', badge: null },
       { href: '/messages', label: 'Messages', key: 'messages', badge: unread > 0 ? String(unread) : null },
     ];
