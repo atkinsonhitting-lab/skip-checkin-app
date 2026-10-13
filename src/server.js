@@ -2381,10 +2381,26 @@ function syncProgramsFromSheets() {
 // Run sheet sync on boot (Bobby's sheets are the source of truth)
 try { syncProgramsFromSheets(); } catch (e) { console.error('Sheet sync on boot failed:', e.message); }
 
+// ---- Today layout (Oct 2026, Bobby) ----
+// GATED PREVIEW: the new Today home screen for remote athletes renders ONLY
+// for the remote-program athlete whose first name is Bobby (Bobby's own
+// test account). Everyone else keeps the current /program flow untouched.
+// Gate = role athlete + remote program assigned + first_name 'Bobby'
+// (case-insensitive). The coach account is also named Bobby, but it has no
+// remote_program_id, so it never matches.
+function isTodayLayoutUser(user) {
+  return !!user
+    && user.role === 'athlete'
+    && !!user.remoteProgramId
+    && String(user.firstName || '').trim().toLowerCase() === 'bobby';
+}
+
 // Hitter's program page — remote athletes only.
 app.get('/program', requireLogin, requireWaiver, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
   if (!req.user.remoteProgramId) return res.redirect('/');
+  // Gated Today preview: the test athlete's Program home IS the Today page.
+  if (isTodayLayoutUser(req.user)) return res.redirect('/program/today');
   const sub = String(req.query.sub || 'hitting');
   // Bobby (Sep 24 2026): Program tab defaults to the hitting document.
   // ?sub=mobility goes to the mobility page.
@@ -2392,6 +2408,32 @@ app.get('/program', requireLogin, requireWaiver, (req, res) => {
     return res.redirect('/program/mobility');
   }
   return res.redirect('/program/hitting-plan');
+});
+
+// Today page (Oct 2026, Bobby) — GATED PREVIEW, see isTodayLayoutUser.
+// One day, sections in order: Movement, Hitting, Med Ball, Lifting.
+// Check-offs POST to the existing /program/check endpoint with sub=today,
+// which routes back here via /program?sub=today (handled by /program above).
+app.get('/program/today', requireLogin, requireWaiver, (req, res) => {
+  if (req.user.role === 'coach') return res.redirect('/coach');
+  if (!req.user.remoteProgramId) return res.redirect('/');
+  if (!isTodayLayoutUser(req.user)) return res.redirect('/program');
+  const p = getProgram(req.user.remoteProgramId);
+  if (!p) return res.redirect('/');
+  const liftingId = db.prepare('SELECT lifting_program_id FROM remote_programs WHERE id = ?').get(p.id);
+  const lifting = getLifting(liftingId && liftingId.lifting_program_id);
+  const today = chiToday();
+  const checkoffs = getCheckoffs(req.user.id, today);
+  const liftDays = Array.isArray(lifting && lifting.days) ? lifting.days.filter((d) =>
+    (Array.isArray(d.exercises) ? d.exercises : []).some((ex) => String((ex && ex.name) || '').trim())
+  ) : [];
+  const ldayIdx = pickLiftingDayIdx(req, p, liftDays.length);
+  res.send(views.todayProgramPage(req.user, p, {
+    lifting, ldayIdx, checkoffs, today,
+    videoLib: videoLibMap(),
+    subs: todaySubs(req.user.id),
+    weekday: chiWeekdayFmt.format(new Date()),
+  }));
 });
 
 // Mobility page (Sep 23 2026): mobility + med ball for non-lifters.

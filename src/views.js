@@ -106,7 +106,10 @@ const TABBAR_HREFS = ['/mental-game', '/checkin', '/notebook', '/chat'];
 // in the bottom tab bar too.
 // Bottom tab bar for Bobby's remote hitters only (mobile). Program comes
 // before Check In — the program is the point of the app for these guys.
-const REMOTE_TABBAR_HREFS = ['/program', '/mental-game', '/checkin', '/notebook', '/chat'];
+// Oct 2026: the gated Today preview adds its own tab hrefs. Extending this
+// allowlist changes nothing for other pages — bottomTabbar only renders
+// tabs a page actually passes in.
+const REMOTE_TABBAR_HREFS = ['/program', '/program/today', '/program/hitting-plan', '/videos', '/mental-game', '/checkin', '/notebook', '/chat'];
 // Coach tab bar (Sep 2026, Bobby: Messages in the tab bar instead of Train
 // Skip): Bobby's coaching loop — Home (attention), My Players, Approvals
 // (badge), Messages (badge). Train Skip, Programs, Videos, Finances, and
@@ -129,6 +132,10 @@ const TABBAR_ICONS = {
   '/notebook': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>',
   '/routine': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>',
   '/chat': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>',
+  // Today preview (Oct 2026, Bobby): tab icons for the gated Today page.
+  '/program/today': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><polyline points="9 16 11 18 15 14"/></svg>',
+  '/program/hitting-plan': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',
+  '/videos': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><polygon points="10 9 15 12 10 15 10 9" fill="currentColor" stroke="none"/></svg>',
 };
 function bottomTabbar(user, tabs) {
   if (!user) return '';
@@ -2333,6 +2340,266 @@ const realItems = (items) =>
   (Array.isArray(items) ? items : []).filter((it) => String((it && it.drill) || '').trim());
 const realExercises = (exs) =>
   (Array.isArray(exs) ? exs : []).filter((ex) => String((ex && ex.name) || '').trim());
+
+// Today page (Oct 2026, Bobby) — GATED PREVIEW for the Bobby test
+// account only (see isTodayLayoutUser in server.js). One day, sections in
+// order: Movement, Hitting, Med Ball, Lifting. Check-offs POST to the
+// existing /program/check endpoint with sub=today. Substitute links use
+// the existing /program/substitute flow. Reorder + move-day are
+// client-side-only in this preview (nothing persists).
+function todayProgramPage(user, p, opts) {
+  const o = opts || {};
+  const prog = (p && p.prog) || {};
+  const routine = Array.isArray(prog.routine) ? prog.routine : [];
+  const lifting = o.lifting || null;
+  const checkoffs = o.checkoffs || {};
+  const subs = o.subs || {};
+  const videoLib = o.videoLib || {};
+  const today = o.today || '';
+  const weekday = o.weekday || '';
+
+  // Schedule: [weekday, label] pairs (or {weekday, day_label} objects).
+  const schedEntry = (s) => Array.isArray(s)
+    ? { weekday: String(s[0] || '').trim(), label: String(s[1] || '').trim() }
+    : { weekday: String((s && s.weekday) || '').trim(), label: String((s && (s.day_label || s.label)) || '').trim() };
+  const schedArr = (Array.isArray(prog.schedule) ? prog.schedule : []).map(schedEntry);
+  const schedToday = schedArr.find((s) => s.weekday.toLowerCase() === String(weekday).toLowerCase());
+  const todayLabel = schedToday ? schedToday.label : '';
+  const isRestDay = !!schedToday && /^(off|rest|recovery)$/i.test(todayLabel);
+
+  const dayPrefix = (cat) => {
+    const m = /^([A-Za-z]+ ?\d+|Pregame)/i.exec(String(cat || '').trim());
+    return m ? m[1].trim() : '';
+  };
+  const kindOf = (cat) => {
+    const n = String(cat || '');
+    if (/med\s*ball/i.test(n)) return 'medball';
+    if (/mobility/i.test(n)) return 'mobility';
+    if (/prep/i.test(n)) return 'prep';
+    if (/metabol|conditioning/i.test(n)) return 'metabolic';
+    return 'hit';
+  };
+  const realItems = (items) => (Array.isArray(items) ? items : []).filter((it) => String((it && it.drill) || '').trim());
+  // Day filter: no schedule entry today -> everything is today's work.
+  // Day-prefixed blocks only show on their scheduled day; flat blocks always show.
+  const inToday = (cat) => {
+    if (!todayLabel) return true;
+    const pre = dayPrefix(cat);
+    return !pre || pre.toLowerCase() === todayLabel.toLowerCase();
+  };
+  const isMovementCat = (cat) => /daily routine/i.test(String(cat || '')) || kindOf(cat) === 'mobility' || kindOf(cat) === 'prep';
+
+  // Resolve a stored item video URL to its href: Drive URLs open the in-app
+  // library watch page when the video is in Bobby's library (and visible);
+  // YouTube and anything else open directly. Hidden library videos show no
+  // link at all. (Same rule as programPage.)
+  const videoHref = (url) => {
+    const u = String(url || '').trim();
+    if (!u) return '';
+    const dm = /drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/.exec(u);
+    if (dm) {
+      const v = videoLib[dm[1]];
+      if (v && !v.hidden) return '/videos/watch/' + v.id;
+      if (v && v.hidden) return '';
+      return u;
+    }
+    return u;
+  };
+  const watchLink = (video) => {
+    const href = videoHref(video);
+    if (!href) return '';
+    const ext = /^https?:\/\//i.test(href);
+    return ` <a class="td-watch" href="${esc(href)}"${ext ? ' target="_blank" rel="noopener"' : ''} aria-label="Watch video">&#9654; <span>Watch</span></a>`;
+  };
+
+  let totalItems = 0;
+  let doneItems = 0;
+  // One check-off row. Item keys match the existing conventions so Today
+  // check-offs sync with the Lifting tab: routine items
+  // `{kind}::{dayPrefix}::{category}::{drill}`; lifting items use the
+  // /program/lifting formats (`lift::{label}::{name}`,
+  // `spd::::{label}::{name}`, `med::::{label}::{name}`).
+  const checkRow = (kind, key, name, volume, video, extra) => {
+    const done = !!checkoffs[key];
+    totalItems += 1;
+    if (done) doneItems += 1;
+    const swapped = subs[key];
+    const shown = swapped ? String(swapped.sub_name || name) : name;
+    const subBadge = swapped ? ` <span class="td-subbadge">⇄ swapped from ${esc(name)}</span>` : '';
+    const subLink = kind === 'med'
+      ? ` <a class="td-sublink" href="/program/substitute?name=${encodeURIComponent(name)}&key=${encodeURIComponent(key)}&sub=today&day=${encodeURIComponent(todayLabel)}">⇄ Substitute</a>`
+      : '';
+    return `<form method="post" action="/program/check" class="td-row${done ? ' done' : ''}" data-td-row>
+      <input type="hidden" name="kind" value="${kind}">
+      <input type="hidden" name="sub" value="today">
+      <input type="hidden" name="day" value="${esc(todayLabel)}">
+      ${extra || ''}
+      <input type="hidden" name="item_key" value="${esc(key)}">
+      <span class="td-drag" title="Drag to reorder (preview only — order does not save yet)">≡</span>
+      <button type="submit" class="td-checkbtn" aria-label="${done ? 'Mark not done' : 'Mark done'}">${done ? '☑' : '☐'}</button>
+      <span class="td-rowmain"><span class="td-rowname">${esc(shown || '')}</span>${volume ? `<span class="td-vol">${esc(volume)}</span>` : ''}${subBadge}</span>
+      ${watchLink(video)}
+      ${subLink}
+    </form>`;
+  };
+  const heldHtml = (held) => held.length
+    ? held.map(() => `<div class="td-held"><p style="margin:0"><strong>Your coach is picking the right exercise for this spot.</strong></p><p class="td-hint" style="margin:4px 0 0">Check back soon — it will appear here when it's ready.</p></div>`).join('')
+    : '';
+
+  // ---- Section content ----
+  const movementBlocks = routine.filter((c) => realItems(c.items).length && isMovementCat(c.category) && inToday(c.category));
+  const hittingBlocks = routine.filter((c) => realItems(c.items).length && !isMovementCat(c.category) && kindOf(c.category) !== 'medball' && inToday(c.category));
+  const routineMedBlocks = routine.filter((c) => realItems(c.items).length && kindOf(c.category) === 'medball' && inToday(c.category));
+
+  const liftDays = Array.isArray(lifting && lifting.days) ? lifting.days.filter((d) =>
+    (Array.isArray(d.exercises) ? d.exercises : []).some((ex) => String((ex && ex.name) || '').trim())
+  ) : [];
+  const ldayIdx = Number.isFinite(Number(o.ldayIdx)) ? Number(o.ldayIdx) : 0;
+  const isLiftRest = ldayIdx < 0;
+  const curDay = (!isLiftRest && liftDays[ldayIdx]) || null;
+  const liftDayLabel = curDay ? String(curDay.label || '') : '';
+  const liftExtra = `<input type="hidden" name="lday" value="${ldayIdx}">`;
+
+  const movementHtml = movementBlocks.map((c) =>
+    realItems(c.items).map((it) => checkRow('mob', `mob::${dayPrefix(c.category)}::${c.category}::${it.drill}`, it.drill, it.volume || '', it.video || '')).join('')
+  ).join('');
+  const hittingHtml = hittingBlocks.map((c) =>
+    realItems(c.items).map((it) => checkRow('hit', `hit::${dayPrefix(c.category)}::${c.category}::${it.drill}`, it.drill, it.volume || '', it.video || '')).join('')
+  ).join('');
+
+  // Med ball: the lifting day's med ball is the source of truth when a
+  // lifting day exists (same rule as the Lifting tab); otherwise the
+  // routine med ball blocks.
+  let medHtml = '';
+  if (curDay) {
+    const dayMedAll = (Array.isArray(curDay.medball) ? curDay.medball : []).filter((s) => String((s && s.name) || '').trim());
+    const dayMed = dayMedAll.filter((s) => !s.held);
+    const heldMed = dayMedAll.filter((s) => s.held);
+    medHtml = dayMed.map((s) => checkRow('med', `med::::${liftDayLabel}::${s.name}`, s.name,
+      [s.volume, s.notes].filter(Boolean).join(' — '), s.video || '', liftExtra)).join('') + heldHtml(heldMed);
+  } else {
+    medHtml = routineMedBlocks.map((c) =>
+      realItems(c.items).map((it) => checkRow('med', `med::${dayPrefix(c.category)}::${c.category}::${it.drill}`, it.drill, it.volume || '', it.video || '')).join('')
+    ).join('');
+  }
+
+  // Lifting: Speed -> Power is inside Med Ball; here are the lifts.
+  let liftHtml = '';
+  if (curDay) {
+    const daySpeedAll = (Array.isArray(curDay.speed) ? curDay.speed : []).filter((s) => String((s && s.name) || '').trim());
+    const daySpeed = daySpeedAll.filter((s) => !s.held);
+    const heldSpeed = daySpeedAll.filter((s) => s.held);
+    const speedHtml = daySpeed.map((s) => checkRow('spd', `spd::::${liftDayLabel}::${s.name}`, s.name,
+      [s.volume, s.notes].filter(Boolean).join(' — '), s.video || '', liftExtra)).join('') + heldHtml(heldSpeed);
+    const exs = (Array.isArray(curDay.exercises) ? curDay.exercises : []).filter((ex) => String((ex && ex.name) || '').trim() && !(ex && ex.held));
+    const heldEx = (Array.isArray(curDay.exercises) ? curDay.exercises : []).filter((ex) => String((ex && ex.name) || '').trim() && (ex && ex.held));
+    const exHtml = exs.map((ex) => {
+      const vol = [ex.sets && ex.reps ? `${ex.sets} × ${ex.reps}` : '', ex.notes].filter(Boolean).join(' — ');
+      return checkRow('lift', `lift::${liftDayLabel}::${ex.name}`, ex.name, vol, ex.video || '', liftExtra);
+    }).join('') + heldHtml(heldEx);
+    liftHtml = speedHtml + exHtml;
+  }
+
+  const sectionHtml = (title, rowsHtml) => rowsHtml
+    ? `<section class="td-sec"><div class="td-sec-head"><span>${title}</span></div><div class="td-sec-rows" data-td-sec>${rowsHtml}</div></section>`
+    : '';
+
+  let dateLabel = weekday;
+  try {
+    const d = new Date(today + 'T12:00:00');
+    if (!Number.isNaN(d.getTime())) dateLabel = `${weekday} · ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+  } catch (e) { /* keep weekday */ }
+
+  let content = '';
+  if (isRestDay) {
+    content = `<div class="td-card"><p style="margin:0"><strong>Rest day — recover.</strong></p><p class="td-hint" style="margin:6px 0 0">No work scheduled today. Walk, stretch, sleep — the rest is the work.</p></div>`;
+  } else {
+    content = sectionHtml('Movement · Warm-up', movementHtml)
+      + sectionHtml('Hitting', hittingHtml)
+      + sectionHtml('Med Ball', medHtml)
+      + (curDay ? sectionHtml(`Lifting · ${esc(liftDayLabel)}`, liftHtml) : (lifting ? `<section class="td-sec"><div class="td-sec-head"><span>Lifting</span></div><div class="td-card"><p style="margin:0">No lifting today — rest day on the lifting calendar.</p></div></section>` : ''));
+    if (!totalItems) {
+      content = `<div class="td-card"><p style="margin:0"><strong>No program yet.</strong></p><p class="td-hint" style="margin:6px 0 0">Nothing scheduled for today. Your coach will add your program here.</p></div>`;
+    }
+  }
+  const pct = totalItems ? Math.round((doneItems / totalItems) * 100) : 0;
+
+  const tabs = [
+    { href: '/program/today', label: 'Today', active: true },
+    { href: '/program/hitting-plan', label: 'Program' },
+    { href: '/videos', label: 'Videos' },
+    { href: '/chat', label: 'Messages' },
+  ];
+
+  return layout({
+    title: 'Today',
+    user,
+    tabs,
+    body: `<style>
+.td-eyebrow{font-size:12px;font-weight:800;letter-spacing:2px;color:#999;margin:0 0 4px}
+.td-h1{font-size:26px;font-weight:800;margin:0}
+.td-date{font-size:13px;color:#999;margin:4px 0 0}
+.td-progress{display:flex;justify-content:space-between;font-size:12px;color:#999;margin:14px 0 6px}
+.td-bar{height:6px;background:#222;border-radius:3px;overflow:hidden}
+.td-barfill{height:100%;background:#fff;border-radius:3px}
+.td-sec{margin-top:22px}
+.td-sec-head{font-size:16px;font-weight:800;padding-bottom:8px;border-bottom:1px solid #222}
+.td-row{display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid #1a1a1a}
+.td-row.done{opacity:.45}
+.td-drag{color:#555;font-size:16px;cursor:grab;touch-action:none}
+.td-checkbtn{background:none;border:none;color:#fff;font-size:22px;line-height:1;padding:0;cursor:pointer}
+.td-rowmain{flex:1;min-width:0}
+.td-rowname{display:block;font-size:15px;font-weight:600}
+.td-row.done .td-rowname{text-decoration:line-through}
+.td-vol{display:block;font-size:12px;color:#888;margin-top:2px}
+.td-watch{color:#fff;font-size:12px;white-space:nowrap;text-decoration:none;border:1px solid #333;border-radius:20px;padding:6px 10px}
+.td-watch span{margin-left:2px}
+.td-sublink{color:#999;font-size:12px;white-space:nowrap;text-decoration:none}
+.td-subbadge{color:#999;font-size:12px}
+.td-card{background:#111;border:1px solid #222;border-radius:12px;padding:16px;margin-top:16px}
+.td-hint{font-size:12px;color:#888}
+.td-held{background:#111;border:1px dashed #333;border-radius:12px;padding:14px;margin:10px 0}
+.td-move{width:100%;background:#111;color:#fff;border:1px solid #333;border-radius:10px;padding:12px;font-size:13px;font-weight:600;margin-top:20px;cursor:pointer}
+.td-movenote{font-size:12px;color:#888;margin:8px 0 0;text-align:center}
+</style>
+<p class="td-eyebrow">ATKINSON HITTING</p>
+<h1 class="td-h1">Today</h1>
+<p class="td-date">${esc(dateLabel)}${todayLabel ? ` · ${esc(todayLabel)}` : ''}</p>
+<div class="td-progress"><span>${doneItems} of ${totalItems} complete</span><span>${pct}%</span></div>
+<div class="td-bar"><div class="td-barfill" style="width:${pct}%"></div></div>
+${content}
+<button type="button" class="td-move" id="td-move-day">Move day to tomorrow</button>
+<p class="td-movenote" id="td-move-note" hidden>Moving days doesn't save yet in this preview.</p>
+<script>
+(function () {
+  var moveBtn = document.getElementById('td-move-day');
+  var moveNote = document.getElementById('td-move-note');
+  if (moveBtn && moveNote) moveBtn.addEventListener('click', function () { moveNote.hidden = false; moveBtn.textContent = 'Day move noted — not saved yet'; });
+  // Drag handles reorder rows within a section (preview only — order does
+  // not save). Rows are forms, so dragging starts from the handle only.
+  var dragged = null;
+  document.querySelectorAll('.td-drag').forEach(function (h) {
+    h.setAttribute('draggable', 'true');
+    h.addEventListener('dragstart', function () { dragged = h.closest('[data-td-row]'); });
+    h.addEventListener('dragend', function () { dragged = null; });
+  });
+  document.querySelectorAll('[data-td-sec]').forEach(function (sec) {
+    sec.addEventListener('dragover', function (e) {
+      if (!dragged) return;
+      e.preventDefault();
+      var row = e.target.closest('[data-td-row]');
+      if (row && row !== dragged) {
+        var r = row.getBoundingClientRect();
+        if (e.clientY < r.top + r.height / 2) sec.insertBefore(dragged, row);
+        else sec.insertBefore(dragged, row.nextSibling);
+      }
+    });
+    sec.addEventListener('drop', function (e) { e.preventDefault(); dragged = null; });
+  });
+})();
+</script>`,
+  });
+}
 
 function programPage(user, p, opts) {
   const prog = p.prog || {};
@@ -6160,6 +6427,7 @@ module.exports = {
   forgotPasswordPage,
   resetPasswordPage,
   programPage,
+  todayProgramPage,
   workoutPage,
   sessionPage,
   programRoutinePage,
