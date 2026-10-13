@@ -1949,41 +1949,36 @@ function splitProgramBlocks(p) {
   }
   return out;
 }
-// Which Programs sub-tabs an athlete gets (Bobby, Sep 24 2026): training
-// blocks are ONLY mobility, med ball, and lifting (when assigned). The
-// hitting document IS the page — no Hitting tab.
-// Mobility tab only when the program has mobility content AND no lifting
-// program — lifters get mobility paired INSIDE the Lifting tab. Med Ball tab
-// only when they have med ball content, no lifting, AND no mobility
-// (mobility + med ball pair in the Mobility tab for non-lifters). Lifting
-// only when a lifting program with real exercises is assigned.
-// Returns [{ id, label }].
-function programSubTabs(p, lifting) {
-  const blocks = splitProgramBlocks(p);
-  // Per-hitter section labels (Bobby, Oct 2026) — the tabs show this
-  // athlete's renamed sections; other hitters keep their own.
+// Section tabs for the Program page (Bobby, Oct 2026): one tab per
+// non-blank section — Hitting, Movement, Med Ball, Lifting — in that
+// order, with the hitter's renamed labels. A blank section gets no tab
+// at all. Returns [{ id, label, href }]. Hitting = the program doc;
+// Movement / Med Ball / Lifting = their interactive pages.
+function programSectionTabs(p, lifting) {
   const prog = (p && p.prog) || {};
   const sl = (prog.section_labels && typeof prog.section_labels === 'object') ? prog.section_labels : {};
   const tabLabel = (key, dflt) => String(sl[key] || '').trim() || dflt;
-  const tabs = [];
+  const routine = Array.isArray(prog.routine) ? prog.routine : [];
+  const hasReal = (c) => (Array.isArray(c.items) ? c.items : []).some((it) => String((it && it.drill) || '').trim());
+  const blocks = splitProgramBlocks(p);
+  const drills = Array.isArray(prog.hitting_plan && prog.hitting_plan.drills) ? prog.hitting_plan.drills : [];
+  const hasHitting = drills.length > 0 || blocks.prep.length > 0 || blocks.hit.length > 0 || blocks.metabolic.length > 0;
+  // Movement = Daily Routine + Mobility blocks (Daily Routine classifies
+  // as 'hit' in splitProgramBlocks, so check it directly).
+  const hasMovement = blocks.mobility.length > 0 ||
+    routine.some((c) => hasReal(c) && /daily routine/i.test(String(c.category || '')));
+  // Med Ball tab = routine med ball blocks only. Lifters' lifting-day med
+  // ball lives inside the Lifting tab (Power) — no duplicate tab.
+  const hasMedball = blocks.medball.length > 0;
   const liftDays = lifting && Array.isArray(lifting.days) ? lifting.days : [];
   const hasLifting = liftDays.some((d) =>
     (Array.isArray(d.exercises) ? d.exercises : []).some((ex) => String((ex && ex.name) || '').trim())
   );
-  // Med ball rides with lifting — it's the explosive start of it.
-  // Bobby (Sep 23 2026): no standalone Mobility section unless the athlete
-  // has mobility work AND no lifting program. Lifters get mobility paired
-  // inside the Lifting tab; non-lifters get mobility + med ball paired in one
-  // flow (the Mobility tab). A lone Med Ball tab only appears when there's med
-  // ball work but no mobility blocks to pair it with.
-  if (blocks.mobility.length && !hasLifting) tabs.push({ id: 'mobility', label: tabLabel('movement', 'Warm-up') });
-  if (!hasLifting && blocks.medball.length && !blocks.mobility.length) tabs.push({ id: 'medball', label: tabLabel('medball', 'Med Ball') });
-  // No Metabolic tab (Sep 2026): speed work lives inside the Lifting tab.
-  // Legacy 'Metabolic' blocks in old programs render in the Lifting tab's
-  // Speed section instead of getting their own tab.
-  if (hasLifting) {
-    tabs.push({ id: 'lifting', label: tabLabel('lifting', 'Lifting') });
-  }
+  const tabs = [];
+  if (hasHitting) tabs.push({ id: 'hitting', label: tabLabel('hitting', 'Hitting'), href: '/program/hitting-plan' });
+  if (hasMovement) tabs.push({ id: 'movement', label: tabLabel('movement', 'Movement'), href: '/program/movement' });
+  if (hasMedball) tabs.push({ id: 'medball', label: tabLabel('medball', 'Med Ball'), href: '/program/medball' });
+  if (hasLifting) tabs.push({ id: 'lifting', label: tabLabel('lifting', 'Lifting'), href: '/program/lifting' });
   return tabs;
 }
 // Distinct day labels across a program's blocks, in first-seen order
@@ -2390,11 +2385,19 @@ app.get('/program', requireLogin, requireWaiver, (req, res) => {
   // Gated Today preview: the test athlete's Program home IS the Today page.
   if (isTodayLayoutUser(req.user)) return res.redirect('/program/today');
   const sub = String(req.query.sub || 'hitting');
-  // Bobby (Sep 24 2026): Program tab defaults to the hitting document.
-  // ?sub=mobility goes to the mobility page.
-  if (sub === 'mobility') {
-    return res.redirect('/program/mobility');
+  const day = String(req.query.day || '');
+  const dayQ = day ? `?day=${encodeURIComponent(day)}` : '';
+  // Section router (Bobby, Oct 2026): the Program page's tabs all route
+  // through here so check-offs land back on the right section.
+  // 'mobility' is the legacy sub for the Movement tab.
+  if (sub === 'movement' || sub === 'mobility') return res.redirect('/program/movement' + dayQ);
+  if (sub === 'medball') return res.redirect('/program/medball' + dayQ);
+  if (sub === 'lifting') {
+    const lday = String(req.query.lday || '');
+    const q = [day && `day=${encodeURIComponent(day)}`, lday && `lday=${encodeURIComponent(lday)}`].filter(Boolean).join('&');
+    return res.redirect('/program/lifting' + (q ? `?${q}` : ''));
   }
+  // Bobby (Sep 24 2026): Program tab defaults to the hitting document.
   return res.redirect('/program/hitting-plan');
 });
 
@@ -2424,19 +2427,56 @@ app.get('/program/today', requireLogin, requireWaiver, (req, res) => {
   }));
 });
 
-// Mobility page (Sep 23 2026): mobility + med ball for non-lifters.
+// Mobility page (Sep 23 2026) — now the Movement tab. The Warm-up doc
+// page is retired; Movement is an interactive tab on the Program page.
+// Legacy /program/mobility links land on the Movement tab.
 app.get('/program/mobility', requireLogin, requireWaiver, (req, res) => {
+  if (req.user.role === 'coach') return res.redirect('/coach');
+  if (!req.user.remoteProgramId) return res.redirect('/');
+  return res.redirect('/program/movement');
+});
+
+// Movement tab (Bobby, Oct 2026): Daily Routine + Mobility blocks,
+// full program, check-offs. Med ball lives on its own tab now.
+app.get('/program/movement', requireLogin, requireWaiver, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
   if (!req.user.remoteProgramId) return res.redirect('/');
   const p = getProgram(req.user.remoteProgramId);
   if (!p) return res.redirect('/');
   const liftingId = db.prepare('SELECT lifting_program_id FROM remote_programs WHERE id = ?').get(p.id);
   const lifting = getLifting(liftingId && liftingId.lifting_program_id);
-  const tabs = programSubTabs(p, lifting);
-  const blocks = splitProgramBlocks(p);
-  // Bobby (Sep 23 2026): med ball rotates daily on the Warm-up page too
-  const todaysMedball = todaysMedballBlocks(p, blocks);
-  res.send(views.mobilityPage(req.user, p, { tabs, blocks, todaysMedball }));
+  const tabs = programSectionTabs(p, lifting);
+  const today = chiToday();
+  const checkoffs = getCheckoffs(req.user.id, today);
+  const labels = programDayLabels(p);
+  res.send(views.programPage(req.user, p, {
+    tabs, sub: 'movement', day: String(req.query.day || ''), labels, today, checkoffs, lifting,
+    sched: [], weekday: chiWeekdayFmt.format(new Date()), isToday: true,
+    videoLib: videoLibMap(), subs: todaySubs(req.user.id),
+    sessionOrder: 'hitting_first',
+  }));
+});
+
+// Med Ball tab (Bobby, Oct 2026): routine med ball blocks, full
+// program, check-offs. Lifters' lifting-day med ball stays inside the
+// Lifting tab (Power) — this tab is the routine med ball work.
+app.get('/program/medball', requireLogin, requireWaiver, (req, res) => {
+  if (req.user.role === 'coach') return res.redirect('/coach');
+  if (!req.user.remoteProgramId) return res.redirect('/');
+  const p = getProgram(req.user.remoteProgramId);
+  if (!p) return res.redirect('/');
+  const liftingId = db.prepare('SELECT lifting_program_id FROM remote_programs WHERE id = ?').get(p.id);
+  const lifting = getLifting(liftingId && liftingId.lifting_program_id);
+  const tabs = programSectionTabs(p, lifting);
+  const today = chiToday();
+  const checkoffs = getCheckoffs(req.user.id, today);
+  const labels = programDayLabels(p);
+  res.send(views.programPage(req.user, p, {
+    tabs, sub: 'medball', day: String(req.query.day || ''), labels, today, checkoffs, lifting,
+    sched: [], weekday: chiWeekdayFmt.format(new Date()), isToday: true,
+    videoLib: videoLibMap(), subs: todaySubs(req.user.id),
+    sessionOrder: 'hitting_first',
+  }));
 });
 
 // Bobby (Sep 23 2026): med ball rotates daily. Uses the athlete's own
@@ -2535,7 +2575,7 @@ app.get('/program/hitting-plan', requireLogin, requireWaiver, (req, res) => {
   }
   const liftingId = db.prepare('SELECT lifting_program_id FROM remote_programs WHERE id = ?').get(p.id);
   const lifting = getLifting(liftingId && liftingId.lifting_program_id);
-  const tabs = programSubTabs(p, lifting);
+  const tabs = programSectionTabs(p, lifting);
   res.send(views.hittingPlanPage(req.user, p, { tabs, sub: 'hitting' }));
 });
 
@@ -2548,14 +2588,10 @@ app.get('/program/lifting', requireLogin, requireWaiver, (req, res) => {
   if (!p) return res.redirect('/');
   const liftingId = db.prepare('SELECT lifting_program_id FROM remote_programs WHERE id = ?').get(p.id);
   const lifting = getLifting(liftingId && liftingId.lifting_program_id);
-  if (!lifting) return res.send(views.hittingPlanPage(req.user, p)); // No lifting? Show hitting doc
-  // Render the lifting sub-tab using the existing programPage view
-  // (Bobby Sep 24 2026: training blocks are mobility/med ball/lifting only —
-  // no Hitting tab; the Hitting Plan button at the top of programPage is the
-  // way back to the hitting document.)
-  // Per-hitter section label (Bobby, Oct 2026).
-  const liftLabel = (p.prog && p.prog.section_labels && String(p.prog.section_labels.lifting || '').trim()) || 'Lifting';
-  const tabs = [{ id: 'lifting', label: liftLabel }];
+  const tabs = programSectionTabs(p, lifting);
+  if (!lifting) return res.send(views.hittingPlanPage(req.user, p, { tabs })); // No lifting? Show hitting doc
+  // Render the lifting section using the existing programPage view.
+  // The section tab bar at the top links the sections together.
   const today = chiToday();
   const checkoffs = getCheckoffs(req.user.id, today);
   const liftDays = Array.isArray(lifting.days) ? lifting.days.filter((d) =>
@@ -2921,6 +2957,18 @@ app.post('/program/check', requireLogin, requireWaiver, (req, res) => {
   const day = String(req.body.day || '').slice(0, 30);
   const r = applyProgramLog(req.user.id, req.body);
   if (!r.ok) return res.redirect('/program');
+  // Gated Today user: /program bounces to Today, so send check-offs
+  // back to the section page they came from (Bobby, Oct 2026).
+  if (isTodayLayoutUser(req.user)) {
+    if (sub === 'today') return res.redirect('/program/today');
+    if (sub === 'movement') return res.redirect('/program/movement' + (day ? '?day=' + encodeURIComponent(day) : ''));
+    if (sub === 'medball') return res.redirect('/program/medball' + (day ? '?day=' + encodeURIComponent(day) : ''));
+    if (sub === 'lifting') {
+      const q = [day && `day=${encodeURIComponent(day)}`, req.body.lday != null && String(req.body.lday) !== '' && `lday=${encodeURIComponent(String(req.body.lday))}`].filter(Boolean).join('&');
+      return res.redirect('/program/lifting' + (q ? `?${q}` : ''));
+    }
+    return res.redirect('/program/hitting-plan');
+  }
   const back =
     '/program?sub=' +
     encodeURIComponent(sub) +
@@ -4051,7 +4099,7 @@ app.get('/coach/program/:id/doc', requireCoach, (req, res) => {
   }
   const liftingId = db.prepare('SELECT lifting_program_id FROM remote_programs WHERE id = ?').get(p.id);
   const lifting = getLifting(liftingId && liftingId.lifting_program_id);
-  const tabs = programSubTabs(p, lifting);
+  const tabs = programSectionTabs(p, lifting);
   const canEdit = req.user.role === 'coach' && req.user.canEdit !== false;
   res.send(
     views.hittingPlanPage(req.user, p, {

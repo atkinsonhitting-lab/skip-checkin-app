@@ -118,6 +118,44 @@ function sectionLabelsOf(prog) {
     lifting: clean(s.lifting, 'Lifting'),
   };
 }
+
+// Block classification shared by Today + Program (Bobby, Oct 2026).
+// Movement = Daily Routine + Mobility blocks. Prep lives under Hitting
+// (its own sub-section), never under Movement. Hitting drills = hit +
+// metabolic blocks. Med ball = med ball blocks. A block's environment is
+// its category suffix after the day prefix ("Day 1 — Tee" -> "Tee") —
+// a condition, never a drill.
+const progIsMovement = (cat) => /daily routine/i.test(String(cat || '')) || /mobility/i.test(String(cat || ''));
+const progIsPrep = (cat) => /prep/i.test(String(cat || ''));
+const progIsMedball = (cat) => /med\s*ball/i.test(String(cat || ''));
+const progIsHittingDrill = (cat) => !progIsMovement(cat) && !progIsPrep(cat) && !progIsMedball(cat);
+// Category blocks + top-level prog.<field> fallback, mirroring
+// splitProgramBlocks in server.js: when routine has no blocks matching
+// the fallback category, the list lives on the program object itself
+// (Bobby's sheets put Mobility there). sectionPred selects the section's
+// blocks (e.g. Movement = Daily Routine + Mobility); fallbackCatPred
+// decides whether the top-level list is needed (e.g. Mobility only).
+const sectionBlocksWithFallback = (routine, prog, sectionPred, fallbackCatPred, field, category) => {
+  const blocks = (Array.isArray(routine) ? routine : []).filter((c) => sectionPred(c.category) && realItems(c.items).length);
+  const hasFallbackCat = (Array.isArray(routine) ? routine : []).some((c) => fallbackCatPred(c.category) && realItems(c.items).length);
+  if (!hasFallbackCat && Array.isArray(prog[field]) && realItems(prog[field]).length) {
+    blocks.push({ category, items: realItems(prog[field]) });
+  }
+  return blocks;
+};
+const progBlockEnvironment = (cat) => {
+  const c = String(cat || '').trim();
+  if (!c) return '';
+  // A bare day label ("Day 1", "Pregame") is not an environment.
+  if (/^(?:[A-Za-z]+ ?\d+|Pregame)$/i.test(c)) return '';
+  const m = /^(?:[A-Za-z]+ ?\d+|Pregame)\s*[—–-]\s*(.+)$/i.exec(c);
+  const suffix = (m ? m[1] : c).trim();
+  return GENERIC_ENV_NAMES.has(suffix.toLowerCase()) ? '' : suffix;
+};
+// Generic category names that are NOT environments — never list them as
+// environments for the day. (Game Swings / Normal Swings are drill
+// names — Bobby's end-of-section labels — not conditions.)
+const GENERIC_ENV_NAMES = new Set(['hitting', 'hitting work', 'drills', 'work', 'hitting program', 'program', '', 'game swings', 'normal swings']);
 // (Bobby, Sep 17 2026 — booking links in messages must be clickable).
 function linkify(text) {
   return esc(text).replace(/https?:\/\/[^\s<>"')\]]+/g, (u) => {
@@ -2594,14 +2632,6 @@ function todayProgramPage(user, p, opts) {
     const m = /^([A-Za-z]+ ?\d+|Pregame)/i.exec(String(cat || '').trim());
     return m ? m[1].trim() : '';
   };
-  const kindOf = (cat) => {
-    const n = String(cat || '');
-    if (/med\s*ball/i.test(n)) return 'medball';
-    if (/mobility/i.test(n)) return 'mobility';
-    if (/prep/i.test(n)) return 'prep';
-    if (/metabol|conditioning/i.test(n)) return 'metabolic';
-    return 'hit';
-  };
   const realItems = (items) => (Array.isArray(items) ? items : []).filter((it) => String((it && it.drill) || '').trim());
   // Day filter: no schedule entry today -> everything is today's work.
   // Day-prefixed blocks only show on their scheduled day; flat blocks always show.
@@ -2610,7 +2640,6 @@ function todayProgramPage(user, p, opts) {
     const pre = dayPrefix(cat);
     return !pre || pre.toLowerCase() === todayLabel.toLowerCase();
   };
-  const isMovementCat = (cat) => /daily routine/i.test(String(cat || '')) || kindOf(cat) === 'mobility' || kindOf(cat) === 'prep';
 
   // Program item videos open cleanly in-app (see programVideoButton).
   const watchLink = (video) => programVideoButton(video, videoLib, 'td-watch', true);
@@ -2649,10 +2678,15 @@ function todayProgramPage(user, p, opts) {
     ? held.map(() => `<div class="td-held"><p style="margin:0"><strong>Your coach is picking the right exercise for this spot.</strong></p><p class="td-hint" style="margin:4px 0 0">Check back soon — it will appear here when it's ready.</p></div>`).join('')
     : '';
 
-  // ---- Section content ----
-  const movementBlocks = routine.filter((c) => realItems(c.items).length && isMovementCat(c.category) && inToday(c.category));
-  const hittingBlocks = routine.filter((c) => realItems(c.items).length && !isMovementCat(c.category) && kindOf(c.category) !== 'medball' && inToday(c.category));
-  const routineMedBlocks = routine.filter((c) => realItems(c.items).length && kindOf(c.category) === 'medball' && inToday(c.category));
+  // ---- Section content (Bobby, Oct 2026): Movement, then Hitting
+  // (Prep / Drills / Environments), then Med Ball + Lifting. Prep lives
+  // under Hitting now — it is no longer part of Movement.
+  const movementBlocks = sectionBlocksWithFallback(routine, prog, progIsMovement, (cat) => /mobility/i.test(String(cat || '')), 'mobility', 'Mobility')
+    .filter((c) => inToday(c.category));
+  const prepBlocks = routine.filter((c) => realItems(c.items).length && progIsPrep(c.category) && inToday(c.category));
+  const hittingEnvBlocks = routine.filter((c) => realItems(c.items).length && progIsHittingDrill(c.category) && inToday(c.category));
+  const routineMedBlocks = sectionBlocksWithFallback(routine, prog, progIsMedball, progIsMedball, 'medball', 'Med Ball')
+    .filter((c) => inToday(c.category));
 
   const liftDays = Array.isArray(lifting && lifting.days) ? lifting.days.filter((d) =>
     (Array.isArray(d.exercises) ? d.exercises : []).some((ex) => String((ex && ex.name) || '').trim())
@@ -2666,9 +2700,31 @@ function todayProgramPage(user, p, opts) {
   const movementHtml = movementBlocks.map((c) =>
     realItems(c.items).map((it) => checkRow('mob', `mob::${dayPrefix(c.category)}::${c.category}::${it.drill}`, it.drill, it.volume || '', it.video || '', '', it.tags)).join('')
   ).join('');
-  const hittingHtml = hittingBlocks.map((c) =>
+  // Prep rows keep their 'mob' kind + mob:: check-off keys (storage
+  // identity) even though they now render under Hitting — existing
+  // check-offs for prep items keep syncing exactly.
+  const prepHtml = prepBlocks.map((c) =>
+    realItems(c.items).map((it) => checkRow('mob', `mob::${dayPrefix(c.category)}::${c.category}::${it.drill}`, it.drill, it.volume || '', it.video || '', '', it.tags)).join('')
+  ).join('');
+  const drillsHtml = hittingEnvBlocks.map((c) =>
     realItems(c.items).map((it) => checkRow('hit', `hit::${dayPrefix(c.category)}::${c.category}::${it.drill}`, it.drill, it.volume || '', it.video || '', '', it.tags)).join('')
   ).join('');
+  // Environments for the day: the environments the day's hitting blocks
+  // run in (block-category suffixes), deduped in first-seen order.
+  // Conditions, never drills — no check-offs. No environment info for
+  // the day means no Environments sub-section at all.
+  const envNames = [];
+  for (const c of hittingEnvBlocks) {
+    const env = progBlockEnvironment(c.category);
+    if (env && !envNames.some((e) => e.toLowerCase() === env.toLowerCase())) envNames.push(env);
+  }
+  const envHtml = envNames.length
+    ? `<div class="td-subhead">Environments for the day</div><p class="td-envnote">Conditions, not drills — run your drills in these environments.</p><div class="td-envchips">${envNames.map((e) => `<span class="td-envchip">${esc(e)}</span>`).join('')}</div>`
+    : '';
+  // Each Hitting sub-section renders only with content (blank = hidden).
+  const hittingHtml = (prepHtml ? `<div class="td-subhead">Prep</div>${prepHtml}` : '')
+    + (drillsHtml ? `<div class="td-subhead">Drills</div>${drillsHtml}` : '')
+    + envHtml;
 
   // Med ball: the lifting day's med ball is the source of truth when a
   // lifting day exists (same rule as the Lifting tab); otherwise the
@@ -2749,6 +2805,11 @@ function todayProgramPage(user, p, opts) {
 .td-barfill{height:100%;background:#fff;border-radius:3px}
 .td-sec{margin-top:22px}
 .td-sec-head{font-size:16px;font-weight:800;padding-bottom:8px;border-bottom:1px solid #222}
+.td-subhead{font-size:13px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:#999;margin:16px 0 4px}
+.td-subhead:first-child{margin-top:0}
+.td-envnote{font-size:12px;color:#888;margin:0 0 8px}
+.td-envchips{display:flex;flex-wrap:wrap;gap:8px;padding:2px 0 12px}
+.td-envchip{border:1px solid #333;border-radius:20px;padding:6px 12px;font-size:13px;font-weight:600}
 .td-row{display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid #1a1a1a}
 .td-row.done{opacity:.45}
 .td-drag{color:#555;font-size:16px;cursor:grab;touch-action:none}
@@ -2820,10 +2881,13 @@ function programPage(user, p, opts) {
   const weekday = o.weekday || '';
   const autoDay = o.autoDay || '';
   const isToday = !!o.isToday;
-  const videoLib = o.videoLib || {};
+  // NOTE: local is videoMap, not videoLib — blockCard below calls the
+  // module-scope videoLib.findVideoUrl (video_lib.js); a local named
+  // videoLib would shadow it with the plain drive-id map.
+  const videoMap = o.videoLib || {};
 
   // Program item videos open cleanly in-app (see programVideoButton).
-  const watchLink = (video) => programVideoButton(video, videoLib, 'watch-link', true);
+  const watchLink = (video) => programVideoButton(video, videoMap, 'watch-link', true);
   // (yt helpers live at module scope: ytIdOf, intentBadgeHtml, liftVideoHtml, YT_TOGGLE_SCRIPT)
 
 
@@ -2836,12 +2900,13 @@ function programPage(user, p, opts) {
   const meta = [prog.date_range, prog.phase_emphasis].filter(Boolean).map(esc).join(' · ');
   const progNotes = Array.isArray(prog.notes) ? prog.notes.filter(Boolean) : [];
 
-  // Training-block nav (Bobby Sep 24 2026): mobility / med ball / lifting
-  // only. The hitting document is this page, not a tab.
+  // Training-block nav (Bobby Sep 24 2026, tabs Oct 2026): one tab per
+  // program section — Hitting / Movement / Med Ball / Lifting. Section
+  // tabs carry their own href; fall back to the legacy ?sub= link.
   const tabHtml = `<nav class="prog-subtabs">${tabs
     .map(
       (t) =>
-        `<a href="/program?sub=${t.id}${day ? '&day=' + encodeURIComponent(day) : ''}" class="subtab${t.id === sub ? ' active' : ''}">${esc(t.label)}</a>`
+        `<a href="${esc(t.href || `/program?sub=${t.id}${day ? '&day=' + encodeURIComponent(day) : ''}`)}" class="subtab${t.id === sub ? ' active' : ''}">${esc(t.label)}</a>`
     )
     .join('')}</nav>`;
   // Session order removed (Bobby, Sep 23 2026) — hitting always runs first.
@@ -2899,10 +2964,10 @@ function programPage(user, p, opts) {
       const lab = s ? s.label : '';
       const isToday = wd.toLowerCase() === String(weekday).toLowerCase();
       const isOff = /^(off|rest)/i.test(lab) || !lab;
-      // Bobby (Sep 23 2026): Mobility Day opens the Mobility tab for non-lifters;
+      // Bobby (Sep 23 2026): Mobility Day opens the Movement tab;
       // lifters get mobility inside the Lifting tab, so it opens lifting.
-      const hasMobTab = tabs.some((t) => t.id === 'mobility');
-      const tab = /mobility day/i.test(lab) ? (hasMobTab ? 'mobility' : 'lifting') : sub;
+      const hasMovementTab = tabs.some((t) => t.id === 'movement');
+      const tab = /mobility day/i.test(lab) ? (hasMovementTab ? 'movement' : 'lifting') : sub;
       const inner = `<span class="ws-dow">${wd.slice(0, 3)}</span><span class="ws-lab">${esc(lab || '—')}</span>`;
       const cls = `ws-cell${isToday ? ' ws-today' : ''}${isOff ? ' ws-off' : ''}`;
       return isOff
@@ -2949,7 +3014,20 @@ function programPage(user, p, opts) {
   };
 
   let content = '';
-  if (sub === 'mobility') {
+  if (sub === 'movement') {
+    // Movement tab (Bobby, Oct 2026): Daily Routine + Mobility blocks,
+    // full program, check-offs. Med ball lives on its own tab now.
+    // Includes the top-level prog.mobility fallback (see
+    // sectionBlocksWithFallback).
+    const blocks = sectionBlocksWithFallback(routine, prog, progIsMovement, (cat) => /mobility/i.test(String(cat || '')), 'mobility', 'Mobility');
+    const todays = day ? blocks.filter((c) => inDay(c.category, day)) : blocks;
+    const others = day ? blocks.filter((c) => !inDay(c.category, day)) : [];
+    content = `${dayHead(true)}
+      ${(todays.length || others.length
+        ? todays.map((c) => blockCard(c.category, c.items, 'mob', dayPrefix(c.category))).join('') +
+          others.map((c) => blockCard(c.category, c.items, 'mob', dayPrefix(c.category))).join('')
+        : '')}`;
+  } else if (sub === 'mobility') {
     const blocks = routine.filter((c) => kindOf(c.category) === 'mobility' && realItems(c.items).length);
     // Bobby (Sep 23 2026): mobility + med ball paired in one flow for athletes
     // without a lifting program — med ball work renders below the mobility.
@@ -2964,7 +3042,9 @@ function programPage(user, p, opts) {
       <p class="lede">Do this first, every day — then get after the work below.</p>
       ${blocks.map((c) => blockCard(c.category, c.items, 'mob')).join('')}${medHtmlMob}`;
   } else if (sub === 'medball') {
-    const blocks = routine.filter((c) => kindOf(c.category) === 'medball' && realItems(c.items).length);
+    // Med Ball tab: routine med ball blocks + top-level prog.medball
+    // fallback (see sectionBlocksWithFallback).
+    const blocks = sectionBlocksWithFallback(routine, prog, progIsMedball, progIsMedball, 'medball', 'Med Ball');
     const todays = day ? blocks.filter((c) => inDay(c.category, day)) : blocks;
     const others = day ? blocks.filter((c) => !inDay(c.category, day)) : [];
     content = `${dayHead(true)}
@@ -3040,7 +3120,7 @@ function programPage(user, p, opts) {
       const tEntry = schedArr.find(([wd]) => String(wd || '').toLowerCase() === String(o.weekday || '').toLowerCase());
       const tLabel = tEntry ? String(tEntry[1] || '') : '';
       const restCopy = /mobil/i.test(tLabel)
-        ? '<strong>Mobility day</strong> — no lifting today. Hit the Mobility tab if you want to move.'
+        ? '<strong>Mobility day</strong> — no lifting today. Hit the Movement tab if you want to move.'
         : /recover/i.test(tLabel)
           ? '<strong>Recovery day</strong> — no lifting today. Walk, stretch, sleep — the rest is the work.'
           : '<strong>OFF day</strong> — no lifting today. True rest.';
@@ -5941,17 +6021,12 @@ function hittingPlanPage(user, p, opts) {
   const envLib = require('./env_lib');
   // Bobby (Sep 23 2026): tab navigation for Mobility/Hitting
   const tabs = o.tabs || [];
-  // Bobby (Sep 24 2026): training blocks are mobility, med ball, lifting
-  // only — no Hitting tab. The hitting document IS this page; lifters get a
-  // button to their lifting program.
-  const liftBtn = tabs.some((t) => t.id === 'lifting')
-    ? `<p style="text-align:center;margin-bottom:20px"><a href="/program/lifting" class="btn" style="display:inline-block;text-decoration:none;padding:12px 24px;background:#111;color:#fff;border-radius:8px;font-weight:700">💪 Lifting Program</a></p>`
-    : '';
-  // Bobby (Sep 24 2026): non-lifters get a button to their Warm-up page
-  // (mobility + med ball). No tab bar — training blocks are reached from
-  // the document, not presented as tabs next to it.
-  const warmBtn = tabs.some((t) => t.id === 'mobility' || t.id === 'medball')
-    ? `<p style="text-align:center;margin-bottom:20px"><a href="/program/mobility" class="btn" style="display:inline-block;text-decoration:none;padding:12px 24px;background:#111;color:#fff;border-radius:8px;font-weight:700">▶ Warm-up</a></p>`
+  // Section tabs (Bobby, Oct 2026): Hitting / Movement / Med Ball /
+  // Lifting — one tab per non-blank section, at the top of the Program
+  // page. No Warm-up button (Bobby: it goes away) and no Lifting button
+  // — Movement and Lifting are tabs now.
+  const sectionTabHtml = tabs.length
+    ? `<nav class="prog-tabs">${tabs.map((t) => `<a href="${esc(t.href || '/program/hitting-plan')}" class="prog-tab${t.id === 'hitting' ? ' active' : ''}">${esc(t.label)}</a>`).join('')}</nav>`
     : '';
 
   // === EVAL: Hitting Evaluation Report (Bobby's template, Sep 23 2026) ===
@@ -6066,7 +6141,7 @@ function hittingPlanPage(user, p, opts) {
     title: 'Hitting Program',
     user,
     tabs: o.layoutTabs || userTabs('program', user),
-    body: `${o.coachBar || ''}${liftBtn}${warmBtn}<div class="doc-page">
+    body: `${o.coachBar || ''}${sectionTabHtml}<div class="doc-page">
       <div class="doc-header">
         <img src="/atkinson-hitting-logo.jpg" class="doc-logo-img" alt="Atkinson Hitting">
         <div class="doc-title-wrap">
