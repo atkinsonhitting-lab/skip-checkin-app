@@ -153,7 +153,7 @@ const TABBAR_HREFS = ['/mental-game', '/checkin', '/notebook', '/chat'];
 // Oct 2026: the gated Today preview adds its own tab hrefs. Extending this
 // allowlist changes nothing for other pages — bottomTabbar only renders
 // tabs a page actually passes in.
-const REMOTE_TABBAR_HREFS = ['/program', '/program/today', '/program/hitting-plan', '/videos', '/mental-game', '/checkin', '/notebook', '/chat'];
+const REMOTE_TABBAR_HREFS = ['/program', '/program/today', '/program/hitting-plan', '/videos', '/messages', '/mental-game', '/checkin', '/notebook', '/chat'];
 // Coach tab bar (Sep 2026, Bobby: Messages in the tab bar instead of Train
 // Skip): Bobby's coaching loop — Home (attention), My Players, Approvals
 // (badge), Messages (badge). Train Skip, Programs, Videos, Finances, and
@@ -181,10 +181,50 @@ const TABBAR_ICONS = {
   '/program/hitting-plan': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',
   '/videos': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><polygon points="10 9 15 12 10 15 10 9" fill="currentColor" stroke="none"/></svg>',
 };
+// Mirrors isTodayLayoutUser in server.js — the Today page is the gated
+// preview for Bobby's remote test account. Used by the bottom bar to
+// decide where the Today button points.
+function hasTodayLayout(user) {
+  return (
+    !!user &&
+    user.role === 'athlete' &&
+    !!user.remoteProgramId &&
+    String(user.firstName || '').trim().toLowerCase() === 'bobby'
+  );
+}
 function bottomTabbar(user, tabs) {
   if (!user) return '';
   const isCoach = user.role === 'coach';
   if (!isCoach && user.role !== 'athlete') return '';
+  // Remote athletes (Oct 2026, Bobby): the bottom bar is ALWAYS Today /
+  // Program / Videos / Messages, on every page — only the highlight moves.
+  // Bobby reported the buttons changing per tab; pages pass different tab
+  // lists (the drawer list), so the bar now ignores the passed list for
+  // remote athletes and renders the fixed set. The drawer still uses the
+  // passed list. Today points at /program/today for the gated Today-layout
+  // user, else at /program (their program home).
+  if (!isCoach && user.remoteProgramId) {
+    const activeHref = String(((tabs || []).find((t) => t.active) || {}).href || '');
+    const activeKey =
+      activeHref === '/program/today' ? 'today'
+      : activeHref === '/messages' || activeHref.startsWith('/messages/') ? 'messages'
+      : activeHref === '/videos' || activeHref.startsWith('/videos/') ? 'videos'
+      : activeHref === '/program' || activeHref.startsWith('/program/') ? 'program'
+      : null;
+    const unread = Number(user.unreadMessages || 0);
+    const items = [
+      { href: hasTodayLayout(user) ? '/program/today' : '/program', label: 'Today', key: 'today', badge: null },
+      { href: '/program', label: 'Program', key: 'program', badge: null },
+      { href: '/videos', label: 'Videos', key: 'videos', badge: null },
+      { href: '/messages', label: 'Messages', key: 'messages', badge: unread > 0 ? String(unread) : null },
+    ];
+    return `<nav id="tabbar" aria-label="Primary">${items
+      .map(
+        (t) =>
+          `<a href="${t.href}" class="tabbar-link${t.key === activeKey ? ' active' : ''}">${TABBAR_ICONS[t.href === '/program/today' ? '/program/today' : t.href] || ''}<span>${esc(t.label)}</span>${t.badge ? `<span class="tabbar-badge">${esc(t.badge)}</span>` : ''}</a>`
+      )
+      .join('')}</nav>`;
+  }
   const hrefs = isCoach ? COACH_TABBAR_HREFS : user.remoteProgramId ? REMOTE_TABBAR_HREFS : TABBAR_HREFS;
   const icons = isCoach ? COACH_TABBAR_ICONS : TABBAR_ICONS;
   const items = (tabs || []).filter((t) => hrefs.includes(t.href));
@@ -283,6 +323,9 @@ function userTabs(active, user) {
   const isRemote = !!(user && user.remoteProgramId);
   const tabs = [];
   if (isRemote) tabs.push({ href: '/program', label: 'Program', active: active === 'program' });
+  // Messages (Oct 2026, Bobby): remote athletes message their coach from
+  // the bottom nav. Journaling athletes keep Talk to Skip, not Messages.
+  if (isRemote) tabs.push({ href: '/messages', label: 'Messages', active: active === 'messages' });
 
   tabs.push(
     { href: '/mental-game', label: 'Lock In', active: active === 'mental' },
@@ -320,6 +363,7 @@ function coachTabs(active, approvalCount, user) {
   const tabs = [
     { href: '/coach', label: 'Home', active: active === 'home' },
     { href: '/coach/my-players', label: 'My Players', active: active === 'my-players' },
+    { href: '/coach/messages', label: 'Messages', active: active === 'messages' },
     { href: '/coach/hitters', label: 'All Players', active: active === 'hitters' },
     { href: '/coach/videos', label: 'Remote Library', active: active === 'videos' },
     { href: '/coach/organizations', label: 'Organizations', active: active === 'organizations' },
@@ -1503,11 +1547,131 @@ function chatPage(user, messages, chatEnabled) {
       ? `<div id="text-panel">
         <div id="chat-log" class="chat-log" data-skip-avatar="${img}">${msgs || `<div class="msg msg-skip">${skipImg}<div class="msg-bubble">${isPitcher ? "What\u2019s going on with your throwing? Tell me what feels off." : "What\u2019s going on at the plate? Tell me what feels off."}</div></div>`}</div>
         <form id="chat-form" class="chat-form" autocomplete="off">
-          <input id="chat-input" type="text" placeholder="Ask Skip…" maxlength="2000" required>
+          <input id="chat-input" type="text" placeholder="Ask Skip\u2026" maxlength="2000" required>
           <button type="submit" class="btn-primary">Send</button>
         </form>
       </div>`
       : `<div class="card empty">Skip's chat isn't switched on yet — check back soon.</div>`}`,
+  });
+}
+
+// ---- Player/coach messaging (Oct 2026, Bobby) ----
+// 1:1 threads between an athlete and a coach, on the existing messages +
+// message_recipients tables. Athletes see only their own threads; coaches
+// see every athlete thread (view-only coaches read, only full coaches
+// send). Attachments render in-app via /msg-attachments/:file — never a
+// raw external link. No Onform tools here — inbox + video send/playback
+// only; analysis tools are the next round.
+
+function messageAttachmentHtml(m) {
+  const f = String(m.attachment_path || '');
+  if (!f) return '';
+  const type = String(m.attachment_type || '');
+  const isVideo = type.startsWith('video/') || /\.(mp4|mov|webm)$/i.test(f);
+  const url = `/msg-attachments/${encodeURIComponent(f)}`;
+  if (isVideo) return `<div class="msg-attach"><video controls preload="metadata" playsinline src="${url}"></video></div>`;
+  return `<div class="msg-attach"><img src="${url}" alt="Attachment"></div>`;
+}
+
+function messageThreadHtml(msgs, meId) {
+  let out = '';
+  let lastDay = '';
+  for (const m of msgs || []) {
+    const day = String(m.created_at || '').slice(0, 10);
+    if (day && day !== lastDay) {
+      out += `<div class="msg-day">${esc(day)}</div>`;
+      lastDay = day;
+    }
+    const mine = m.sender_id === meId;
+    const bubble = `${m.body ? linkify(String(m.body)) : ''}${messageAttachmentHtml(m)}`;
+    out += `<div class="msg ${mine ? 'msg-user' : 'msg-skip'}"><div class="msg-bubble">${bubble || '<span class="hint-inline">Attachment</span>'}</div></div>`;
+  }
+  return out || '<div class="card empty">No messages yet — say hey.</div>';
+}
+
+function peerName(peer) {
+  return [peer && peer.first_name, peer && peer.last_name].filter(Boolean).join(' ') || (peer && peer.email) || 'Coach';
+}
+
+// Shared 1:1 thread — athlete view and coach view. canSend=false renders
+// the view-only notice instead of the reply box (Cam).
+function messageThreadPage(user, peer, msgs, opts) {
+  const o = opts || {};
+  const canSend = o.canSend !== false;
+  const name = peerName(peer);
+  return layout({
+    title: `Messages — ${name}`,
+    user,
+    tabs: o.tabs || [],
+    body: `<p><a href="${esc(o.backHref || '/messages')}">\u2190 ${esc(o.backLabel || 'Back to Messages')}</a></p>
+    <h1 class="page-title">Messages — ${esc(name)}</h1>
+    ${o.error ? `<div class="error">${esc(o.error)}</div>` : ''}
+    <div class="chat-log">${messageThreadHtml(msgs, user.id)}</div>
+    ${canSend
+      ? `<form method="post" action="${esc(o.action || `/messages/${peer.id}`)}" enctype="multipart/form-data" class="chat-form msg-form" autocomplete="off">
+      <input type="text" name="body" placeholder="Message\u2026" maxlength="5000">
+      <label class="msg-attach-btn" title="Attach a video or photo">\uD83D\uDCCE<input type="file" name="attachment" accept="video/*,image/*" hidden></label>
+      <button type="submit" class="btn-primary">Send</button>
+    </form>`
+      : `<div class="card"><p class="hint" style="margin:0">View-only — you can read this thread but can\u2019t reply.</p></div>`}`,
+  });
+}
+
+// Athlete inbox: one row per coach conversation.
+function messagesInboxPage(user, conversations, coach) {
+  const rows = (conversations || [])
+    .map((c) => {
+      const name = peerName(c.peer);
+      const preview = c.lastBody ? String(c.lastBody).slice(0, 80) : 'No messages yet';
+      return `<a class="msg-row" href="/messages/${c.peer.id}">
+        <div style="min-width:0"><strong>${esc(name)}</strong><div class="hint-inline" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(preview)}</div></div>
+        ${c.unread > 0 ? `<span class="tab-badge">${c.unread}</span>` : ''}
+      </a>`;
+    })
+    .join('');
+  const empty = !rows.length && coach
+    ? `<div class="card"><p style="margin:0">No messages yet.</p><p class="hint" style="margin:8px 0 0"><a href="/messages/${coach.id}">Message Coach \u2192</a></p></div>`
+    : `<div class="card empty">No messages yet.</div>`;
+  return layout({
+    title: 'Messages',
+    user,
+    tabs: userTabs('messages', user),
+    body: `<h1 class="page-title">Messages</h1>${rows ? `<div class="card">${rows}</div>` : empty}`,
+  });
+}
+
+// Coach inbox: one row per athlete with message traffic, plus a compose
+// form for full coaches to start a new thread.
+function coachMessagesPage(user, rows, athletes, canSend, error) {
+  const list = (rows || [])
+    .map((r) => {
+      const name = peerName(r.athlete);
+      const preview = r.lastBody ? String(r.lastBody).slice(0, 80) : 'No messages yet';
+      return `<a class="msg-row" href="/coach/messages/${r.athlete.id}">
+        <div style="min-width:0"><strong>${esc(name)}</strong><div class="hint-inline">${esc(r.athlete.email || '')}</div><div class="hint-inline" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(preview)}</div></div>
+        ${r.unread > 0 ? `<span class="tab-badge">${r.unread}</span>` : ''}
+      </a>`;
+    })
+    .join('');
+  const options = (athletes || [])
+    .map((a) => `<option value="${a.id}">${esc(peerName(a))} (${esc(a.email || '')})</option>`)
+    .join('');
+  return layout({
+    title: 'Messages',
+    user,
+    tabs: coachTabs('messages', user.approvalCount, user),
+    body: `<h1 class="page-title">Messages</h1>
+    ${error ? `<div class="error">${esc(error)}</div>` : ''}
+    ${canSend ? `<div class="card" style="margin-bottom:16px">
+      <h3 style="margin-top:0">New message</h3>
+      <form method="post" action="/coach/messages/new" enctype="multipart/form-data" class="form">
+        <label>Athlete<select name="athlete_id" required><option value="">Pick an athlete\u2026</option>${options}</select></label>
+        <label>Message<textarea name="body" rows="3" maxlength="5000" placeholder="Write a message\u2026"></textarea></label>
+        <label>Attach a video or photo<input type="file" name="attachment" accept="video/*,image/*"></label>
+        <button type="submit" class="btn-primary">Send</button>
+      </form>
+    </div>` : ''}
+    ${list ? `<div class="card">${list}</div>` : `<div class="card empty">No message threads yet.</div>`}`,
   });
 }
 
@@ -2566,8 +2730,7 @@ function todayProgramPage(user, p, opts) {
     { href: '/program/today', label: 'Today', active: true },
     { href: '/program/hitting-plan', label: 'Program' },
     { href: '/videos', label: 'Videos' },
-    // No Messages tab: it used to point at Talk to Skip, which remote
-    // athletes don't get, and there is no athlete inbox page.
+    { href: '/messages', label: 'Messages' },
   ];
 
   return layout({
@@ -6471,6 +6634,9 @@ module.exports = {
   studyPlayerEditPage,
   scorePage,
   chatPage,
+  messagesInboxPage,
+  messageThreadPage,
+  coachMessagesPage,
   coachHomePage,
   coachHittersPage,
   coachProgramsPage,

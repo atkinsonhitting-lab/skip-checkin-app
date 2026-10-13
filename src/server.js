@@ -257,23 +257,6 @@ const msgAttachmentUpload = multer({
   limits: { fileSize: 100 * 1024 * 1024 },
 });
 
-// Serve message attachments. Filename is validated to a flat safe pattern;
-// only the sender, the recipient(s), and coaches can fetch.
-app.get('/msg-attachments/:file', requireLogin, (req, res) => {
-  const f = String(req.params.file || '');
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*\.(mp4|mov|webm|png|jpg|jpeg|webp|gif|heic)$/i.test(f)) return res.status(404).end();
-  const row = db.prepare('SELECT id, sender_id, recipient_id FROM messages WHERE attachment_path = ?').get(f);
-  if (!row) return res.status(404).end();
-  const me = req.user.id;
-  const isCoach = req.user.role === 'coach';
-  // Broadcasts have recipient_id NULL — check the message_recipients table.
-  const isRecipient = row.recipient_id === me ||
-    !!db.prepare('SELECT 1 FROM message_recipients WHERE message_id = ? AND user_id = ?').get(row.id, me);
-  const involved = row.sender_id === me || isRecipient;
-  if (!isCoach && !involved) return res.status(403).end();
-  res.sendFile(path.join(MSG_ATTACH_DIR, f));
-});
-
 // Serve uploaded logos. The filename is validated to a flat safe pattern so
 // no path traversal is possible; the row stores only the file name.
 app.get('/org-logos/:file', (req, res) => {
@@ -9143,6 +9126,215 @@ async function askSkip(user, userMessage, opts = {}) {
   }
   return text;
 }
+
+// ---- Player/coach messaging (Oct 2026, Bobby) ----
+// 1:1 threads on the existing messages + message_recipients tables.
+// Athletes see only their own threads; coaches see every athlete thread
+// (view-only coaches read, only full coaches send). Attachments reuse the
+// existing msgAttachmentUpload + /msg-attachments serving. No Onform
+// tools here — inbox + video send/playback only.
+function msgPeerRow(id) {
+  return db.prepare('SELECT id, email, first_name, last_name, role FROM users WHERE id = ?').get(id) || null;
+}
+// Messages between two users, either direction, including coach
+// broadcasts (recipient_id NULL) addressed to the athlete.
+function threadMessages(a, b) {
+  return db.prepare(
+    `SELECT m.*, su.first_name AS sender_first, su.role AS sender_role
+     FROM messages m JOIN users su ON su.id = m.sender_id
+     WHERE (m.sender_id = ? AND m.recipient_id = ?)
+        OR (m.sender_id = ? AND m.recipient_id = ?)
+        OR (m.sender_id = ? AND m.recipient_id IS NULL
+            AND EXISTS (SELECT 1 FROM message_recipients r WHERE r.message_id = m.id AND r.user_id = ?))
+     ORDER BY m.created_at ASC, m.id ASC`
+  ).all(a, b, b, a, b, a);
+}
+// Coach view of a thread with an athlete: messages between the athlete
+// and ANY coach (so a view-only coach who never sent anything still reads
+// the full history).
+function coachThreadMessages(athleteId) {
+  return db.prepare(
+    `SELECT m.*, su.first_name AS sender_first, su.role AS sender_role
+     FROM messages m JOIN users su ON su.id = m.sender_id
+     LEFT JOIN users ru ON ru.id = m.recipient_id
+     WHERE (m.sender_id = ? AND ru.role = 'coach')
+        OR (su.role = 'coach' AND m.recipient_id = ?)
+        OR (su.role = 'coach' AND m.recipient_id IS NULL
+            AND EXISTS (SELECT 1 FROM message_recipients r WHERE r.message_id = m.id AND r.user_id = ?))
+     ORDER BY m.created_at ASC, m.id ASC`
+  ).all(athleteId, athleteId, athleteId);
+}
+function markThreadRead(userId, msgs) {
+  const ids = (msgs || []).map((m) => m.id);
+  if (!ids.length) return;
+  const now = new Date().toISOString();
+  const stmt = db.prepare('UPDATE message_recipients SET read_at = ? WHERE user_id = ? AND message_id = ? AND read_at IS NULL');
+  for (const id of ids) stmt.run(now, userId, id);
+}
+function threadUnreadFor(userId, msgs) {
+  const ids = (msgs || []).map((m) => m.id);
+  if (!ids.length) return 0;
+  const placeholders = ids.map(() => '?').join(',');
+  return db.prepare(`SELECT COUNT(*) AS c FROM message_recipients WHERE user_id = ? AND read_at IS NULL AND message_id IN (${placeholders})`).get(userId, ...ids).c;
+}
+function sendMessage(senderId, recipientId, body, file) {
+  const now = new Date().toISOString();
+  const info = db.prepare('INSERT INTO messages (sender_id, recipient_id, body, created_at, attachment_path, attachment_type) VALUES (?, ?, ?, ?, ?, ?)').run(
+    senderId, recipientId, body, now,
+    file ? file.filename : '', file ? file.mimetype : ''
+  );
+  db.prepare('INSERT OR IGNORE INTO message_recipients (message_id, user_id, read_at) VALUES (?, ?, NULL)').run(info.lastInsertRowid, recipientId);
+  return info.lastInsertRowid;
+}
+// Athlete may open/send in a thread with a coach only if they already
+// have traffic with that coach, or that coach is their assigned coach.
+function athleteCanMessageCoach(athleteId, coachId) {
+  const peer = msgPeerRow(coachId);
+  if (!peer || peer.role !== 'coach') return false;
+  if (coachForPlayer(athleteId) === coachId) return true;
+  return threadMessages(athleteId, coachId).length > 0;
+}
+function commitSendMessage(req, res, senderId, recipientId, redirectTo) {
+  const body = String((req.body || {}).body || '').trim().slice(0, 5000);
+  const file = req.file || null;
+  if (!body && !file) return res.redirect(`${redirectTo}?err=empty`);
+  sendMessage(senderId, recipientId, body, file);
+  return res.redirect(redirectTo);
+}
+// Runs the attachment upload first (multipart bodies are empty until
+// multer parses them), then commits the message. Errors redirect back
+// with ?err= so the GET handler can show the reason.
+function handleSendMessage(req, res, senderId, recipientId, redirectTo) {
+  msgAttachmentUpload.single('attachment')(req, res, (err) => {
+    if (err) return res.redirect(`${redirectTo}?err=upload`);
+    commitSendMessage(req, res, senderId, recipientId, redirectTo);
+  });
+}
+
+// Serve message attachments. Filename is validated to a flat safe pattern;
+// only the sender, the recipient(s), and coaches can fetch.
+// NOTE (Oct 2026): this route MUST live after attachUser — it was
+// originally registered before it, so requireLogin always saw no user
+// and every attachment fetch 302'd to /login. Attachments were never
+// actually fetchable until this move.
+app.get('/msg-attachments/:file', requireLogin, (req, res) => {
+  const f = String(req.params.file || '');
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*\.(mp4|mov|webm|png|jpg|jpeg|webp|gif|heic)$/i.test(f)) return res.status(404).end();
+  const row = db.prepare('SELECT id, sender_id, recipient_id FROM messages WHERE attachment_path = ?').get(f);
+  if (!row) return res.status(404).end();
+  const me = req.user.id;
+  const isCoach = req.user.role === 'coach';
+  // Broadcasts have recipient_id NULL — check the message_recipients table.
+  const isRecipient = row.recipient_id === me ||
+    !!db.prepare('SELECT 1 FROM message_recipients WHERE message_id = ? AND user_id = ?').get(row.id, me);
+  const involved = row.sender_id === me || isRecipient;
+  if (!isCoach && !involved) return res.status(403).end();
+  res.sendFile(path.join(MSG_ATTACH_DIR, f));
+});
+
+// Athlete inbox: one row per coach conversation.
+app.get('/messages', requireLogin, requireWaiver, (req, res) => {
+  if (req.user.role !== 'athlete') return res.redirect('/coach/messages');
+  const me = req.user.id;
+  const coachIds = new Set();
+  for (const r of db.prepare('SELECT DISTINCT sender_id AS id FROM messages WHERE recipient_id = ? AND sender_id != ?').all(me, me)) coachIds.add(r.id);
+  for (const r of db.prepare('SELECT DISTINCT recipient_id AS id FROM messages WHERE sender_id = ? AND recipient_id IS NOT NULL').all(me)) coachIds.add(r.id);
+  const assigned = coachForPlayer(me);
+  if (assigned) coachIds.add(assigned);
+  const conversations = [...coachIds]
+    .map((cid) => {
+      const msgs = threadMessages(me, cid);
+      const last = msgs[msgs.length - 1] || null;
+      return { peer: msgPeerRow(cid), lastBody: last ? last.body : '', lastAt: last ? last.created_at : '', unread: threadUnreadFor(me, msgs) };
+    })
+    .filter((c) => c.peer)
+    .sort((a, b) => String(b.lastAt || '').localeCompare(String(a.lastAt || '')));
+  res.send(views.messagesInboxPage(req.user, conversations, assigned ? msgPeerRow(assigned) : null));
+});
+
+// Athlete thread with one coach.
+app.get('/messages/:coachId', requireLogin, requireWaiver, (req, res) => {
+  if (req.user.role !== 'athlete') return res.redirect('/coach/messages');
+  const coachId = Number(req.params.coachId);
+  if (!athleteCanMessageCoach(req.user.id, coachId)) return res.redirect('/messages');
+  const msgs = threadMessages(req.user.id, coachId);
+  markThreadRead(req.user.id, msgs);
+  const err = req.query.err === 'upload'
+    ? 'Upload failed — attach a video (MP4/MOV) or photo under 100MB.'
+    : req.query.err === 'empty' ? 'Write a message or attach a video/photo.' : null;
+  res.send(views.messageThreadPage(req.user, msgPeerRow(coachId), msgs, {
+    tabs: views.userTabs('messages', req.user),
+    canSend: true, backHref: '/messages', backLabel: 'Back to Messages',
+    action: `/messages/${coachId}`, error: err,
+  }));
+});
+app.post('/messages/:coachId', requireLogin, requireWaiver, (req, res) => {
+  if (req.user.role !== 'athlete') return res.status(403).send('Forbidden');
+  const coachId = Number(req.params.coachId);
+  if (!athleteCanMessageCoach(req.user.id, coachId)) return res.redirect('/messages');
+  handleSendMessage(req, res, req.user.id, coachId, `/messages/${coachId}`);
+});
+
+// Coach inbox: one row per athlete with message traffic.
+app.get('/coach/messages', requireCoachAny, (req, res) => {
+  setApprovalCount(req);
+  const athleteIds = new Set();
+  for (const r of db.prepare(`SELECT DISTINCT m.sender_id AS id FROM messages m JOIN users u ON u.id = m.sender_id WHERE u.role = 'athlete'`).all()) athleteIds.add(r.id);
+  for (const r of db.prepare(`SELECT DISTINCT m.recipient_id AS id FROM messages m JOIN users u ON u.id = m.recipient_id WHERE u.role = 'athlete'`).all()) athleteIds.add(r.id);
+  for (const r of db.prepare(`SELECT DISTINCT r.user_id AS id FROM message_recipients r JOIN messages m ON m.id = r.message_id JOIN users u ON u.id = r.user_id WHERE u.role = 'athlete' AND m.sender_id != r.user_id`).all()) athleteIds.add(r.id);
+  const rows = [...athleteIds]
+    .map((aid) => {
+      const msgs = coachThreadMessages(aid);
+      const last = msgs[msgs.length - 1] || null;
+      return { athlete: msgPeerRow(aid), lastBody: last ? last.body : '', lastAt: last ? last.created_at : '', unread: threadUnreadFor(req.user.id, msgs) };
+    })
+    .filter((r) => r.athlete)
+    .sort((a, b) => String(b.lastAt || '').localeCompare(String(a.lastAt || '')));
+  const athletes = db.prepare(`SELECT id, email, first_name, last_name FROM users WHERE role = 'athlete' AND status = 'approved' ORDER BY first_name, last_name`).all();
+  const inboxErr = req.query.err === 'upload'
+    ? 'Upload failed — attach a video (MP4/MOV) or photo under 100MB.'
+    : req.query.err === 'empty' ? 'Write a message or attach a video/photo.' : null;
+  res.send(views.coachMessagesPage(req.user, rows, athletes, req.user.canEdit !== false, inboxErr));
+});
+
+// Coach 1:1 thread with an athlete (any coach may read; only full coaches send).
+app.get('/coach/messages/:athleteId', requireCoachAny, (req, res) => {
+  setApprovalCount(req);
+  const athleteId = Number(req.params.athleteId);
+  const peer = msgPeerRow(athleteId);
+  if (!peer || peer.role !== 'athlete') return res.redirect('/coach/messages');
+  const msgs = coachThreadMessages(athleteId);
+  markThreadRead(req.user.id, msgs);
+  const err = req.query.err === 'upload'
+    ? 'Upload failed — attach a video (MP4/MOV) or photo under 100MB.'
+    : req.query.err === 'empty' ? 'Write a message or attach a video/photo.' : null;
+  res.send(views.messageThreadPage(req.user, peer, msgs, {
+    tabs: views.coachTabs('messages', req.user.approvalCount, req.user),
+    canSend: req.user.canEdit !== false,
+    backHref: '/coach/messages', backLabel: 'Back to Messages',
+    action: `/coach/messages/${athleteId}`,
+    error: err,
+  }));
+});
+app.post('/coach/messages/new', requireCoach, (req, res) => {
+  // NOTE: this route must stay ABOVE /coach/messages/:athleteId — Express
+  // matches in definition order, and :athleteId would swallow "new".
+  // Multipart form: parse the upload first so req.body is populated,
+  // then read athlete_id from the parsed body.
+  msgAttachmentUpload.single('attachment')(req, res, (err) => {
+    if (err) return res.redirect('/coach/messages?err=upload');
+    const athleteId = Number((req.body || {}).athlete_id);
+    const peer = msgPeerRow(athleteId);
+    if (!peer || peer.role !== 'athlete') return res.redirect('/coach/messages');
+    commitSendMessage(req, res, req.user.id, athleteId, `/coach/messages/${athleteId}`);
+  });
+});
+app.post('/coach/messages/:athleteId', requireCoach, (req, res) => {
+  const athleteId = Number(req.params.athleteId);
+  const peer = msgPeerRow(athleteId);
+  if (!peer || peer.role !== 'athlete') return res.redirect('/coach/messages');
+  handleSendMessage(req, res, req.user.id, athleteId, `/coach/messages/${athleteId}`);
+});
 
 app.get('/chat', requireLogin, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
