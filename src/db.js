@@ -163,6 +163,15 @@ db.exec(`CREATE TABLE IF NOT EXISTS message_recipients (
   read_at TEXT,
   PRIMARY KEY(message_id, user_id)
 )`);
+// Video review annotations (Oct 2026): one shared telestration layer per
+// message video — a JSON blob of normalized drawing strokes, visible to
+// both coach and athlete in the review view.
+db.exec(`CREATE TABLE IF NOT EXISTS message_annotations (
+  message_id INTEGER PRIMARY KEY,
+  data TEXT NOT NULL DEFAULT '{}',
+  updated_at TEXT NOT NULL DEFAULT '',
+  updated_by INTEGER
+)`);
 db.exec(`
 CREATE TABLE IF NOT EXISTS org_payments (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

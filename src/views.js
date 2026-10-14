@@ -1610,7 +1610,7 @@ function messageAttachmentHtml(m) {
   const type = String(m.attachment_type || '');
   const isVideo = type.startsWith('video/') || /\.(mp4|mov|webm)$/i.test(f);
   const url = `/msg-attachments/${encodeURIComponent(f)}`;
-  if (isVideo) return `<div class="msg-attach"><video controls preload="metadata" playsinline src="${url}"></video></div>`;
+  if (isVideo) return `<div class="msg-attach"><a class="msg-review-link" href="/review/${m.id}" title="Open video review"><video preload="metadata" playsinline muted src="${url}"></video><span class="msg-review-hint">Tap to review</span></a></div>`;
   return `<div class="msg-attach"><img src="${url}" alt="Attachment"></div>`;
 }
 
@@ -1682,6 +1682,222 @@ function messageThreadPage(user, peer, msgs, opts) {
     }
     </script>`
       : `<div class="card"><p class="hint" style="margin:0">View-only — you can read this thread but can\u2019t reply.</p></div>`}`,
+  });
+}
+
+// Video review (Oct 2026, Bobby): OnForm-style review of a message video —
+// slow motion, frame-by-frame, scrub slider, and telestration. Annotations
+// are one shared JSON layer per message, visible to both coach and athlete.
+function reviewPage(user, msg, peer, annotations, opts) {
+  const o = opts || {};
+  const canSave = o.canSave !== false;
+  const messageId = Number(o.messageId || msg.id);
+  const name = peerName(peer);
+  const f = String(msg.attachment_path || '');
+  const url = `/msg-attachments/${encodeURIComponent(f)}`;
+  const initial = JSON.stringify(annotations && typeof annotations === 'object' ? annotations : { strokes: [] }).replace(/</g, '\\u003c');
+  return layout({
+    title: `Video review — ${name}`,
+    user,
+    tabs: o.tabs || [],
+    body: `<p><a href="${esc(o.backHref || '/messages')}">\u2190 ${esc(o.backLabel || 'Back')}</a></p>
+    <h1 class="page-title">Video review</h1>
+    <div class="review-stage">
+      <video id="rv-video" src="${url}" playsinline preload="auto"></video>
+      <canvas id="rv-canvas"></canvas>
+    </div>
+    <div class="review-controls">
+      <button type="button" class="rv-btn" id="rv-play">Play</button>
+      <button type="button" class="rv-btn rv-step" id="rv-back" title="Back one frame">\u25c0 1</button>
+      <button type="button" class="rv-btn rv-step" id="rv-fwd" title="Forward one frame">1 \u25b6</button>
+      <div class="rv-speeds">
+        <button type="button" class="rv-btn rv-speed" data-rate="0.25">0.25x</button>
+        <button type="button" class="rv-btn rv-speed" data-rate="0.5">0.5x</button>
+        <button type="button" class="rv-btn rv-speed active" data-rate="1">1x</button>
+      </div>
+    </div>
+    <input type="range" id="rv-scrub" class="rv-scrub" min="0" max="1000" value="0" step="1" aria-label="Scrub video">
+    <div class="review-tools">
+      <div class="rv-toolrow" role="group" aria-label="Drawing tools">
+        <button type="button" class="rv-btn rv-tool active" data-tool="line">Line</button>
+        <button type="button" class="rv-btn rv-tool" data-tool="arrow">Arrow</button>
+        <button type="button" class="rv-btn rv-tool" data-tool="circle">Circle</button>
+        <button type="button" class="rv-btn rv-tool" data-tool="freehand">Draw</button>
+      </div>
+      <div class="rv-toolrow" role="group" aria-label="Colors">
+        <button type="button" class="rv-swatch active" data-color="#ff3b30" style="background:#ff3b30" aria-label="Red"></button>
+        <button type="button" class="rv-swatch" data-color="#ffd60a" style="background:#ffd60a" aria-label="Yellow"></button>
+        <button type="button" class="rv-swatch" data-color="#ffffff" style="background:#ffffff" aria-label="White"></button>
+      </div>
+      <div class="rv-toolrow">
+        <button type="button" class="rv-btn" id="rv-undo">Undo</button>
+        <button type="button" class="rv-btn" id="rv-clear">Clear all</button>
+        ${canSave
+          ? `<button type="button" class="btn-primary" id="rv-save">Save</button><span class="rv-saved" id="rv-saved" hidden>Saved \u2713</span>`
+          : `<span class="hint-inline">View-only — your drawings stay on your screen only.</span>`}
+      </div>
+    </div>
+    <script>
+    (function () {
+      var video = document.getElementById('rv-video');
+      var canvas = document.getElementById('rv-canvas');
+      var ctx = canvas.getContext('2d');
+      var CAN_SAVE = ${canSave ? 'true' : 'false'};
+      var MSG_ID = ${messageId};
+      var strokes = [];
+      try {
+        var init = ${initial};
+        if (init && Array.isArray(init.strokes)) strokes = init.strokes;
+      } catch (e) {}
+      var tool = 'line', color = '#ff3b30';
+      var drawing = false, startPt = null, curPt = null, freePts = null;
+
+      function fitCanvas() {
+        var w = video.clientWidth, h = video.clientHeight;
+        if (!w || !h) return;
+        canvas.width = w; canvas.height = h;
+        render();
+      }
+      window.addEventListener('resize', fitCanvas);
+      video.addEventListener('loadedmetadata', fitCanvas);
+
+      function pt(e) {
+        var r = canvas.getBoundingClientRect();
+        return [Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
+                Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))];
+      }
+      function drawStroke(s) {
+        var W = canvas.width, H = canvas.height;
+        ctx.strokeStyle = s.color; ctx.fillStyle = s.color;
+        ctx.lineWidth = Math.max(2, W / 160); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        var P = s.points.map(function (p) { return [p[0] * W, p[1] * H]; });
+        ctx.beginPath();
+        if (s.tool === 'freehand') {
+          P.forEach(function (p, i) { i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); });
+          ctx.stroke(); return;
+        }
+        if (P.length < 2) return;
+        var a = P[0], b = P[P.length - 1];
+        if (s.tool === 'circle') {
+          var cx = (a[0] + b[0]) / 2, cy = (a[1] + b[1]) / 2;
+          ctx.beginPath();
+          ctx.ellipse(cx, cy, Math.abs(b[0] - a[0]) / 2, Math.abs(b[1] - a[1]) / 2, 0, 0, Math.PI * 2);
+          ctx.stroke();
+          return;
+        }
+        ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+        if (s.tool === 'arrow') {
+          var ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+          var hs = Math.max(10, W / 40);
+          [[ang - 2.6], [ang + 2.6]].forEach(function (o) {
+            ctx.beginPath();
+            ctx.moveTo(b[0], b[1]);
+            ctx.lineTo(b[0] - hs * Math.cos(o[0]), b[1] - hs * Math.sin(o[0]));
+            ctx.stroke();
+          });
+        }
+      }
+      function render() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        strokes.forEach(drawStroke);
+        if (drawing && startPt && curPt) {
+          var pts = tool === 'freehand' ? freePts.concat([curPt]) : [startPt, curPt];
+          drawStroke({ tool: tool, color: color, points: pts });
+        }
+      }
+      canvas.addEventListener('pointerdown', function (e) {
+        e.preventDefault();
+        video.pause(); syncPlayBtn();
+        drawing = true; startPt = pt(e); curPt = startPt; freePts = [startPt];
+        canvas.setPointerCapture(e.pointerId);
+        render();
+      });
+      canvas.addEventListener('pointermove', function (e) {
+        if (!drawing) return;
+        curPt = pt(e);
+        if (tool === 'freehand') freePts.push(curPt);
+        render();
+      });
+      function endStroke() {
+        if (!drawing) return;
+        drawing = false;
+        var pts = tool === 'freehand' ? freePts : [startPt, curPt];
+        if (pts.length >= 2) strokes.push({ tool: tool, color: color, points: pts });
+        startPt = curPt = freePts = null;
+        render();
+      }
+      canvas.addEventListener('pointerup', endStroke);
+      canvas.addEventListener('pointercancel', endStroke);
+
+      // Playback controls
+      var playBtn = document.getElementById('rv-play');
+      function syncPlayBtn() { playBtn.textContent = video.paused ? 'Play' : 'Pause'; }
+      playBtn.addEventListener('click', function () { video.paused ? video.play() : video.pause(); });
+      video.addEventListener('play', syncPlayBtn);
+      video.addEventListener('pause', syncPlayBtn);
+      document.querySelectorAll('.rv-speed').forEach(function (b) {
+        b.addEventListener('click', function () {
+          video.playbackRate = parseFloat(b.dataset.rate);
+          document.querySelectorAll('.rv-speed').forEach(function (x) { x.classList.toggle('active', x === b); });
+        });
+      });
+      var scrub = document.getElementById('rv-scrub');
+      video.addEventListener('timeupdate', function () {
+        if (video.duration && !scrub.matches(':active')) scrub.value = Math.round((video.currentTime / video.duration) * 1000);
+      });
+      scrub.addEventListener('input', function () {
+        if (video.duration) video.currentTime = (scrub.value / 1000) * video.duration;
+      });
+      document.getElementById('rv-back').addEventListener('click', function () {
+        video.pause(); syncPlayBtn();
+        video.currentTime = Math.max(0, video.currentTime - 1 / 30);
+      });
+      document.getElementById('rv-fwd').addEventListener('click', function () {
+        video.pause(); syncPlayBtn();
+        if (video.duration) video.currentTime = Math.min(video.duration, video.currentTime + 1 / 30);
+      });
+
+      // Tool + color pickers
+      document.querySelectorAll('.rv-tool').forEach(function (b) {
+        b.addEventListener('click', function () {
+          tool = b.dataset.tool;
+          document.querySelectorAll('.rv-tool').forEach(function (x) { x.classList.toggle('active', x === b); });
+        });
+      });
+      document.querySelectorAll('.rv-swatch').forEach(function (b) {
+        b.addEventListener('click', function () {
+          color = b.dataset.color;
+          document.querySelectorAll('.rv-swatch').forEach(function (x) { x.classList.toggle('active', x === b); });
+        });
+      });
+      document.getElementById('rv-undo').addEventListener('click', function () { strokes.pop(); render(); });
+      document.getElementById('rv-clear').addEventListener('click', function () {
+        if (!strokes.length) return;
+        if (confirm('Remove all drawings from this video?')) { strokes = []; render(); }
+      });
+
+      // Save (full coaches + athletes; view-only coaches get no save button)
+      var saveBtn = document.getElementById('rv-save');
+      if (saveBtn) {
+        saveBtn.addEventListener('click', function () {
+          saveBtn.disabled = true;
+          fetch('/review/' + MSG_ID, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ strokes: strokes })
+          }).then(function (r) { return r.json(); }).then(function (j) {
+            saveBtn.disabled = false;
+            if (j && j.ok) {
+              var s = document.getElementById('rv-saved');
+              s.hidden = false;
+              setTimeout(function () { s.hidden = true; }, 2000);
+            }
+          }).catch(function () { saveBtn.disabled = false; });
+        });
+      }
+      fitCanvas();
+    })();
+    </script>`
   });
 }
 
@@ -6759,6 +6975,7 @@ module.exports = {
   chatPage,
   messagesInboxPage,
   messageThreadPage,
+  reviewPage,
   coachMessagesPage,
   coachHomePage,
   coachHittersPage,

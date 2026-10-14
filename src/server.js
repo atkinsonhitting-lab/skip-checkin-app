@@ -9317,6 +9317,88 @@ app.get('/msg-attachments/:file', requireLogin, (req, res) => {
   res.sendFile(path.join(MSG_ATTACH_DIR, f));
 });
 
+// ---- Video review (Oct 2026, Bobby) ----
+// OnForm-style review of a message video: slow-mo, frame step, scrub, and
+// telestration. One shared annotation layer per message — coach draws, the
+// hitter sees. View-only coaches may draw locally but cannot save.
+function reviewMessageRow(id) {
+  return db.prepare(`SELECT m.* FROM messages m WHERE m.id = ?
+    AND m.attachment_path != ''
+    AND (m.attachment_type LIKE 'video/%' OR m.attachment_path LIKE '%.mp4'
+      OR m.attachment_path LIKE '%.mov' OR m.attachment_path LIKE '%.webm')`).get(Number(id));
+}
+function canReviewMessage(user, msg) {
+  if (!msg) return false;
+  if (user.role === 'coach') return true; // any coach may read, like attachments
+  if (user.role !== 'athlete' || !isRemoteAthlete(user.id)) return false;
+  const me = user.id;
+  if (msg.sender_id === me || msg.recipient_id === me) return true;
+  return !!db.prepare('SELECT 1 FROM message_recipients WHERE message_id = ? AND user_id = ?').get(msg.id, me);
+}
+function reviewPeer(user, msg) {
+  const otherId = msg.sender_id === user.id ? msg.recipient_id : msg.sender_id;
+  const p = otherId ? msgPeerRow(otherId) : null;
+  if (p && ((user.role === 'athlete' && p.role === 'coach') || (user.role === 'coach' && p.role === 'athlete'))) {
+    return { id: p.id, first_name: p.first_name, last_name: p.last_name, email: p.email };
+  }
+  if (user.role === 'athlete') {
+    const c = coachForPlayer(user.id);
+    const cp = c ? msgPeerRow(c) : null;
+    return cp ? { id: cp.id, first_name: cp.first_name, last_name: cp.last_name, email: cp.email } : { first_name: 'Coach' };
+  }
+  return { first_name: 'Athlete' };
+}
+function sanitizeStrokes(strokes) {
+  const TOOLS = { line: 1, arrow: 1, circle: 1, freehand: 1 };
+  const out = [];
+  for (const s of (strokes || []).slice(0, 200)) {
+    if (!s || !TOOLS[s.tool]) continue;
+    const color = /^#[0-9a-fA-F]{6}$/.test(String(s.color || '')) ? String(s.color) : '#ff3b30';
+    const pts = [];
+    for (const p of (Array.isArray(s.points) ? s.points : []).slice(0, 500)) {
+      if (!Array.isArray(p)) continue;
+      const x = Number(p[0]), y = Number(p[1]);
+      if (!isFinite(x) || !isFinite(y)) continue;
+      pts.push([Math.min(1, Math.max(0, x)), Math.min(1, Math.max(0, y))]);
+    }
+    if (pts.length >= 2) out.push({ tool: s.tool, color, points: pts });
+  }
+  return out;
+}
+app.get('/review/:messageId', requireLogin, (req, res) => {
+  const msg = reviewMessageRow(req.params.messageId);
+  if (!msg || !canReviewMessage(req.user, msg)) {
+    return res.redirect(req.user.role === 'coach' ? '/coach/messages' : '/messages');
+  }
+  const peer = reviewPeer(req.user, msg);
+  const row = db.prepare('SELECT data FROM message_annotations WHERE message_id = ?').get(msg.id);
+  let annotations = { strokes: [] };
+  try {
+    const parsed = JSON.parse(row && row.data ? row.data : '{"strokes":[]}');
+    if (parsed && Array.isArray(parsed.strokes)) annotations = { strokes: sanitizeStrokes(parsed.strokes) };
+  } catch (e) {}
+  const isAthlete = req.user.role === 'athlete';
+  const backHref = isAthlete ? (peer.id ? `/messages/${peer.id}` : '/messages')
+    : (peer.id ? `/coach/messages/${peer.id}` : '/coach/messages');
+  res.send(views.reviewPage(req.user, msg, peer, annotations, {
+    tabs: isAthlete ? views.userTabs('messages', req.user) : views.coachTabs('messages', req.user.approvalCount, req.user),
+    backHref, backLabel: isAthlete ? 'Back to thread' : 'Back to Messages',
+    canSave: !(req.user.role === 'coach' && !req.user.canEdit),
+    messageId: msg.id,
+  }));
+});
+app.post('/review/:messageId', requireLogin, (req, res) => {
+  const msg = reviewMessageRow(req.params.messageId);
+  if (!msg || !canReviewMessage(req.user, msg)) return res.status(403).json({ ok: false });
+  if (req.user.role === 'coach' && !req.user.canEdit) return res.status(403).json({ ok: false, reason: 'view-only' });
+  const strokes = sanitizeStrokes((req.body || {}).strokes);
+  db.prepare(`INSERT INTO message_annotations (message_id, data, updated_at, updated_by)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(message_id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at, updated_by = excluded.updated_by`)
+    .run(msg.id, JSON.stringify({ strokes }), new Date().toISOString(), req.user.id);
+  res.json({ ok: true });
+});
+
 // Athlete inbox: one row per coach conversation. Remote athletes only.
 app.get('/messages', requireLogin, requireWaiver, (req, res) => {
   if (req.user.role !== 'athlete') return res.redirect('/coach/messages');
