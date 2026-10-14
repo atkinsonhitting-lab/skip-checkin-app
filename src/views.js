@@ -1651,7 +1651,7 @@ function messageThreadPage(user, peer, msgs, opts) {
     ${canSend
       ? `<form method="post" action="${esc(o.action || `/messages/${peer.id}`)}" enctype="multipart/form-data" class="chat-form msg-form" autocomplete="off">
       <input type="text" name="body" placeholder="Message\u2026" maxlength="5000">
-      <label class="msg-attach-btn" title="Attach a video or photo">\uD83D\uDCCE<input type="file" name="attachment" accept="video/*,image/*" hidden></label>
+      <label class="msg-attach-btn" title="Attach a video or photo">\uD83D\uDCCE<input type="file" name="attachment" accept="video/*,image/*" onchange="var s=this.parentNode.querySelector('.msg-attach-name');if(s)s.textContent=(this.files&&this.files[0])?this.files[0].name:''"><span class="msg-attach-name"></span></label>
       <button type="submit" class="btn-primary">Send</button>
     </form>`
       : `<div class="card"><p class="hint" style="margin:0">View-only — you can read this thread but can\u2019t reply.</p></div>`}`,

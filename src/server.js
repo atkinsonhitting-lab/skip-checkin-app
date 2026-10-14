@@ -9242,11 +9242,36 @@ function athleteCanMessageCoach(athleteId, coachId) {
   if (coachForPlayer(athleteId) === coachId) return true;
   return threadMessages(athleteId, coachId).length > 0;
 }
+// Push-notify the recipient of a 1:1 message (Oct 2026, Bobby). Only the
+// recipient is ever pushed — never the sender. A push failure must never
+// break the send, so everything here is guarded.
+function notifyMessageRecipient(senderId, recipientId, bodyText, file) {
+  try {
+    const sender = msgPeerRow(senderId);
+    const recipient = msgPeerRow(recipientId);
+    if (!sender || !recipient || senderId === recipientId) return;
+    const senderName = [sender.first_name, sender.last_name].filter(Boolean).join(' ') || sender.email || 'Coach';
+    const title = `New message from ${senderName}`;
+    let body = String(bodyText || '').trim();
+    if (!body && file) {
+      body = String((file && file.mimetype) || '').startsWith('video/') ? 'sent a video' : 'sent a photo';
+    }
+    if (body.length > 80) body = body.slice(0, 80).trimEnd() + '…';
+    // Tapping the push opens the recipient's own thread view.
+    const url = recipient.role === 'coach'
+      ? `/coach/messages/${senderId}`
+      : `/messages/${senderId}`;
+    pushToUser(recipientId, title, body, url).catch(() => {});
+  } catch (e) {
+    console.warn('message push notify failed:', e && e.message);
+  }
+}
 function commitSendMessage(req, res, senderId, recipientId, redirectTo) {
   const body = String((req.body || {}).body || '').trim().slice(0, 5000);
   const file = req.file || null;
   if (!body && !file) return res.redirect(`${redirectTo}?err=empty`);
   sendMessage(senderId, recipientId, body, file);
+  notifyMessageRecipient(senderId, recipientId, body, file);
   return res.redirect(redirectTo);
 }
 // Runs the attachment upload first (multipart bodies are empty until
