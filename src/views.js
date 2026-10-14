@@ -1650,10 +1650,37 @@ function messageThreadPage(user, peer, msgs, opts) {
     <div class="chat-log">${messageThreadHtml(msgs, user.id)}</div>
     ${canSend
       ? `<form method="post" action="${esc(o.action || `/messages/${peer.id}`)}" enctype="multipart/form-data" class="chat-form msg-form" autocomplete="off">
+      <div class="msg-preview" hidden></div>
       <input type="text" name="body" placeholder="Message\u2026" maxlength="5000">
-      <label class="msg-attach-btn" title="Attach a video or photo">\uD83D\uDCCE<input type="file" name="attachment" accept="video/*,image/*" onchange="var s=this.parentNode.querySelector('.msg-attach-name');if(s)s.textContent=(this.files&&this.files[0])?this.files[0].name:''"><span class="msg-attach-name"></span></label>
+      <label class="msg-attach-btn" title="Attach a video or photo">\uD83D\uDCCE<input type="file" name="attachment" accept="video/*,image/*" onchange="msgAttachPreview(this)"></label>
       <button type="submit" class="btn-primary">Send</button>
-    </form>`
+    </form>
+    <script>
+    function msgAttachPreview(input) {
+      var form = input.closest('form');
+      if (!form) return;
+      var prev = form.querySelector('.msg-preview');
+      var f = input.files && input.files[0];
+      if (!f) { prev.hidden = true; prev.innerHTML = ''; return; }
+      var url = URL.createObjectURL(f);
+      var isVideo = (f.type || '').indexOf('video/') === 0;
+      prev.innerHTML = '';
+      var media = document.createElement(isVideo ? 'video' : 'img');
+      media.src = url;
+      if (isVideo) { media.muted = true; media.playsInline = true; media.preload = 'metadata'; }
+      var nm = document.createElement('span');
+      nm.className = 'msg-preview-name';
+      nm.textContent = f.name;
+      var clear = document.createElement('button');
+      clear.type = 'button';
+      clear.className = 'msg-preview-clear';
+      clear.setAttribute('aria-label', 'Remove attachment');
+      clear.textContent = '\u00d7';
+      clear.onclick = function() { try { URL.revokeObjectURL(url); } catch (e) {} input.value = ''; prev.hidden = true; prev.innerHTML = ''; };
+      prev.appendChild(media); prev.appendChild(nm); prev.appendChild(clear);
+      prev.hidden = false;
+    }
+    </script>`
       : `<div class="card"><p class="hint" style="margin:0">View-only — you can read this thread but can\u2019t reply.</p></div>`}`,
   });
 }
