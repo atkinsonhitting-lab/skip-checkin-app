@@ -1735,6 +1735,7 @@ function reviewPage(user, msg, peer, annotations, opts) {
         ${canSave
           ? `<button type="button" class="btn-primary" id="rv-save">Save</button><span class="rv-saved" id="rv-saved" hidden>Saved \u2713</span>`
           : `<span class="hint-inline">View-only — your drawings stay on your screen only.</span>`}
+        <button type="button" class="rv-btn" id="rv-save-video">Save video</button>
       </div>
     </div>
     <script>
@@ -1893,6 +1894,38 @@ function reviewPage(user, msg, peer, annotations, opts) {
               setTimeout(function () { s.hidden = true; }, 2000);
             }
           }).catch(function () { saveBtn.disabled = false; });
+        });
+      }
+      // Save video to camera roll (Oct 2026, Bobby): Web Share with the file
+      // opens the iOS share sheet -> "Save to Photos". Fallback opens the
+      // raw file URL for a manual share-sheet save.
+      var saveVidBtn = document.getElementById('rv-save-video');
+      if (saveVidBtn) {
+        saveVidBtn.addEventListener('click', function () {
+          var done = function () { saveVidBtn.disabled = false; };
+          saveVidBtn.disabled = true;
+          var finish = function () {
+            try {
+              var src = video.currentSrc || video.src;
+              window.open(src, '_blank');
+            } catch (e) {}
+            done();
+          };
+          try {
+            fetch(video.currentSrc || video.src, { credentials: 'same-origin' }).then(function (r) {
+              if (!r.ok) throw new Error('fetch failed');
+              return r.blob();
+            }).then(function (blob) {
+              var ext = 'mp4';
+              try { ext = (video.currentSrc || video.src).split('.').pop().split('?')[0] || 'mp4'; } catch (e) {}
+              var file = new File([blob], 'swing-video.' + ext, { type: blob.type || 'video/mp4' });
+              if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                navigator.share({ files: [file], title: 'Swing video' }).then(done).catch(function () { done(); });
+              } else {
+                finish();
+              }
+            }).catch(finish);
+          } catch (e) { finish(); }
         });
       }
       fitCanvas();
