@@ -9242,6 +9242,15 @@ function athleteCanMessageCoach(athleteId, coachId) {
   if (coachForPlayer(athleteId) === coachId) return true;
   return threadMessages(athleteId, coachId).length > 0;
 }
+// Remote-only messaging (Oct 2026, Bobby): 1:1 messaging is for remote
+// program athletes only — in-person/lesson athletes have no messaging.
+// Canonical predicate: the user has a remote_program_id pointing at an
+// existing remote_programs row.
+function isRemoteAthlete(userId) {
+  return !!db.prepare(
+    'SELECT 1 FROM users u JOIN remote_programs p ON p.id = u.remote_program_id WHERE u.id = ?'
+  ).get(Number(userId));
+}
 // Push-notify the recipient of a 1:1 message (Oct 2026, Bobby). Only the
 // recipient is ever pushed — never the sender. A push failure must never
 // break the send, so everything here is guarded.
@@ -9305,9 +9314,10 @@ app.get('/msg-attachments/:file', requireLogin, (req, res) => {
   res.sendFile(path.join(MSG_ATTACH_DIR, f));
 });
 
-// Athlete inbox: one row per coach conversation.
+// Athlete inbox: one row per coach conversation. Remote athletes only.
 app.get('/messages', requireLogin, requireWaiver, (req, res) => {
   if (req.user.role !== 'athlete') return res.redirect('/coach/messages');
+  if (!isRemoteAthlete(req.user.id)) return res.redirect('/');
   const me = req.user.id;
   const coachIds = new Set();
   for (const r of db.prepare('SELECT DISTINCT sender_id AS id FROM messages WHERE recipient_id = ? AND sender_id != ?').all(me, me)) coachIds.add(r.id);
@@ -9325,9 +9335,10 @@ app.get('/messages', requireLogin, requireWaiver, (req, res) => {
   res.send(views.messagesInboxPage(req.user, conversations, assigned ? msgPeerRow(assigned) : null));
 });
 
-// Athlete thread with one coach.
+// Athlete thread with one coach. Remote athletes only.
 app.get('/messages/:coachId', requireLogin, requireWaiver, (req, res) => {
   if (req.user.role !== 'athlete') return res.redirect('/coach/messages');
+  if (!isRemoteAthlete(req.user.id)) return res.redirect('/');
   const coachId = Number(req.params.coachId);
   if (!athleteCanMessageCoach(req.user.id, coachId)) return res.redirect('/messages');
   const msgs = threadMessages(req.user.id, coachId);
@@ -9343,12 +9354,13 @@ app.get('/messages/:coachId', requireLogin, requireWaiver, (req, res) => {
 });
 app.post('/messages/:coachId', requireLogin, requireWaiver, (req, res) => {
   if (req.user.role !== 'athlete') return res.status(403).send('Forbidden');
+  if (!isRemoteAthlete(req.user.id)) return res.status(403).send('Forbidden');
   const coachId = Number(req.params.coachId);
   if (!athleteCanMessageCoach(req.user.id, coachId)) return res.redirect('/messages');
   handleSendMessage(req, res, req.user.id, coachId, `/messages/${coachId}`);
 });
 
-// Coach inbox: one row per athlete with message traffic.
+// Coach inbox: one row per REMOTE athlete with message traffic.
 app.get('/coach/messages', requireCoachAny, (req, res) => {
   setApprovalCount(req);
   const athleteIds = new Set();
@@ -9356,6 +9368,7 @@ app.get('/coach/messages', requireCoachAny, (req, res) => {
   for (const r of db.prepare(`SELECT DISTINCT m.recipient_id AS id FROM messages m JOIN users u ON u.id = m.recipient_id WHERE u.role = 'athlete'`).all()) athleteIds.add(r.id);
   for (const r of db.prepare(`SELECT DISTINCT r.user_id AS id FROM message_recipients r JOIN messages m ON m.id = r.message_id JOIN users u ON u.id = r.user_id WHERE u.role = 'athlete' AND m.sender_id != r.user_id`).all()) athleteIds.add(r.id);
   const rows = [...athleteIds]
+    .filter((aid) => isRemoteAthlete(aid))
     .map((aid) => {
       const msgs = coachThreadMessages(aid);
       const last = msgs[msgs.length - 1] || null;
@@ -9363,7 +9376,7 @@ app.get('/coach/messages', requireCoachAny, (req, res) => {
     })
     .filter((r) => r.athlete)
     .sort((a, b) => String(b.lastAt || '').localeCompare(String(a.lastAt || '')));
-  const athletes = db.prepare(`SELECT id, email, first_name, last_name FROM users WHERE role = 'athlete' AND status = 'approved' ORDER BY first_name, last_name`).all();
+  const athletes = db.prepare(`SELECT id, email, first_name, last_name FROM users WHERE role = 'athlete' AND status = 'approved' AND EXISTS (SELECT 1 FROM remote_programs p WHERE p.id = users.remote_program_id) ORDER BY first_name, last_name`).all();
   const inboxErr = req.query.err === 'upload'
     ? 'Upload failed — attach a video (MP4/MOV) or photo under 100MB.'
     : req.query.err === 'empty' ? 'Write a message or attach a video/photo.' : null;
@@ -9371,11 +9384,13 @@ app.get('/coach/messages', requireCoachAny, (req, res) => {
 });
 
 // Coach 1:1 thread with an athlete (any coach may read; only full coaches send).
+// Remote athletes only — threads with non-remote athletes redirect away.
 app.get('/coach/messages/:athleteId', requireCoachAny, (req, res) => {
   setApprovalCount(req);
   const athleteId = Number(req.params.athleteId);
   const peer = msgPeerRow(athleteId);
   if (!peer || peer.role !== 'athlete') return res.redirect('/coach/messages');
+  if (!isRemoteAthlete(athleteId)) return res.redirect('/coach/messages');
   const msgs = coachThreadMessages(athleteId);
   markThreadRead(req.user.id, msgs);
   const err = req.query.err === 'upload'
@@ -9399,6 +9414,7 @@ app.post('/coach/messages/new', requireCoach, (req, res) => {
     const athleteId = Number((req.body || {}).athlete_id);
     const peer = msgPeerRow(athleteId);
     if (!peer || peer.role !== 'athlete') return res.redirect('/coach/messages');
+    if (!isRemoteAthlete(athleteId)) return res.redirect('/coach/messages');
     commitSendMessage(req, res, req.user.id, athleteId, `/coach/messages/${athleteId}`);
   });
 });
@@ -9406,6 +9422,7 @@ app.post('/coach/messages/:athleteId', requireCoach, (req, res) => {
   const athleteId = Number(req.params.athleteId);
   const peer = msgPeerRow(athleteId);
   if (!peer || peer.role !== 'athlete') return res.redirect('/coach/messages');
+  if (!isRemoteAthlete(athleteId)) return res.redirect('/coach/messages');
   handleSendMessage(req, res, req.user.id, athleteId, `/coach/messages/${athleteId}`);
 });
 
