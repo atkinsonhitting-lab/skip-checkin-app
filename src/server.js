@@ -2027,6 +2027,28 @@ function getCheckoffs(userId, day) {
   return map;
 }
 
+// Today's workout picks (Oct 2026, Bobby): which program sections the
+// hitter chose for the day, via the Program tab picker. Returns the array
+// of section ids, or null when nothing was picked (Today shows everything).
+const TODAY_SECTIONS = ['movement', 'hitting', 'medball', 'lifting'];
+function getTodayPicks(userId, day) {
+  try {
+    const r = db.prepare('SELECT sections FROM today_workout_picks WHERE user_id = ? AND day = ?').get(userId, day);
+    if (!r) return null;
+    const arr = JSON.parse(r.sections || '[]');
+    if (!Array.isArray(arr)) return null;
+    const clean = arr.map((s) => String(s)).filter((s) => TODAY_SECTIONS.includes(s));
+    return clean;
+  } catch (e) { return null; }
+}
+function setTodayPicks(userId, day, sections) {
+  const clean = [...new Set((Array.isArray(sections) ? sections : []).map((s) => String(s)).filter((s) => TODAY_SECTIONS.includes(s)))];
+  db.prepare(`INSERT OR REPLACE INTO today_workout_picks (user_id, day, sections, updated_at)
+    VALUES (?, ?, ?, ?)`)
+    .run(userId, day, JSON.stringify(clean), new Date().toISOString());
+  return clean;
+}
+
 // Most recent logged lift for an exercise (per-set log or legacy weight/RPE).
 // Prefers an earlier day ("what you did last time"); falls back to any
 // earlier log today.
@@ -2365,31 +2387,30 @@ function syncProgramsFromSheets() {
 try { syncProgramsFromSheets(); } catch (e) { console.error('Sheet sync on boot failed:', e.message); }
 
 // ---- Today layout (Oct 2026, Bobby) ----
-// GATED PREVIEW: the new Today home screen for remote athletes renders ONLY
-// for the remote-program athlete whose first name is Bobby (Bobby's own
-// test account). Everyone else keeps the current /program flow untouched.
-// Gate = role athlete + remote program assigned + first_name 'Bobby'
-// (case-insensitive). The coach account is also named Bobby, but it has no
-// remote_program_id, so it never matches.
+// The Today home screen for remote athletes: the Today tab points at
+// /program/today and the Program tab at /program (the section menu).
+// Matches every remote-program athlete. Coaches never match: the coach
+// account has no remote_program_id.
 function isTodayLayoutUser(user) {
   return !!user
     && user.role === 'athlete'
-    && !!user.remoteProgramId
-    && String(user.firstName || '').trim().toLowerCase() === 'bobby';
+    && !!user.remoteProgramId;
 }
 
 // Hitter's program page — remote athletes only.
 app.get('/program', requireLogin, requireWaiver, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
   if (!req.user.remoteProgramId) return res.redirect('/');
-  // Gated Today preview: the test athlete's Program home IS the Today page.
-  if (isTodayLayoutUser(req.user)) return res.redirect('/program/today');
   const sub = String(req.query.sub || 'hitting');
   const day = String(req.query.day || '');
   const dayQ = day ? `?day=${encodeURIComponent(day)}` : '';
   // Section router (Bobby, Oct 2026): the Program page's tabs all route
   // through here so check-offs land back on the right section.
-  // 'mobility' is the legacy sub for the Movement tab.
+  // 'mobility' is the legacy sub for the Movement tab. 'today' is the
+  // substitute flow's back link (see /program/substitute).
+  // (Oct 2026: the Today tab points straight at /program/today, so this
+  // route no longer bounces there — Today and Program are different tabs.)
+  if (sub === 'today') return res.redirect('/program/today');
   if (sub === 'movement' || sub === 'mobility') return res.redirect('/program/movement' + dayQ);
   if (sub === 'medball') return res.redirect('/program/medball' + dayQ);
   if (sub === 'lifting') {
@@ -2401,30 +2422,51 @@ app.get('/program', requireLogin, requireWaiver, (req, res) => {
   return res.redirect('/program/hitting-plan');
 });
 
-// Today page (Oct 2026, Bobby) — GATED PREVIEW, see isTodayLayoutUser.
+// Today page (Oct 2026, Bobby) — every remote athlete's Today tab.
 // One day, sections in order: Movement, Hitting, Med Ball, Lifting.
 // Check-offs POST to the existing /program/check endpoint with sub=today,
-// which routes back here via /program?sub=today (handled by /program above).
+// which redirects straight back here.
+// The hitter picks which sections are today's workout on the Program tab;
+// no picks (or empty picks) = show all non-blank sections.
 app.get('/program/today', requireLogin, requireWaiver, (req, res) => {
   if (req.user.role === 'coach') return res.redirect('/coach');
   if (!req.user.remoteProgramId) return res.redirect('/');
-  if (!isTodayLayoutUser(req.user)) return res.redirect('/program');
   const p = getProgram(req.user.remoteProgramId);
   if (!p) return res.redirect('/');
   const liftingId = db.prepare('SELECT lifting_program_id FROM remote_programs WHERE id = ?').get(p.id);
   const lifting = getLifting(liftingId && liftingId.lifting_program_id);
   const today = chiToday();
   const checkoffs = getCheckoffs(req.user.id, today);
+  const picks = getTodayPicks(req.user.id, today);
   const liftDays = Array.isArray(lifting && lifting.days) ? lifting.days.filter((d) =>
     (Array.isArray(d.exercises) ? d.exercises : []).some((ex) => String((ex && ex.name) || '').trim())
   ) : [];
   const ldayIdx = pickLiftingDayIdx(req, p, liftDays.length);
   res.send(views.todayProgramPage(req.user, p, {
-    lifting, ldayIdx, checkoffs, today,
+    lifting, ldayIdx, checkoffs, today, picks,
     videoLib: videoLibMap(),
     subs: todaySubs(req.user.id),
     weekday: chiWeekdayFmt.format(new Date()),
   }));
+});
+
+// Today's workout picker (Oct 2026, Bobby): toggle one program section
+// in/out of today's workout. First toggle starts from all sections, so
+// tapping reads as "take this one out / put it back". Guarded: an unknown
+// or missing section never wipes existing picks — it just redirects back.
+app.post('/program/today-pick', requireLogin, requireWaiver, (req, res) => {
+  if (req.user.role === 'coach') return res.status(403).send('Coaches cannot pick workouts.');
+  if (!req.user.remoteProgramId) return res.status(403).send('No program assigned.');
+  if (req.user.viewAs) return res.status(403).send('View-as is read-only.');
+  const back = String(req.body.back || '/program/hitting-plan').slice(0, 160);
+  const safeBack = back.startsWith('/program/') ? back : '/program/hitting-plan';
+  const section = String(req.body.section || '').trim().toLowerCase();
+  if (!TODAY_SECTIONS.includes(section)) return res.redirect(safeBack);
+  const day = chiToday();
+  const cur = getTodayPicks(req.user.id, day) || [...TODAY_SECTIONS];
+  const next = cur.includes(section) ? cur.filter((s) => s !== section) : [...cur, section];
+  setTodayPicks(req.user.id, day, next);
+  res.redirect(safeBack);
 });
 
 // Mobility page (Sep 23 2026) — now the Movement tab. The Warm-up doc
@@ -2454,6 +2496,7 @@ app.get('/program/movement', requireLogin, requireWaiver, (req, res) => {
     sched: [], weekday: chiWeekdayFmt.format(new Date()), isToday: true,
     videoLib: videoLibMap(), subs: todaySubs(req.user.id),
     sessionOrder: 'hitting_first',
+    picks: getTodayPicks(req.user.id, today), pickBack: req.originalUrl,
   }));
 });
 
@@ -2476,6 +2519,7 @@ app.get('/program/medball', requireLogin, requireWaiver, (req, res) => {
     sched: [], weekday: chiWeekdayFmt.format(new Date()), isToday: true,
     videoLib: videoLibMap(), subs: todaySubs(req.user.id),
     sessionOrder: 'hitting_first',
+    picks: getTodayPicks(req.user.id, today), pickBack: req.originalUrl,
   }));
 });
 
@@ -2576,7 +2620,11 @@ app.get('/program/hitting-plan', requireLogin, requireWaiver, (req, res) => {
   const liftingId = db.prepare('SELECT lifting_program_id FROM remote_programs WHERE id = ?').get(p.id);
   const lifting = getLifting(liftingId && liftingId.lifting_program_id);
   const tabs = programSectionTabs(p, lifting);
-  res.send(views.hittingPlanPage(req.user, p, { tabs, sub: 'hitting' }));
+  const today = chiToday();
+  res.send(views.hittingPlanPage(req.user, p, {
+    tabs, sub: 'hitting',
+    picks: getTodayPicks(req.user.id, today), pickBack: req.originalUrl,
+  }));
 });
 
 // Lifting program (Sep 23 2026): interactive lifting, accessible from Program tab.
@@ -2589,7 +2637,10 @@ app.get('/program/lifting', requireLogin, requireWaiver, (req, res) => {
   const liftingId = db.prepare('SELECT lifting_program_id FROM remote_programs WHERE id = ?').get(p.id);
   const lifting = getLifting(liftingId && liftingId.lifting_program_id);
   const tabs = programSectionTabs(p, lifting);
-  if (!lifting) return res.send(views.hittingPlanPage(req.user, p, { tabs })); // No lifting? Show hitting doc
+  if (!lifting) {
+    const _t = chiToday();
+    return res.send(views.hittingPlanPage(req.user, p, { tabs, picks: getTodayPicks(req.user.id, _t), pickBack: req.originalUrl }));
+  } // No lifting? Show hitting doc
   // Render the lifting section using the existing programPage view.
   // The section tab bar at the top links the sections together.
   const today = chiToday();
@@ -2613,6 +2664,7 @@ app.get('/program/lifting', requireLogin, requireWaiver, (req, res) => {
     subs: todaySubs(req.user.id),
     sessionOrder: 'hitting_first',
     programTab: 'lifting', // Flag for the view to show Hitting/Lifting switcher
+    picks: getTodayPicks(req.user.id, today), pickBack: req.originalUrl,
   }));
 });
 
@@ -2957,26 +3009,16 @@ app.post('/program/check', requireLogin, requireWaiver, (req, res) => {
   const day = String(req.body.day || '').slice(0, 30);
   const r = applyProgramLog(req.user.id, req.body);
   if (!r.ok) return res.redirect('/program');
-  // Gated Today user: /program bounces to Today, so send check-offs
-  // back to the section page they came from (Bobby, Oct 2026).
-  if (isTodayLayoutUser(req.user)) {
-    if (sub === 'today') return res.redirect('/program/today');
-    if (sub === 'movement') return res.redirect('/program/movement' + (day ? '?day=' + encodeURIComponent(day) : ''));
-    if (sub === 'medball') return res.redirect('/program/medball' + (day ? '?day=' + encodeURIComponent(day) : ''));
-    if (sub === 'lifting') {
-      const q = [day && `day=${encodeURIComponent(day)}`, req.body.lday != null && String(req.body.lday) !== '' && `lday=${encodeURIComponent(String(req.body.lday))}`].filter(Boolean).join('&');
-      return res.redirect('/program/lifting' + (q ? `?${q}` : ''));
-    }
-    return res.redirect('/program/hitting-plan');
+  // Check-offs route back to the section page they came from (Bobby, Oct
+  // 2026). Every remote athlete uses the section pages now.
+  if (sub === 'today') return res.redirect('/program/today');
+  if (sub === 'movement') return res.redirect('/program/movement' + (day ? '?day=' + encodeURIComponent(day) : ''));
+  if (sub === 'medball') return res.redirect('/program/medball' + (day ? '?day=' + encodeURIComponent(day) : ''));
+  if (sub === 'lifting') {
+    const q = [day && `day=${encodeURIComponent(day)}`, req.body.lday != null && String(req.body.lday) !== '' && `lday=${encodeURIComponent(String(req.body.lday))}`].filter(Boolean).join('&');
+    return res.redirect('/program/lifting' + (q ? `?${q}` : ''));
   }
-  const back =
-    '/program?sub=' +
-    encodeURIComponent(sub) +
-    (day ? '&day=' + encodeURIComponent(day) : '') +
-    (sub === 'lifting' && req.body.lday != null && String(req.body.lday) !== ''
-      ? '&lday=' + encodeURIComponent(String(req.body.lday))
-      : '');
-  res.redirect(back);
+  return res.redirect('/program/hitting-plan');
 });
 
 // Workout-mode JSON logging (Sep 23 2026): same core as /program/check,

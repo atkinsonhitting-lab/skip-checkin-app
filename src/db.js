@@ -702,6 +702,18 @@ db.exec(`CREATE TABLE IF NOT EXISTS program_checkoffs (
   UNIQUE(user_id, day, item_key)
 );`);
 db.exec('CREATE INDEX IF NOT EXISTS idx_checkoffs_user_key ON program_checkoffs(user_id, item_key, day);');
+// Today's workout picks (Oct 2026, Bobby): the hitter taps which program
+// sections (movement/hitting/medball/lifting) they're doing today, from the
+// Program tab. One row per athlete per Chicago day; the Today page filters
+// to the picked sections. No row (or empty) = show all sections.
+db.exec(`CREATE TABLE IF NOT EXISTS today_workout_picks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  day TEXT NOT NULL,
+  sections TEXT NOT NULL DEFAULT '[]',
+  updated_at TEXT NOT NULL DEFAULT '',
+  UNIQUE(user_id, day)
+);`);
 // Hevy-style per-set logging (Sep 2026): sets_json holds
 // [{w: lbs, r: reps, done: 0/1}, ...] for kind='lift' rows.
 {

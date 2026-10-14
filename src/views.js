@@ -129,6 +129,74 @@ const progIsMovement = (cat) => /daily routine/i.test(String(cat || '')) || /mob
 const progIsPrep = (cat) => /prep/i.test(String(cat || ''));
 const progIsMedball = (cat) => /med\s*ball/i.test(String(cat || ''));
 const progIsHittingDrill = (cat) => !progIsMovement(cat) && !progIsPrep(cat) && !progIsMedball(cat);
+// Med ball per-set logging (Bobby, Oct 14 2026): expandable set logger so
+// hitters log med ball work by sets and weight. Uses the existing
+// program_checkoffs sets_json via lift_op=set/unset (kind='med').
+// checkoffs: map from getCheckoffs; sub/day: form routing; videoHtml: watch link.
+function medSetLogger(key, name, volume, checkoffs, sub, day, videoHtml, lday) {
+  const row = (checkoffs || {})[key] || null;
+  let loggedSets = [];
+  try {
+    const s = JSON.parse(row && row.sets_json ? row.sets_json : '[]');
+    if (Array.isArray(s)) loggedSets = s;
+  } catch (e) {}
+  const volMatch = String(volume || '').match(/(\d+)\s*[x×]\s*(\d+)/i);
+  const progSets = volMatch ? Math.max(1, Math.min(20, parseInt(volMatch[1], 10))) : 3;
+  const progReps = volMatch ? volMatch[2] : '';
+  const dispSets = loggedSets.length
+    ? loggedSets
+    : Array.from({ length: progSets }, () => ({ w: null, r: progReps ? parseInt(progReps, 10) || null : null, done: 0 }));
+  const doneCount = dispSets.filter((s) => s.done).length;
+  const allDone = dispSets.length > 0 && doneCount === dispSets.length && loggedSets.length > 0;
+  const lastW = (() => { const s = dispSets.find((x) => x.w != null && x.w !== ''); return s ? s.w : ''; })();
+  const setForms = dispSets.map((s, i) => {
+    const isDone = !!s.done;
+    return `<form method="post" action="/program/check" class="med-set-form">
+      <input type="hidden" name="kind" value="med">
+      <input type="hidden" name="sub" value="${esc(sub)}">
+      ${day ? `<input type="hidden" name="day" value="${esc(day)}">` : ''}
+      ${lday != null && lday !== '' ? `<input type="hidden" name="lday" value="${esc(String(lday))}">` : ''}
+      <input type="hidden" name="item_key" value="${esc(key)}">
+      <input type="hidden" name="lift_op" value="${isDone ? 'unset' : 'set'}">
+      <input type="hidden" name="set_idx" value="${i}">
+      <input type="hidden" name="prog_sets" value="${progSets}">
+      <input type="hidden" name="prog_reps" value="${esc(progReps)}">
+      <input type="hidden" name="set_weight" value="">
+      <button type="submit" class="set-check${isDone ? ' on' : ''}" aria-label="${isDone ? 'Uncheck' : 'Log'} set ${i + 1}">${isDone ? '☑' : '☐'}</button>
+      <span class="med-set-num">Set ${i + 1}</span>
+    </form>`;
+  }).join('');
+  return `<details class="med-ex${allDone ? ' done' : ''}" data-med-ex>
+    <summary class="med-sum">
+      <span class="med-dot" aria-hidden="true">${allDone ? '✓' : '○'}</span>
+      <span class="med-sum-main"><span class="med-name">${esc(name || '')}</span>
+      ${volume ? `<span class="hint-inline">${esc(volume)}</span>` : ''}
+      ${dispSets.length ? `<span class="hint-inline med-progress">${doneCount}/${dispSets.length} sets</span>` : ''}</span>
+      ${videoHtml || ''}
+    </summary>
+    <div class="med-sets">
+      <label class="med-w-label">Ball weight (lbs)
+        <input type="number" class="med-w-input" inputmode="decimal" step="any" min="0" max="500" placeholder="lbs" value="${lastW === '' ? '' : esc(String(lastW))}" aria-label="Ball weight in pounds">
+      </label>
+      <div class="med-set-list">${setForms}</div>
+    </div>
+  </details>
+  <script>
+  (function () {
+    document.querySelectorAll('[data-med-ex]').forEach(function (det) {
+      if (det.dataset.wired) return;
+      det.dataset.wired = '1';
+      var wInput = det.querySelector('.med-w-input');
+      det.querySelectorAll('.med-set-form').forEach(function (f) {
+        f.addEventListener('submit', function () {
+          var hw = f.querySelector('input[name="set_weight"]');
+          if (hw && wInput) hw.value = wInput.value;
+        });
+      });
+    });
+  })();
+  </script>`;
+}
 // Category blocks + top-level prog.<field> fallback, mirroring
 // splitProgramBlocks in server.js: when routine has no blocks matching
 // the fallback category, the list lives on the program object itself
@@ -219,16 +287,29 @@ const TABBAR_ICONS = {
   '/program/hitting-plan': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',
   '/videos': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><polygon points="10 9 15 12 10 15 10 9" fill="currentColor" stroke="none"/></svg>',
 };
-// Mirrors isTodayLayoutUser in server.js — the Today page is the gated
-// preview for Bobby's remote test account. Used by the bottom bar to
-// decide where the Today button points.
-function hasTodayLayout(user) {
-  return (
-    !!user &&
-    user.role === 'athlete' &&
-    !!user.remoteProgramId &&
-    String(user.firstName || '').trim().toLowerCase() === 'bobby'
-  );
+// Today's workout picker (Oct 2026, Bobby): on each Program section page
+// the hitter taps which sections they're doing today. One form, one submit
+// button per section — tapping toggles it via /program/today-pick and lands
+// back on the same page. Only the athlete's non-blank sections render, so
+// a hitter without lifting never sees a lifting chip. Coaches in view-as
+// never see the picker (their taps can't save).
+function todayPickerHtml(user, tabs, picks, backHref) {
+  if (!user || user.role !== 'athlete' || !user.remoteProgramId || user.viewAs) return '';
+  const order = ['movement', 'hitting', 'medball', 'lifting'];
+  const list = (Array.isArray(tabs) ? tabs : [])
+    .filter((t) => order.includes(t.id))
+    .sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
+  if (!list.length) return '';
+  const picked = Array.isArray(picks) && picks.length ? picks : list.map((t) => t.id);
+  const chips = list.map((t) => {
+    const on = picked.includes(t.id);
+    return `<button type="submit" name="section" value="${esc(t.id)}" class="tp-chip${on ? ' on' : ''}" aria-pressed="${on ? 'true' : 'false'}">${esc(t.label)}${on ? ' ✓' : ''}</button>`;
+  }).join('');
+  return `<div class="today-pick"><span class="today-pick-label">Today's workout — tap what you're doing:</span>
+    <form method="post" action="/program/today-pick" class="today-pick-form">
+      <input type="hidden" name="back" value="${esc(String(backHref || '/program/hitting-plan')).slice(0, 160)}">
+      ${chips}
+    </form></div>`;
 }
 function bottomTabbar(user, tabs) {
   if (!user) return '';
@@ -239,8 +320,8 @@ function bottomTabbar(user, tabs) {
   // Bobby reported the buttons changing per tab; pages pass different tab
   // lists (the drawer list), so the bar now ignores the passed list for
   // remote athletes and renders the fixed set. The drawer still uses the
-  // passed list. Today points at /program/today for the gated Today-layout
-  // user, else at /program (their program home).
+  // passed list. Today goes to the Today page; Program goes to the
+  // program section menu — the two tabs are different screens.
   if (!isCoach && user.remoteProgramId) {
     const activeHref = String(((tabs || []).find((t) => t.active) || {}).href || '');
     const activeKey =
@@ -251,11 +332,8 @@ function bottomTabbar(user, tabs) {
       : null;
     const unread = Number(user.unreadMessages || 0);
     const items = [
-      { href: hasTodayLayout(user) ? '/program/today' : '/program', label: 'Today', key: 'today', badge: null },
-      // Program must NOT point at /program for the gated Today user:
-      // /program bounces them straight back to Today, so the tab looked
-      // dead. The full program doc lives at /program/hitting-plan.
-      { href: hasTodayLayout(user) ? '/program/hitting-plan' : '/program', label: 'Program', key: 'program', badge: null },
+      { href: '/program/today', label: 'Today', key: 'today', badge: null },
+      { href: '/program', label: 'Program', key: 'program', badge: null },
       { href: '/videos', label: 'Videos', key: 'videos', badge: null },
       { href: '/messages', label: 'Messages', key: 'messages', badge: unread > 0 ? String(unread) : null },
     ];
@@ -2876,8 +2954,8 @@ const realItems = (items) =>
 const realExercises = (exs) =>
   (Array.isArray(exs) ? exs : []).filter((ex) => String((ex && ex.name) || '').trim());
 
-// Today page (Oct 2026, Bobby) — GATED PREVIEW for the Bobby test
-// account only (see isTodayLayoutUser in server.js). One day, sections in
+// Today page (Oct 2026, Bobby) — every remote athlete's Today tab
+// (see isTodayLayoutUser in server.js). One day, sections in
 // order: Movement, Hitting, Med Ball, Lifting. Check-offs POST to the
 // existing /program/check endpoint with sub=today. Substitute links use
 // the existing /program/substitute flow. Reorder + move-day are
@@ -2929,6 +3007,16 @@ function todayProgramPage(user, p, opts) {
   // /program/lifting formats (`lift::{label}::{name}`,
   // `spd::::{label}::{name}`, `med::::{label}::{name}`).
   const checkRow = (kind, key, name, volume, video, extra, tags) => {
+    // Bobby (Oct 14 2026): med ball logs by sets and weight — expandable set logger.
+    if (kind === 'med') {
+      totalItems += 1;
+      const _row = checkoffs[key];
+      let _logged = [];
+      try { const _s = JSON.parse(_row && _row.sets_json ? _row.sets_json : '[]'); if (Array.isArray(_s)) _logged = _s; } catch (e) {}
+      if (_logged.length && _logged.every((s) => s.done)) doneItems += 1;
+      else if (!_logged.length && _row) doneItems += 1;
+      return medSetLogger(key, name, volume, checkoffs, 'today', todayLabel, watchLink(video), '');
+    }
     const done = !!checkoffs[key];
     totalItems += 1;
     if (done) doneItems += 1;
@@ -3050,12 +3138,24 @@ function todayProgramPage(user, p, opts) {
   if (isRestDay) {
     content = `<div class="td-card"><p style="margin:0"><strong>Rest day — recover.</strong></p><p class="td-hint" style="margin:6px 0 0">No work scheduled today. Walk, stretch, sleep — the rest is the work.</p></div>`;
   } else {
-    content = sectionHtml(`${esc(secLabels.movement)} · Warm-up`, movementHtml)
-      + sectionHtml(esc(secLabels.hitting), hittingHtml)
-      + sectionHtml(esc(secLabels.medball), medHtml)
+    // Workout picks (Oct 2026, Bobby): the hitter chose today's sections on
+    // the Program tab. No picks (or empty picks) = show all non-blank
+    // sections — Today is never empty because of the picker.
+    const picks = Array.isArray(o.picks) && o.picks.length ? o.picks : null;
+    const showSec = (id) => !picks || picks.includes(id);
+    // Med ball: when a lifting day exists the section renders that day's
+    // med ball work, so it follows the Lifting pick; otherwise it follows
+    // the Med Ball pick. (Lifters have no standalone Med Ball tab.)
+    const showMed = curDay ? showSec('lifting') : showSec('medball');
+    content = (showSec('movement') ? sectionHtml(`${esc(secLabels.movement)} · Warm-up`, movementHtml) : '')
+      + (showSec('hitting') ? sectionHtml(esc(secLabels.hitting), hittingHtml) : '')
+      + (showMed ? sectionHtml(esc(secLabels.medball), medHtml) : '')
       // Blank sections never render: no lifting day means no Lifting
       // section at all (Bobby, Oct 2026) — no empty header, no blank card.
-      + (curDay ? sectionHtml(`${esc(secLabels.lifting)} · ${esc(liftDayLabel)}`, liftHtml) : '');
+      + ((curDay && showSec('lifting')) ? sectionHtml(`${esc(secLabels.lifting)} · ${esc(liftDayLabel)}`, liftHtml) : '');
+    if (picks) {
+      content = `<p class="td-hint" style="margin:10px 0 0">Showing your picked workout — change it on the <a href="/program" style="color:#fff">Program</a> tab.</p>` + content;
+    }
     if (!totalItems) {
       content = `<div class="td-card"><p style="margin:0"><strong>No program yet.</strong></p><p class="td-hint" style="margin:6px 0 0">Nothing scheduled for today. Your coach will add your program here.</p></div>`;
     }
@@ -3256,6 +3356,10 @@ function programPage(user, p, opts) {
 
   // One check-off row (hitting / mobility / med ball / prep).
   const checkRow = (kind, key, drill, volume, video, extra, badge, tags) => {
+    // Bobby (Oct 14 2026): med ball logs by sets and weight — expandable set logger.
+    if (kind === 'med') {
+      return medSetLogger(key, drill, volume, checkoffs, sub, day || '', watchLink(video), '');
+    }
     const done = !!checkoffs[key];
     const swapped = (o.subs || {})[key];
     const shown = swapped ? String(swapped.sub_name || drill) : drill;
@@ -3379,9 +3483,9 @@ function programPage(user, p, opts) {
         (dayMedball.length
           ? `<div class=\"card routine-group\">${dayMedball.map((s) =>
               `<div class=\"spd-row\">` +
-              checkRow('med', `med::::${curDay.label || ''}::${s.name}`, s.name,
-                [s.volume, s.notes].filter(Boolean).join(' — '), null, ldayExtra, intentBadgeHtml(s.intent)) +
-              liftVideoHtml(s.video, watchLink) + `</div>`
+              medSetLogger(`med::::${curDay.label || ''}::${s.name}`, s.name,
+                [s.volume, s.notes].filter(Boolean).join(' — '), checkoffs, 'lifting', '', liftVideoHtml(s.video, watchLink), effLday) +
+              `</div>`
             ).join('')}</div>`
           : '') +
         heldHtml(heldMedball)
@@ -3470,6 +3574,7 @@ function programPage(user, p, opts) {
     <p><a href="/program/hitting-plan" class="btn" style="display:inline-block;text-decoration:none">📄 Hitting Plan</a></p>
     ${meta ? `<p class="lede">${meta}</p>` : ''}
     ${tabHtml}
+    ${todayPickerHtml(user, tabs, o.picks, o.pickBack)}
     ${weekStrip()}
     ${(() => {
       // Guided Today session: one tap runs the whole day in the athlete's
@@ -4804,8 +4909,17 @@ function programEditPage(user, p, profileEmail, hasLifting, progression, opts) {
     }
     return { auto, manual, none };
   };
-  const catBlocks = routine
-    .map((c, i) => {
+  // Bobby (Oct 14 2026): training blocks grouped by section — Movement,
+  // Med Ball, Hitting (prep blocks + link to the hitting plan editor), Other.
+  // The block's category name still determines its section; grouping is visual.
+  // Field indices (cat_N_name) keep their original order so saves are stable.
+  const blockSec = (cat) => {
+    if (progIsMovement(cat)) return 'movement';
+    if (progIsMedball(cat)) return 'medball';
+    if (progIsPrep(cat)) return 'hitting';
+    return 'other';
+  };
+  const catBlockHtml = (c, i) => {
       const st = linkStatus(c.items);
       const statusBits = [];
       if (st.auto) statusBits.push(`${st.auto} auto-linked`);
@@ -4828,8 +4942,9 @@ function programEditPage(user, p, profileEmail, hasLifting, progression, opts) {
         <div class="hint-inline">🔗 ${statusBits.join(' · ') || 'no drills'}. Paste a YouTube or library URL after the last | to set a link; delete a link to keep it blank. New library videos auto-link on their own — your links are never overwritten.</div>
         <button type="button" class="btn btn-danger btn-sm" data-remove-cat>Remove category</button>
       </div>`;
-    })
-    .join('');
+  };
+  const groupedBlocks = { movement: [], medball: [], hitting: [], other: [] };
+  routine.forEach((c, i) => { groupedBlocks[blockSec(c.category)].push(catBlockHtml(c, i)); });
   const cues = prog.cues && typeof prog.cues === 'object' ? prog.cues : {};
   // Section names (Bobby, Oct 2026): rename the four sections for THIS
   // hitter only — stored on his program, never global. Blank = default.
@@ -4992,11 +5107,22 @@ function programEditPage(user, p, profileEmail, hasLifting, progression, opts) {
       </div>
       <h2 class="section-head">Training blocks</h2>
       ${hasLifting ? '<p class="hint-inline"><strong>This athlete has a lifting program</strong> — their Med Ball blocks don\'t get their own tab; they show inside the <em>Lifting</em> tab, ahead of the lifts.</p>' : ''}
-      <p class="hint-inline">Blocks named with <em>Mobility</em> feed the Mobility tab, <em>Med Ball</em> feeds the Med Ball tab (or lands inside the <em>Lifting</em> tab for athletes with a lifting program), <em>Prep</em> stays with Hitting. Speed work lives inside the <em>Lifting</em> program (its Speed section) — there's no Metabolic tab; legacy <em>Metabolic</em> blocks fold into the Lifting tab's Speed section. Naming a block is how tabs appear or disappear for the athlete.</p>
-      <div id="prog-cats" data-next="${routine.length}">${catBlocks}</div>
-      <p><button type="button" class="btn" id="prog-add-cat">+ Add block</button>
-      <button type="button" class="btn" data-addcat-name="Mobility">+ Mobility block</button>
-      <button type="button" class="btn" data-addcat-name="Med Ball">+ Med ball block</button></p>
+      <p class="hint-inline">Blocks are grouped by section. Naming a block is how tabs appear or disappear for the athlete: <em>Mobility</em> feeds the Movement tab, <em>Med Ball</em> feeds the Med Ball tab (or lands inside the <em>Lifting</em> tab for athletes with a lifting program), <em>Prep</em> stays with Hitting. Speed work lives inside the <em>Lifting</em> program (its Speed section).</p>
+      <div id="prog-cats" data-next="${routine.length}">
+        <h3 class="prog-sec-head">${esc(String(secRaw.movement || 'Movement'))}</h3>
+        <div class="prog-sec" id="prog-sec-movement">${groupedBlocks.movement.join('') || '<p class="hint-inline">No movement blocks yet.</p>'}</div>
+        <p><button type="button" class="btn" data-addcat-name="Mobility" data-target="prog-sec-movement">+ Mobility block</button></p>
+        <h3 class="prog-sec-head">${esc(String(secRaw.medball || 'Med Ball'))}</h3>
+        <div class="prog-sec" id="prog-sec-medball">${groupedBlocks.medball.join('') || '<p class="hint-inline">No med ball blocks yet.</p>'}</div>
+        <p><button type="button" class="btn" data-addcat-name="Med Ball" data-target="prog-sec-medball">+ Med ball block</button></p>
+        <h3 class="prog-sec-head">${esc(String(secRaw.hitting || 'Hitting'))}</h3>
+        <p><a href="/coach/program/${p.id}/hitting-plan" class="btn">Edit Hitting Plan →</a> <span class="hint-inline">Drills, cues, prep work, and environments live in the hitting plan.</span></p>
+        <div class="prog-sec" id="prog-sec-hitting">${groupedBlocks.hitting.join('') || '<p class="hint-inline">No prep blocks yet.</p>'}</div>
+        <p><button type="button" class="btn" data-addcat-name="Prep" data-target="prog-sec-hitting">+ Prep block</button></p>
+        <h3 class="prog-sec-head">Other</h3>
+        <div class="prog-sec" id="prog-sec-other">${groupedBlocks.other.join('') || '<p class="hint-inline">No other blocks.</p>'}</div>
+        <p><button type="button" class="btn" id="prog-add-cat" data-target="prog-sec-other">+ Add block</button></p>
+      </div>
       <p><button type="submit" class="btn btn-primary">Save program</button></p>
     </form>
 `,
@@ -6393,12 +6519,20 @@ function hittingPlanPage(user, p, opts) {
   // standalone line on the hitting program, NOT inside the drills table.
   const freqLine = `<p class="freq-line"><strong>${esc(plan.frequency || 'Complete the program 3 to 5 times per week.')}</strong></p>`;
   // Bobby (Sep 24 2026): show the prep right above the drills.
+  // Bobby (Oct 14 2026): prep work lives in the hitting plan — merge the
+  // hitting plan's warmup with any Prep blocks from the program editor.
   const warmupItems = Array.isArray(plan.warmup) ? plan.warmup : [];
-  const prepHtml = warmupItems.length
+  const routinePrepItems = (Array.isArray(prog.routine) ? prog.routine : [])
+    .filter((c) => progIsPrep(c.category))
+    .flatMap((c) => Array.isArray(c.items) ? c.items : [])
+    .map((it) => ({ name: it.drill || it.name || '', detail: it.volume || '' }))
+    .filter((w) => String(w.name || '').trim());
+  const allPrep = [...warmupItems, ...routinePrepItems];
+  const prepHtml = allPrep.length
     ? `<h2 class="doc-sec">Prep</h2>
-       <ul class="std-list">${warmupItems.map((w) => {
+       <ul class="std-list">${allPrep.map((w) => {
          const nm = typeof w === 'string' ? w : (w && w.name) || '';
-         const dt = typeof w === 'object' && w ? w.detail : '';
+         const dt = typeof w === 'object' && w ? (w.detail || w.volume || '') : '';
          return `<li><strong>${esc(nm)}</strong>${dt ? ` &mdash; ${esc(dt)}` : ''}</li>`;
        }).join('')}</ul>`
     : '';
@@ -6431,7 +6565,7 @@ function hittingPlanPage(user, p, opts) {
     title: 'Hitting Program',
     user,
     tabs: o.layoutTabs || userTabs('program', user),
-    body: `${o.coachBar || ''}${sectionTabHtml}<div class="doc-page">
+    body: `${o.coachBar || ''}${sectionTabHtml}${todayPickerHtml(user, tabs, o.picks, o.pickBack)}<div class="doc-page">
       <div class="doc-header">
         <img src="/atkinson-hitting-logo.jpg" class="doc-logo-img" alt="Atkinson Hitting">
         <div class="doc-title-wrap">

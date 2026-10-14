@@ -572,7 +572,7 @@ window.SkipMic = (function () {
     }
     function initBlock(block) { renderBlock(block); }
     wrap.querySelectorAll('[data-cat]').forEach(initBlock);
-    function addCat(presetName) {
+    function addCat(presetName, container) {
       var div = document.createElement('div');
       div.className = 'card routine-group prog-cat';
       div.setAttribute('data-cat', '');
@@ -587,15 +587,20 @@ window.SkipMic = (function () {
         '<label class="fld prog-items-fallback">Drills — one per line, as <em>Drill</em> or <em>Drill | volume</em>' +
         '<textarea name="cat_' + next + '_items" rows="4"></textarea></label>' +
         '<button type="button" class="btn btn-danger btn-sm" data-remove-cat>Remove category</button>';
-      wrap.appendChild(div);
+      (container || wrap).appendChild(div);
       next++;
       initBlock(div);
       div.scrollIntoView({ block: 'nearest' });
     }
+    function targetFor(btn) {
+      var t = btn && btn.getAttribute ? btn.getAttribute('data-target') : null;
+      var el = t ? document.getElementById(t) : null;
+      return el || wrap;
+    }
     var addBtn = document.getElementById('prog-add-cat');
-    if (addBtn) addBtn.addEventListener('click', function () { addCat(''); });
+    if (addBtn) addBtn.addEventListener('click', function () { addCat('', targetFor(addBtn)); });
     document.querySelectorAll('[data-addcat-name]').forEach(function (b) {
-      b.addEventListener('click', function () { addCat(b.getAttribute('data-addcat-name')); });
+      b.addEventListener('click', function () { addCat(b.getAttribute('data-addcat-name'), targetFor(b)); });
     });
     wrap.addEventListener('input', function (e) {
       var block = e.target && e.target.closest ? e.target.closest('[data-cat]') : null;
