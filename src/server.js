@@ -4373,7 +4373,7 @@ app.post('/coach/program/:id/hitting-plan', requireCoach, (req, res) => {
     if (!name) continue;
     plan.warmup.push({ name, detail: String(b[`w_detail_${i}`] || '').trim() });
   }
-  // Drills: d_name_0, d_envs_0 (multi-checkbox), d_volume_0, d_cues_0, d_why_0, ...
+  // Drills: d_name_0, d_envs_0 (multi-checkbox), d_volume_0, d_cues_0, d_why_0, d_video_0, ...
   const oldDrills = Array.isArray(oldPlan.drills) ? oldPlan.drills : [];
   for (let i = 0; i < 100; i++) {
     const name = String(b[`d_name_${i}`] || '').trim();
@@ -4400,6 +4400,9 @@ app.post('/coach/program/:id/hitting-plan', requireCoach, (req, res) => {
       volume: String(b[`d_volume_${i}`] || '').trim(),
       cues: String(b[`d_cues_${i}`] || '').trim(),
       why: String(b[`d_why_${i}`] || '').trim(),
+      // Bobby (Oct 14 2026): per-drill Drive video override — stored on the
+      // program drill, never in the drill library.
+      videoUrl: String(b[`d_video_${i}`] || '').trim().slice(0, 500),
     });
   }
   // (Med-ball editing removed Sep 24 2026 — Bobby: the hitting plan is eval +
@@ -9411,6 +9414,21 @@ app.post('/coach/messages/new', requireCoach, (req, res) => {
   // then read athlete_id from the parsed body.
   msgAttachmentUpload.single('attachment')(req, res, (err) => {
     if (err) return res.redirect('/coach/messages?err=upload');
+    // Send to all remote hitters at once — one 1:1 message per athlete
+    // (separate chats), all sharing the single uploaded file.
+    if ((req.body || {}).all_remote) {
+      const body = String((req.body || {}).body || '').trim().slice(0, 5000);
+      const file = req.file || null;
+      if (!body && !file) return res.redirect('/coach/messages?err=empty');
+      const athletes = db.prepare(
+        `SELECT id FROM users WHERE role = 'athlete' AND status = 'approved' AND EXISTS (SELECT 1 FROM remote_programs p WHERE p.id = users.remote_program_id)`
+      ).all();
+      for (const a of athletes) {
+        sendMessage(req.user.id, a.id, body, file);
+        notifyMessageRecipient(req.user.id, a.id, body, file);
+      }
+      return res.redirect('/coach/messages');
+    }
     const athleteId = Number((req.body || {}).athlete_id);
     const peer = msgPeerRow(athleteId);
     if (!peer || peer.role !== 'athlete') return res.redirect('/coach/messages');

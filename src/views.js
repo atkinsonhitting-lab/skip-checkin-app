@@ -1734,6 +1734,7 @@ function coachMessagesPage(user, rows, athletes, canSend, error) {
       <h3 style="margin-top:0">New message</h3>
       <form method="post" action="/coach/messages/new" enctype="multipart/form-data" class="form">
         <label>Athlete<select name="athlete_id" required><option value="">Pick an athlete\u2026</option>${options}</select></label>
+        <label style="font-weight:400"><input type="checkbox" name="all_remote" value="1" style="display:inline-block;width:auto;margin:0 8px 0 0;vertical-align:middle" onchange="var s=this.form.querySelector('select[name=athlete_id]');if(s){s.disabled=this.checked;s.required=!this.checked;}"> Send to all remote hitters (separate chats)</label>
         <label>Message<textarea name="body" rows="3" maxlength="5000" placeholder="Write a message\u2026"></textarea></label>
         <label>Attach a video or photo<input type="file" name="attachment" accept="video/*,image/*"></label>
         <button type="submit" class="btn-primary">Send</button>
@@ -6106,22 +6107,35 @@ function hittingPlanPage(user, p, opts) {
   // Drill table: Drill / Coaching Notes | Sets / Reps
   // Bobby (Sep 24 2026): no more progression line — each drill shows
   // "Do this drill on: ..." from his per-drill environment picks.
+  // Bobby (Oct 14 2026): column-level rule — when every drill's Sets/Reps
+  // is blank, drop the column entirely instead of an empty column.
   const drills = Array.isArray(plan.drills) ? plan.drills : [];
+  const volOf = (d) => String(d.setsReps || d.volume || '').trim();
+  const showVol = drills.some((d) => volOf(d));
   const drillRows = drills.map((d) => {
     // Tolerate legacy custom plans (old schema: single env string, cues/volume).
     const dEnvs = Array.isArray(d.envs) ? d.envs
       : d.env ? [(d.env === 'Toss' ? 'Side Toss' : d.env)]
       : [];
-    const left = `<strong>${esc(d.name || '')}</strong>` +
+    // Bobby (Oct 14 2026): per-drill Drive video override, set in the coach
+    // hitting-plan editor. Stored on the program drill — never the library.
+    // Only http(s) links render, so pasted text can't become a JS link.
+    const vUrl = String(d.videoUrl || '').trim();
+    const watch = /^https?:\/\//i.test(vUrl)
+      ? ` <a class="drill-watch" href="${esc(vUrl)}" target="_blank" rel="noopener">▶ Watch</a>`
+      : '';
+    const left = `<strong>${esc(d.name || '')}</strong>${watch}` +
       (dEnvs.length ? `<br><span class="do-on"><strong>Do this drill on:</strong> ${esc(dEnvs.join(', '))}</span>` : '') +
       (d.why ? `<br><span class="why">Why? ${esc(d.why)}</span>` : '');
-    const right = esc(d.setsReps || d.volume || '');
-    return `<tr><td>${left}</td><td class="vol">${right}</td></tr>`;
+    const right = esc(volOf(d));
+    return showVol
+      ? `<tr><td>${left}</td><td class="vol">${right}</td></tr>`
+      : `<tr><td>${left}</td></tr>`;
   }).join('');
 
   const drillTableHtml = drillRows
     ? `<table class="drill-table">
-         <thead><tr><th>Drill / Coaching Notes</th><th>Sets / Reps</th></tr></thead>
+         <thead><tr><th>Drill / Coaching Notes</th>${showVol ? '<th>Sets / Reps</th>' : ''}</tr></thead>
          <tbody>${drillRows}</tbody>
        </table>`
     : '';
@@ -6218,6 +6232,7 @@ function hittingPlanPage(user, p, opts) {
       .drill-table th { background: #c8102e; color: #fff; border: 1px solid #c8102e; padding: 8px 10px; text-align: left; font-size: 13px; }
       .drill-table td { border: 1px solid #444; padding: 8px 10px; vertical-align: top; color: #fff; }
       .drill-table .vol { text-align: center; font-weight: 700; white-space: nowrap; }
+      .drill-table .drill-watch { color: #fff; font-size: 13px; font-weight: 400; text-decoration: underline; white-space: nowrap; }
       .freq-line { font-size: 15px; margin: 12px 0; color: #fff; }
       .why { font-size: 13px; color: #ccc; }
       .do-on { font-size: 13px; color: #ccc; }
@@ -6317,6 +6332,7 @@ function hittingPlanEditPage(user, p) {
       <input type="text" name="d_volume_${i}" value="${esc(d.volume || '')}" placeholder="Volume (e.g. 2x5)" maxlength="100">
       <input type="text" name="d_cues_${i}" value="${esc(d.cues || '')}" placeholder="Cues" maxlength="200">
       <input type="text" name="d_why_${i}" value="${esc(d.why || '')}" placeholder="Why? (what it trains)" maxlength="300">
+      <input type="text" name="d_video_${i}" value="${esc(d.videoUrl || '')}" placeholder="Video link (Drive URL, optional)" maxlength="500" class="drill-video">
     </div>`).join('');
   const drillBlanks = [0, 1, 2, 3].map((k) => {
     const i = drills.length + k;
@@ -6326,6 +6342,7 @@ function hittingPlanEditPage(user, p) {
       <input type="text" name="d_volume_${i}" value="" placeholder="Volume (e.g. 2x5)" maxlength="100">
       <input type="text" name="d_cues_${i}" value="" placeholder="Cues" maxlength="200">
       <input type="text" name="d_why_${i}" value="" placeholder="Why? (what it trains)" maxlength="300">
+      <input type="text" name="d_video_${i}" value="" placeholder="Video link (Drive URL, optional)" maxlength="500" class="drill-video">
     </div>`;
   }).join('');
 
@@ -6395,6 +6412,7 @@ function hittingPlanEditPage(user, p) {
       .plan-drill { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; padding: 10px; background: var(--card); border: 1px solid var(--line); border-radius: 6px; }
       .plan-drill input { padding: 8px; }
       .plan-drill .drill-name { grid-column: 1 / -1; font-weight: 600; }
+      .plan-drill .drill-video { grid-column: 1 / -1; }
       .drill-envs { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; font-size: 14px; }
       .drill-envs-label { font-weight: 600; }
       .env-check { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; }
