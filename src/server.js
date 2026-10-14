@@ -4324,6 +4324,17 @@ app.post('/coach/program/:id/hitting-plan', requireCoach, (req, res) => {
     why_text: String(oldPlan.why_text || ''),
     reminder: String(oldPlan.reminder || ''),
   };
+  // Days per week (Bobby Oct 14 2026): coach picks the number in the editor;
+  // the doc renders "Complete the program N times per week." Guarded: a
+  // stale form without the field keeps the old value.
+  const _dpw = parseInt(b.days_per_week, 10);
+  if (_dpw >= 1 && _dpw <= 7) {
+    plan.daysPerWeek = _dpw;
+    plan.frequency = `Complete the program ${_dpw} time${_dpw === 1 ? '' : 's'} per week.`;
+  } else {
+    if (oldPlan.daysPerWeek) plan.daysPerWeek = oldPlan.daysPerWeek;
+    if (oldPlan.frequency) plan.frequency = oldPlan.frequency;
+  }
   const GRADES = ['Load', 'Path', 'Connection', 'Timing', 'Power Production'];
   if (GRADES.some((g) => ('grade_' + g.replace(/ /g, '_')) in b)) {
     const grades = {};

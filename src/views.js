@@ -6622,6 +6622,26 @@ function hittingPlanEditPage(user, p) {
           <textarea name="adjustment" rows="2" maxlength="500">${esc(prog.adjustment || '')}</textarea>
         </label>
         <label class="fld">Mental framework<input type="text" name="mental_framework" value="${esc(prog.mental_framework || '')}" maxlength="200" placeholder="PREPARED → PRESENT → COMPETE"></label>
+        <label class="fld">Days per week — how many days should he do this program? (He picks his own days.)
+          <input type="hidden" name="days_per_week" id="days_per_week" value="${plan.daysPerWeek || ''}">
+          <div class="dpw-picker" role="group" aria-label="Days per week">
+            ${[1, 2, 3, 4, 5, 6, 7].map((n) => `<button type="button" class="dpw-btn${Number(plan.daysPerWeek) === n ? ' active' : ''}" data-n="${n}">${n}</button>`).join('')}
+          </div>
+        </label>
+        <script>
+        (function () {
+          var hid = document.getElementById('days_per_week');
+          if (!hid || hid.dataset.wired) return;
+          hid.dataset.wired = '1';
+          var btns = hid.parentNode.querySelectorAll('.dpw-btn');
+          btns.forEach(function (btn) {
+            btn.addEventListener('click', function () {
+              hid.value = btn.dataset.n;
+              btns.forEach(function (b) { b.classList.toggle('active', b === btn); });
+            });
+          });
+        })();
+        </script>
       </div>
       <h3>Grades</h3>
       <p class="hint-inline">Show on his program right after the key strengths.</p>
@@ -6662,6 +6682,9 @@ function hittingPlanEditPage(user, p) {
       .plan-drill input { padding: 8px; }
       .plan-drill .drill-name { grid-column: 1 / -1; font-weight: 600; }
       .plan-drill .drill-video { grid-column: 1 / -1; }
+      .dpw-picker { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+      .dpw-btn { width: 44px; height: 44px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg2); color: var(--text); font-size: 16px; font-weight: 700; cursor: pointer; font-family: inherit; }
+      .dpw-btn.active { border-color: var(--red); color: var(--red); }
       .drill-envs { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; font-size: 14px; }
       .drill-envs-label { font-weight: 600; }
       .env-check { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; }
