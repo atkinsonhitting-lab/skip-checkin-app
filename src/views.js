@@ -316,7 +316,7 @@ function bottomTabbar(user, tabs) {
   const isCoach = user.role === 'coach';
   if (!isCoach && user.role !== 'athlete') return '';
   // Remote athletes (Oct 2026, Bobby): the bottom bar is ALWAYS Today /
-  // Program / Videos / Messages, on every page — only the highlight moves.
+  // Program / Check In / Videos / Messages, on every page — only the highlight moves.
   // Bobby reported the buttons changing per tab; pages pass different tab
   // lists (the drawer list), so the bar now ignores the passed list for
   // remote athletes and renders the fixed set. The drawer still uses the
@@ -326,6 +326,7 @@ function bottomTabbar(user, tabs) {
     const activeHref = String(((tabs || []).find((t) => t.active) || {}).href || '');
     const activeKey =
       activeHref === '/program/today' ? 'today'
+      : activeHref === '/checkin' || activeHref.startsWith('/checkin') ? 'checkin'
       : activeHref === '/messages' || activeHref.startsWith('/messages/') ? 'messages'
       : activeHref === '/videos' || activeHref.startsWith('/videos/') ? 'videos'
       : activeHref === '/program' || activeHref.startsWith('/program/') ? 'program'
@@ -334,6 +335,7 @@ function bottomTabbar(user, tabs) {
     const items = [
       { href: '/program/today', label: 'Today', key: 'today', badge: null },
       { href: '/program', label: 'Program', key: 'program', badge: null },
+      { href: '/checkin', label: 'Check In', key: 'checkin', badge: null },
       { href: '/videos', label: 'Videos', key: 'videos', badge: null },
       { href: '/messages', label: 'Messages', key: 'messages', badge: unread > 0 ? String(unread) : null },
     ];
@@ -4877,7 +4879,7 @@ function programEditPage(user, p, profileEmail, hasLifting, progression, opts) {
   const subs = o.subs || [];
   const prog = p.prog || {};
   const grades = prog.grades && typeof prog.grades === 'object' ? prog.grades : {};
-  const gradeFields = ['Load', 'Path', 'Connection', 'Timing', 'Power Production']
+  const gradeFields = ['The Load', 'The Setup', 'Launch Position', 'Zone Entry', 'Path', 'Post-Contact Direction', 'The Finish']
     .map(
       (g) => {
         const key = g.replace(/ /g, '_');
@@ -6734,7 +6736,7 @@ function hittingPlanEditPage(user, p) {
   // fall back to prog.grades for plans saved before the mirror existed.
   const _g = (plan.grades && typeof plan.grades === 'object' && Object.keys(plan.grades).length ? plan.grades : prog.grades) || {};
   const _gw = (plan.grade_whys && typeof plan.grade_whys === 'object' && Object.keys(plan.grade_whys).length ? plan.grade_whys : prog.grade_whys) || {};
-  const gradeRows = ['Load', 'Path', 'Connection', 'Timing', 'Power Production'].map((g) => {
+  const gradeRows = ['The Load', 'The Setup', 'Launch Position', 'Zone Entry', 'Path', 'Post-Contact Direction', 'The Finish'].map((g) => {
     const key = g.replace(/ /g, '_');
     return `<div class="grade-edit-block">
       <label class="fld fld-inline">Grade — ${esc(g)}<input type="text" name="grade_${key}" value="${esc(_g[g] || '')}" maxlength="4" placeholder="B+"></label>
