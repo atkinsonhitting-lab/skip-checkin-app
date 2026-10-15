@@ -28,7 +28,7 @@ const { seedUsers, writeCredentialsFile, userCount } = require('./seed');
 // Bobby's own organization — his 4 remote hitters, Talk to Skip on, free
 // forever. Pinned at the top of the Organizations list; the only org whose
 // players get "Edit program" links (it's the only org with programs).
-const FOUNDER_ORG_NAME = 'Atkinson Hitter Development System';
+const FOUNDER_ORG_NAME = 'UNCOMMON';
 
 const app = express();
 
@@ -131,11 +131,11 @@ if (process.env.BOOT_CREATE_USER) {
 }
 
 // Remote org one-shot (Sep 2026): set BOOT_REMOTE_ORG=1 to create Bobby's own
-// organization "Atkinson Hitter Development System" and place his 4 remote
+// organization "UNCOMMON" and place his 4 remote
 // hitters in it. Idempotent: skips creation if the org exists, re-ensures the
 // hitter assignments and Talk to Skip access on every run.
 if (process.env.BOOT_REMOTE_ORG === '1') {
-  const REMOTE_ORG_NAME = 'Atkinson Hitter Development System';
+  const REMOTE_ORG_NAME = 'UNCOMMON';
   const REMOTE_NAMES = ['Liam Stoffel', 'Dylan Kakuda', 'Ryan Seddon', 'Sam Chapman'];
   let org = db.prepare('SELECT id, code, skip_enabled FROM organizations WHERE name = ?').get(REMOTE_ORG_NAME);
   if (!org) {
@@ -410,8 +410,8 @@ function deleteOrgLogoFile(logoPath) {
   } catch (e) { console.warn('BOOT_MSU_ROSTER failed:', e.message); }
 })();
 
-// Bobby's own programs (Sep 17 2026): "Atkinson Hitting" (in-person guys) and
-// "Atkinson Hitter Development System" (remote guys). Idempotent boot setup:
+// Bobby's own programs: "Atkinson Hitting" (in-person guys) and
+// "UNCOMMON" (remote guys). Idempotent boot setup:
 // find-or-create both orgs (Bobby may have created one via the app already),
 // mark is_mine=1 so they power the My Players tab, mirror branding between
 // them when only one has a logo, and move his named players in. Standalone
@@ -420,9 +420,10 @@ function deleteOrgLogoFile(logoPath) {
 (function seedBobbysPrograms() {
   try {
     const INPERSON = 'Atkinson Hitting';
-    const REMOTE = 'Atkinson Hitter Development System';
-    // Bobby renamed it (Sep 23 2026): was "Atkinson Hitting Remote Development".
-    db.prepare("UPDATE organizations SET name = ? WHERE LOWER(name) = LOWER('Atkinson Hitting Remote Development')").run(REMOTE);
+    const REMOTE = 'UNCOMMON';
+    // Bobby renamed it (Oct 15 2026): was "Atkinson Hitter Development System"
+    // (and before that, "Atkinson Hitting Remote Development").
+    db.prepare("UPDATE organizations SET name = ? WHERE LOWER(name) IN (LOWER('Atkinson Hitter Development System'), LOWER('Atkinson Hitting Remote Development'))").run(REMOTE);
     const now = new Date().toISOString();
     const findOrg = (name) => db.prepare('SELECT * FROM organizations WHERE LOWER(name) = LOWER(?)').get(name);
     const ensureOrg = (name, notes) => {
@@ -1756,7 +1757,7 @@ app.post('/routine/remove', requireLogin, (req, res) => {
 
 // ---- Remote programs: Bobby's remote hitters get their training program
 // in the app. Accounts link by name at signup (and on every boot, in db.js).
-const PROGRAM_GRADES = ['Load', 'Path', 'Connection', 'Timing', 'Power Production'];
+const PROGRAM_GRADES = ['The Load', 'The Setup', 'Launch Position', 'Zone Entry', 'Path', 'Post-Contact Direction', 'The Finish'];
 function blankProgram(name) {
   return {
     athlete: name,
@@ -4377,7 +4378,7 @@ app.post('/coach/program/:id/hitting-plan', requireCoach, (req, res) => {
     if (oldPlan.daysPerWeek) plan.daysPerWeek = oldPlan.daysPerWeek;
     if (oldPlan.frequency) plan.frequency = oldPlan.frequency;
   }
-  const GRADES = ['Load', 'Path', 'Connection', 'Timing', 'Power Production'];
+  const GRADES = ['The Load', 'The Setup', 'Launch Position', 'Zone Entry', 'Path', 'Post-Contact Direction', 'The Finish'];
   if (GRADES.some((g) => ('grade_' + g.replace(/ /g, '_')) in b)) {
     const grades = {};
     const gradeWhys = {};
@@ -7801,7 +7802,7 @@ app.get('/coach', requireCoachAny, (req, res) => {
   const todayStr = chiToday();
   const withToday = (p) => ({ ...p, checkedToday: !!p.last && (() => { try { return chiDay(p.last) === todayStr; } catch (e) { return false; } })() });
   const myGuys = isGlobal ? {
-    remote: myStats.filter((p) => p.orgName === 'Atkinson Hitter Development System').map(withToday),
+    remote: myStats.filter((p) => p.orgName === 'UNCOMMON').map(withToday),
     inPerson: myStats.filter((p) => p.orgName === 'Atkinson Hitting').map(withToday),
   } : null;
   // Website application leads: global coaches only (Bobby's business).
