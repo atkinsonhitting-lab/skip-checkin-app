@@ -1776,12 +1776,16 @@ function reviewPage(user, msg, peer, annotations, opts) {
   const f = String(msg.attachment_path || '');
   const url = `/msg-attachments/${encodeURIComponent(f)}`;
   const initial = JSON.stringify(annotations && typeof annotations === 'object' ? annotations : { strokes: [] }).replace(/</g, '\\u003c');
+  const senderName = msg.sender_id === user.id ? 'You' : name;
+  const writeupDate = msg.created_at ? esc(fmtDate(msg.created_at)) : '';
+  const writeup = msg.body ? `<div class="card review-writeup"><p class="hint" style="margin:0 0 6px">${esc(senderName)}${writeupDate ? ' · ' + writeupDate : ''}</p><p style="margin:0;white-space:pre-wrap">${esc(msg.body)}</p></div>` : '';
   return layout({
     title: `Video review — ${name}`,
     user,
     tabs: o.tabs || [],
     body: `<p><a href="${esc(o.backHref || '/messages')}">\u2190 ${esc(o.backLabel || 'Back')}</a></p>
     <h1 class="page-title">Video review</h1>
+    ${writeup}
     <div class="review-stage">
       <video id="rv-video" src="${url}" playsinline preload="auto"></video>
       <canvas id="rv-canvas"></canvas>
@@ -4879,7 +4883,7 @@ function programEditPage(user, p, profileEmail, hasLifting, progression, opts) {
   const subs = o.subs || [];
   const prog = p.prog || {};
   const grades = prog.grades && typeof prog.grades === 'object' ? prog.grades : {};
-  const gradeFields = ['The Load', 'The Setup', 'Launch Position', 'Zone Entry', 'Path', 'Post-Contact Direction', 'The Finish']
+  const gradeFields = ['Mindset & Approach', 'Strength & Explosiveness', 'Load', 'Setup', 'Launch Position', 'Zone Entry', 'Path', 'Post-Contact Direction', 'Finish', 'Timing']
     .map(
       (g) => {
         const key = g.replace(/ /g, '_');
@@ -6736,7 +6740,7 @@ function hittingPlanEditPage(user, p) {
   // fall back to prog.grades for plans saved before the mirror existed.
   const _g = (plan.grades && typeof plan.grades === 'object' && Object.keys(plan.grades).length ? plan.grades : prog.grades) || {};
   const _gw = (plan.grade_whys && typeof plan.grade_whys === 'object' && Object.keys(plan.grade_whys).length ? plan.grade_whys : prog.grade_whys) || {};
-  const gradeRows = ['The Load', 'The Setup', 'Launch Position', 'Zone Entry', 'Path', 'Post-Contact Direction', 'The Finish'].map((g) => {
+  const gradeRows = ['Mindset & Approach', 'Strength & Explosiveness', 'Load', 'Setup', 'Launch Position', 'Zone Entry', 'Path', 'Post-Contact Direction', 'Finish', 'Timing'].map((g) => {
     const key = g.replace(/ /g, '_');
     return `<div class="grade-edit-block">
       <label class="fld fld-inline">Grade — ${esc(g)}<input type="text" name="grade_${key}" value="${esc(_g[g] || '')}" maxlength="4" placeholder="B+"></label>
