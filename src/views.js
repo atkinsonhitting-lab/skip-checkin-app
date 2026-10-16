@@ -1787,7 +1787,7 @@ function reviewPage(user, msg, peer, annotations, opts) {
     <h1 class="page-title">Video review</h1>
     ${writeup}
     <div class="review-stage">
-      <video id="rv-video" src="${url}" playsinline preload="auto"></video>
+      <video id="rv-video" src="${url}" playsinline preload="auto" onloadedmetadata="try{this.currentTime=Math.min(0.1,this.duration/2||0.1)}catch(e){}"></video>
       <canvas id="rv-canvas"></canvas>
     </div>
     <div class="review-controls">
@@ -1803,7 +1803,8 @@ function reviewPage(user, msg, peer, annotations, opts) {
     <input type="range" id="rv-scrub" class="rv-scrub" min="0" max="1000" value="0" step="1" aria-label="Scrub video">
     <div class="review-tools">
       <div class="rv-toolrow" role="group" aria-label="Drawing tools">
-        <button type="button" class="rv-btn rv-tool active" data-tool="line">Line</button>
+        <button type="button" class="rv-btn rv-tool active" data-tool="watch">Watch</button>
+        <button type="button" class="rv-btn rv-tool" data-tool="line">Line</button>
         <button type="button" class="rv-btn rv-tool" data-tool="arrow">Arrow</button>
         <button type="button" class="rv-btn rv-tool" data-tool="circle">Circle</button>
         <button type="button" class="rv-btn rv-tool" data-tool="freehand">Draw</button>
@@ -1834,7 +1835,7 @@ function reviewPage(user, msg, peer, annotations, opts) {
         var init = ${initial};
         if (init && Array.isArray(init.strokes)) strokes = init.strokes;
       } catch (e) {}
-      var tool = 'line', color = '#ff3b30';
+      var tool = 'watch', color = '#ff3b30';
       var drawing = false, startPt = null, curPt = null, freePts = null;
 
       function fitCanvas() {
@@ -1892,6 +1893,11 @@ function reviewPage(user, msg, peer, annotations, opts) {
       }
       canvas.addEventListener('pointerdown', function (e) {
         e.preventDefault();
+        if (tool === 'watch') {
+          video.paused ? video.play() : video.pause();
+          syncPlayBtn();
+          return;
+        }
         video.pause(); syncPlayBtn();
         drawing = true; startPt = pt(e); curPt = startPt; freePts = [startPt];
         canvas.setPointerCapture(e.pointerId);
