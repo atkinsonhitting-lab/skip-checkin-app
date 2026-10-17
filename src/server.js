@@ -237,6 +237,33 @@ const logoUpload = multer({
 // Videos up to 100MB, images up to 10MB. Disk for now, R2 later.
 const MSG_ATTACH_DIR = process.env.ATTACHMENTS_DIR || path.join(data.DATA_DIR, 'message-attachments');
 try { fs.mkdirSync(MSG_ATTACH_DIR, { recursive: true }); } catch (e) {}
+// Poster thumbnails for video attachments (generated with ffmpeg on upload;
+// backfilled on boot). Served via /msg-posters/:file with the same auth as
+// attachments — this is what makes video thumbnails render on iOS, where
+// <video preload="metadata"> alone shows a black box.
+const POSTER_DIR = path.join(data.DATA_DIR, 'message-posters');
+try { fs.mkdirSync(POSTER_DIR, { recursive: true }); } catch (e) {}
+const { execFile } = require('child_process');
+function posterNameFor(videoFile) {
+  return String(videoFile).replace(/\.[^.]+$/, '') + '.jpg';
+}
+function makeVideoPoster(videoFile) {
+  const f = String(videoFile || '');
+  if (!/\.(mp4|mov|webm)$/i.test(f)) return;
+  const src = path.join(MSG_ATTACH_DIR, path.basename(f));
+  const dest = path.join(POSTER_DIR, posterNameFor(path.basename(f)));
+  if (fs.existsSync(dest)) return;
+  execFile('ffmpeg', ['-y', '-i', src, '-ss', '0.5', '-vframes', '1',
+    '-vf', 'scale=480:-1', '-q:v', '4', dest], (err) => {
+    if (err) console.error('[poster] ffmpeg failed for', f, err.message);
+  });
+}
+// Backfill posters for videos uploaded before poster generation existed.
+try {
+  for (const f of fs.readdirSync(MSG_ATTACH_DIR)) {
+    if (/\.(mp4|mov|webm)$/i.test(f)) makeVideoPoster(f);
+  }
+} catch (e) { console.error('[poster] backfill failed', e.message); }
 const msgAttachmentUpload = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => cb(null, MSG_ATTACH_DIR),
@@ -1757,7 +1784,7 @@ app.post('/routine/remove', requireLogin, (req, res) => {
 
 // ---- Remote programs: Bobby's remote hitters get their training program
 // in the app. Accounts link by name at signup (and on every boot, in db.js).
-const PROGRAM_GRADES = ['The Load', 'The Setup', 'Launch Position', 'Zone Entry', 'Path', 'Post-Contact Direction', 'The Finish'];
+const PROGRAM_GRADES = ['Mindset & Approach', 'Strength & Explosiveness', 'Load', 'Setup', 'Launch Position', 'Zone Entry', 'Path', 'Post-Contact Direction', 'Finish', 'Timing'];
 function blankProgram(name) {
   return {
     athlete: name,
@@ -4378,7 +4405,7 @@ app.post('/coach/program/:id/hitting-plan', requireCoach, (req, res) => {
     if (oldPlan.daysPerWeek) plan.daysPerWeek = oldPlan.daysPerWeek;
     if (oldPlan.frequency) plan.frequency = oldPlan.frequency;
   }
-  const GRADES = ['The Load', 'The Setup', 'Launch Position', 'Zone Entry', 'Path', 'Post-Contact Direction', 'The Finish'];
+  const GRADES = ['Mindset & Approach', 'Strength & Explosiveness', 'Load', 'Setup', 'Launch Position', 'Zone Entry', 'Path', 'Post-Contact Direction', 'Finish', 'Timing'];
   if (GRADES.some((g) => ('grade_' + g.replace(/ /g, '_')) in b)) {
     const grades = {};
     const gradeWhys = {};
@@ -9337,6 +9364,7 @@ function commitSendMessage(req, res, senderId, recipientId, redirectTo) {
   const file = req.file || null;
   if (!body && !file) return res.redirect(`${redirectTo}?err=empty`);
   sendMessage(senderId, recipientId, body, file);
+  if (file && /^video\//.test(file.mimetype || '')) makeVideoPoster(file.filename);
   notifyMessageRecipient(senderId, recipientId, body, file);
   return res.redirect(redirectTo);
 }
@@ -9369,6 +9397,26 @@ app.get('/msg-attachments/:file', requireLogin, (req, res) => {
   const involved = row.sender_id === me || isRecipient;
   if (!isCoach && !involved) return res.status(403).end();
   res.sendFile(path.join(MSG_ATTACH_DIR, f));
+});
+
+// Serve video poster thumbnails. Same auth model as /msg-attachments/:file:
+// the :file is the poster name (<video-basename>.jpg); we map it back to the
+// video's message row for the permission check.
+app.get('/msg-posters/:file', requireLogin, (req, res) => {
+  const f = String(req.params.file || '');
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*\.jpg$/i.test(f)) return res.status(404).end();
+  const videoFile = f.replace(/\.jpg$/i, '');
+  const row = db.prepare(`SELECT id, sender_id, recipient_id FROM messages WHERE attachment_path = ? OR attachment_path = ? OR attachment_path = ?`).get(videoFile + '.mp4', videoFile + '.mov', videoFile + '.webm');
+  if (!row) return res.status(404).end();
+  const me = req.user.id;
+  const isCoach = req.user.role === 'coach';
+  const isRecipient = row.recipient_id === me ||
+    !!db.prepare('SELECT 1 FROM message_recipients WHERE message_id = ? AND user_id = ?').get(row.id, me);
+  const involved = row.sender_id === me || isRecipient;
+  if (!isCoach && !involved) return res.status(403).end();
+  const p = path.join(POSTER_DIR, path.basename(f));
+  if (!fs.existsSync(p)) return res.status(404).end();
+  res.sendFile(p);
 });
 
 // ---- Video review (Oct 2026, Bobby) ----
