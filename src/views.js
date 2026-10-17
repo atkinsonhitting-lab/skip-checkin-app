@@ -1690,7 +1690,10 @@ function messageAttachmentHtml(m) {
   const type = String(m.attachment_type || '');
   const isVideo = type.startsWith('video/') || /\.(mp4|mov|webm)$/i.test(f);
   const url = `/msg-attachments/${encodeURIComponent(f)}`;
-  if (isVideo) return `<div class="msg-attach"><a class="msg-review-link" href="/review/${m.id}" title="Open video review"><video preload="metadata" playsinline muted disablepictureinpicture src="${url}" onloadedmetadata="try{this.currentTime=Math.min(0.1,this.duration/2||0.1)}catch(e){}"></video><span class="msg-review-hint">Tap to review</span></a></div>`;
+  if (isVideo) {
+    const poster = `/msg-posters/${encodeURIComponent(f.replace(/\.[^.]+$/, ''))}.jpg`;
+    return `<div class="msg-attach"><a class="msg-review-link" href="/review/${m.id}" title="Open video review"><video preload="none" playsinline muted disablepictureinpicture src="${url}" poster="${poster}" onloadedmetadata="try{this.currentTime=Math.min(0.1,this.duration/2||0.1)}catch(e){}"></video><span class="msg-review-hint">Tap to review</span></a></div>`;
+  }
   return `<div class="msg-attach"><img src="${url}" alt="Attachment"></div>`;
 }
 
