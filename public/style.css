@@ -553,7 +553,8 @@ a.btn-ghost { text-decoration: none; display: inline-block; }
 .rv-btn { background: var(--bg2); border: 1px solid var(--line); border-radius: 10px; color: var(--text); font-size: 14px; font-weight: 700; padding: 10px 14px; cursor: pointer; font-family: inherit; }
 .rv-btn.active { border-color: var(--red); color: var(--red); }
 .rv-step { white-space: nowrap; }
-.rv-scrub { width: 100%; margin: 8px 0 4px; accent-color: var(--red); }
+.rv-scrub { width: 100%; margin: 8px 0 4px; accent-color: var(--red); height: 32px; }
+.rv-scrub::-webkit-slider-thumb { width: 28px; height: 28px; }
 .review-tools { display: flex; flex-direction: column; gap: 10px; margin: 8px 0 24px; }
 .rv-toolrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .rv-swatch { width: 34px; height: 34px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; }
