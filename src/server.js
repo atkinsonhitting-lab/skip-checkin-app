@@ -244,6 +244,8 @@ try { fs.mkdirSync(MSG_ATTACH_DIR, { recursive: true }); } catch (e) {}
 const POSTER_DIR = path.join(data.DATA_DIR, 'message-posters');
 try { fs.mkdirSync(POSTER_DIR, { recursive: true }); } catch (e) {}
 const { execFile } = require('child_process');
+let FFMPEG_BIN = 'ffmpeg';
+try { FFMPEG_BIN = require('ffmpeg-static') || FFMPEG_BIN; } catch (e) { /* fallback to PATH */ }
 function posterNameFor(videoFile) {
   return String(videoFile).replace(/\.[^.]+$/, '') + '.jpg';
 }
@@ -253,7 +255,7 @@ function makeVideoPoster(videoFile) {
   const src = path.join(MSG_ATTACH_DIR, path.basename(f));
   const dest = path.join(POSTER_DIR, posterNameFor(path.basename(f)));
   if (fs.existsSync(dest)) return;
-  execFile('ffmpeg', ['-y', '-i', src, '-ss', '0.5', '-vframes', '1',
+  execFile(FFMPEG_BIN, ['-y', '-i', src, '-ss', '0.5', '-vframes', '1',
     '-vf', 'scale=480:-1', '-q:v', '4', dest], (err) => {
     if (err) console.error('[poster] ffmpeg failed for', f, err.message);
   });
