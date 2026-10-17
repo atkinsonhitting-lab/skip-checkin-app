@@ -1933,10 +1933,20 @@ function reviewPage(user, msg, peer, annotations, opts) {
         });
       });
       var scrub = document.getElementById('rv-scrub');
+      var scrubbing = false;
+      scrub.addEventListener('pointerdown', function () { scrubbing = true; });
+      window.addEventListener('pointerup', function () { scrubbing = false; });
+      window.addEventListener('pointercancel', function () { scrubbing = false; });
+      scrub.addEventListener('touchstart', function () { scrubbing = true; }, { passive: true });
+      scrub.addEventListener('touchend', function () { scrubbing = false; });
+      scrub.addEventListener('touchcancel', function () { scrubbing = false; });
       video.addEventListener('timeupdate', function () {
-        if (video.duration && !scrub.matches(':active')) scrub.value = Math.round((video.currentTime / video.duration) * 1000);
+        if (video.duration && !scrubbing) scrub.value = Math.round((video.currentTime / video.duration) * 1000);
       });
       scrub.addEventListener('input', function () {
+        if (video.duration) video.currentTime = (scrub.value / 1000) * video.duration;
+      });
+      scrub.addEventListener('change', function () {
         if (video.duration) video.currentTime = (scrub.value / 1000) * video.duration;
       });
       document.getElementById('rv-back').addEventListener('click', function () {
