@@ -256,26 +256,17 @@ function makeVideoPoster(videoFile) {
   const dest = path.join(POSTER_DIR, posterNameFor(path.basename(f)));
   if (fs.existsSync(dest)) return Promise.resolve(false);
   return new Promise((resolve) => {
-    execFile(FFMPEG_BIN, ['-y', '-i', src, '-ss', '0.5', '-vframes', '1',
-      '-vf', 'scale=480:-1', '-q:v', '4', dest], (err) => {
+    execFile(FFMPEG_BIN, ['-y', '-ss', '0.5', '-i', src, '-vframes', '1',
+      '-threads', '1', '-vf', 'scale=480:-1', '-q:v', '4', dest], (err) => {
       if (err) console.error('[poster] ffmpeg failed for', f, err.message);
       resolve(!err);
     });
   });
 }
-// Backfill posters for videos uploaded before poster generation existed.
-// Sequential with a short pause: the starter container has 512MB RAM and
-// spawning dozens of ffmpeg processes at once OOM-kills the boot.
-(async () => {
-  try {
-    const files = fs.readdirSync(MSG_ATTACH_DIR).filter((f) => /\.(mp4|mov|webm)$/i.test(f));
-    for (const f of files) {
-      try { await makeVideoPoster(f); } catch (e) { console.error('[poster] backfill failed for', f, e.message); }
-      await new Promise((r) => setTimeout(r, 500));
-    }
-    if (files.length) console.log('[poster] backfill done for', files.length, 'videos');
-  } catch (e) { console.error('[poster] backfill failed', e.message); }
-})();
+// Note: no boot backfill — spawning ffmpeg at boot OOM-kills the 512MB
+// container (verified via Render events: all poster deploys oomKilled).
+// Posters generate on upload; older videos get theirs lazily via the
+// /msg-posters route below.
 const msgAttachmentUpload = multer({
   storage: multer.diskStorage({
     destination: (req, file, cb) => cb(null, MSG_ATTACH_DIR),
