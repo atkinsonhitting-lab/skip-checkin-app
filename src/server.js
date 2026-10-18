@@ -9422,6 +9422,29 @@ app.get('/msg-posters/:file', requireLogin, (req, res) => {
   res.sendFile(p);
 });
 
+// Coach-triggered poster backfill for videos uploaded before poster
+// generation existed. Runs sequentially in the background with light ffmpeg
+// flags — safe to run on the 512MB container (boot backfill OOM'd it).
+let posterBackfillRunning = false;
+app.post('/coach/posters/backfill', requireCoach, (req, res) => {
+  if (posterBackfillRunning) return res.json({ ok: false, error: 'already running' });
+  posterBackfillRunning = true;
+  (async () => {
+    let done = 0, failed = 0;
+    try {
+      const files = fs.readdirSync(MSG_ATTACH_DIR).filter((f) => /\.(mp4|mov|webm)$/i.test(f));
+      for (const f of files) {
+        try { if (await makeVideoPoster(f)) done++; }
+        catch (e) { failed++; console.error('[poster] backfill failed for', f, e.message); }
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    } catch (e) { console.error('[poster] backfill failed', e.message); }
+    posterBackfillRunning = false;
+    console.log('[poster] manual backfill finished:', done, 'created,', failed, 'failed');
+  })();
+  res.json({ ok: true, started: true });
+});
+
 // ---- Video review (Oct 2026, Bobby) ----
 // OnForm-style review of a message video: slow-mo, frame step, scrub, and
 // telestration. One shared annotation layer per message — coach draws, the
