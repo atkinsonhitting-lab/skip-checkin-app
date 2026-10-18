@@ -172,6 +172,22 @@ db.exec(`CREATE TABLE IF NOT EXISTS message_annotations (
   updated_at TEXT NOT NULL DEFAULT '',
   updated_by INTEGER
 )`);
+// Voiceover narration on a review video (Oct 2026, Bobby): coach records
+// audio while the video plays; stored as one audio file per message.
+db.exec(`CREATE TABLE IF NOT EXISTS message_voiceovers (
+  message_id INTEGER PRIMARY KEY,
+  audio_path TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT '',
+  created_by INTEGER
+)`);
+// Coach's favorite reference clips (Oct 2026, Bobby): starred message videos
+// surface at the top of the compare picker.
+db.exec(`CREATE TABLE IF NOT EXISTS message_favorites (
+  message_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (message_id, user_id)
+)`);
 db.exec(`
 CREATE TABLE IF NOT EXISTS org_payments (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

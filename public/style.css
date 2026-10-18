@@ -558,6 +558,13 @@ a.btn-ghost { text-decoration: none; display: inline-block; }
 .review-tools { display: flex; flex-direction: column; gap: 10px; margin: 8px 0 24px; }
 .rv-toolrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .rv-swatch { width: 34px; height: 34px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0; }
+#rv-cam-pip { position: absolute; right: 10px; bottom: 10px; width: 26%; max-width: 180px; aspect-ratio: 3/4; object-fit: cover; border-radius: 10px; border: 2px solid #fff; background: #000; z-index: 5; }
+#rv-cam-pip[hidden] { display: none; }
+.rv-compare-stage { display: flex; gap: 8px; }
+.rv-compare-col { flex: 1; min-width: 0; }
+.rv-compare-col video { width: 100%; background: #000; border-radius: 8px; }
+.rv-compare-opt { display: flex; align-items: center; gap: 8px; }
+.rv-compare-opt img { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; background: #000; }
 .rv-swatch.active { border-color: var(--text); }
 .rv-saved { color: #34c759; font-size: 14px; font-weight: 700; }
 

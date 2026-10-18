@@ -1792,6 +1792,7 @@ function reviewPage(user, msg, peer, annotations, opts) {
     <div class="review-stage">
       <video id="rv-video" src="${url}" playsinline preload="auto" onloadedmetadata="try{this.currentTime=Math.min(0.1,this.duration/2||0.1)}catch(e){}"></video>
       <canvas id="rv-canvas"></canvas>
+      <video id="rv-cam-pip" playsinline muted hidden></video>
     </div>
     <div class="review-controls">
       <button type="button" class="rv-btn" id="rv-play">Play</button>
@@ -1825,6 +1826,38 @@ function reviewPage(user, msg, peer, annotations, opts) {
           : `<span class="hint-inline">View-only — your drawings stay on your screen only.</span>`}
         <button type="button" class="rv-btn" id="rv-save-video">Save video</button>
       </div>
+      <div class="rv-toolrow" role="group" aria-label="Review actions">
+        <button type="button" class="rv-btn" id="rv-vo-btn">Voiceover</button>
+        <button type="button" class="rv-btn" id="rv-compare-btn">Compare</button>
+        ${user.role === 'coach' ? `<button type="button" class="rv-btn" id="rv-fav-btn" aria-label="Favorite this video"></button>` : ''}
+        ${canSave ? `<button type="button" class="rv-btn" id="rv-send-hitter">Send to hitter</button>` : ''}
+      </div>
+    </div>
+    <div class="card" id="rv-vo-panel" hidden style="margin-top:12px">
+      <div class="rv-toolrow">
+        <button type="button" class="rv-btn" id="rv-vo-record">\u25cf Record</button>
+        <button type="button" class="rv-btn" id="rv-vo-cam" aria-pressed="false">Camera: off</button>
+        <button type="button" class="rv-btn" id="rv-vo-stop" hidden>\u25a0 Stop</button>
+        <span class="hint-inline" id="rv-vo-status"></span>
+      </div>
+      <div class="rv-toolrow" id="rv-vo-existing" hidden style="margin-top:8px">
+        <button type="button" class="rv-btn" id="rv-vo-toggle">Voiceover: off</button>
+        ${canSave ? `<button type="button" class="rv-btn" id="rv-vo-rerecord">Re-record</button>
+        <button type="button" class="rv-btn" id="rv-vo-delete">Delete</button>` : ''}
+      </div>
+      <audio id="rv-vo-audio" preload="auto" hidden></audio>
+    </div>
+    <div class="card" id="rv-compare-panel" hidden style="margin-top:12px">
+      <div class="rv-toolrow" id="rv-compare-list" style="margin-bottom:8px"></div>
+      <div class="rv-compare-stage" id="rv-compare-stage" hidden>
+        <div class="rv-compare-col"><video id="rv-cmp-a" playsinline preload="auto"></video><div class="hint-inline" id="rv-cmp-a-label"></div></div>
+        <div class="rv-compare-col"><video id="rv-cmp-b" playsinline preload="auto"></video><div class="hint-inline" id="rv-cmp-b-label"></div></div>
+      </div>
+      <div class="rv-toolrow" id="rv-compare-controls" hidden style="margin-top:8px">
+        <button type="button" class="rv-btn" id="rv-cmp-play">Play both</button>
+        <button type="button" class="rv-btn" id="rv-cmp-exit">Exit compare</button>
+        <span class="hint-inline">One set of controls drives both videos.</span>
+      </div>
     </div>
     <script>
     (function () {
@@ -1833,6 +1866,10 @@ function reviewPage(user, msg, peer, annotations, opts) {
       var ctx = canvas.getContext('2d');
       var CAN_SAVE = ${canSave ? 'true' : 'false'};
       var MSG_ID = ${messageId};
+      var PEER_NAME = ${JSON.stringify(name).replace(/</g, '\\u003c')};
+      var HAS_VOICEOVER = ${o.hasVoiceover ? 'true' : 'false'};
+      var IS_FAVORITE = ${o.isFavorite ? 'true' : 'false'};
+      var COMPARE_OPTIONS = ${JSON.stringify(o.compareOptions || []).replace(/</g, '\\u003c')};
       var strokes = [];
       try {
         var init = ${initial};
@@ -1855,34 +1892,34 @@ function reviewPage(user, msg, peer, annotations, opts) {
         return [Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
                 Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))];
       }
-      function drawStroke(s) {
-        var W = canvas.width, H = canvas.height;
-        ctx.strokeStyle = s.color; ctx.fillStyle = s.color;
-        ctx.lineWidth = Math.max(2, W / 160); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      function drawStroke(s, c, W, H) {
+        c = c || ctx; W = W || canvas.width; H = H || canvas.height;
+        c.strokeStyle = s.color; c.fillStyle = s.color;
+        c.lineWidth = Math.max(2, W / 160); c.lineCap = 'round'; c.lineJoin = 'round';
         var P = s.points.map(function (p) { return [p[0] * W, p[1] * H]; });
-        ctx.beginPath();
+        c.beginPath();
         if (s.tool === 'freehand') {
-          P.forEach(function (p, i) { i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); });
-          ctx.stroke(); return;
+          P.forEach(function (p, i) { i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1]); });
+          c.stroke(); return;
         }
         if (P.length < 2) return;
         var a = P[0], b = P[P.length - 1];
         if (s.tool === 'circle') {
           var cx = (a[0] + b[0]) / 2, cy = (a[1] + b[1]) / 2;
-          ctx.beginPath();
-          ctx.ellipse(cx, cy, Math.abs(b[0] - a[0]) / 2, Math.abs(b[1] - a[1]) / 2, 0, 0, Math.PI * 2);
-          ctx.stroke();
+          c.beginPath();
+          c.ellipse(cx, cy, Math.abs(b[0] - a[0]) / 2, Math.abs(b[1] - a[1]) / 2, 0, 0, Math.PI * 2);
+          c.stroke();
           return;
         }
-        ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+        c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]); c.stroke();
         if (s.tool === 'arrow') {
           var ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
           var hs = Math.max(10, W / 40);
           [[ang - 2.6], [ang + 2.6]].forEach(function (o) {
-            ctx.beginPath();
-            ctx.moveTo(b[0], b[1]);
-            ctx.lineTo(b[0] - hs * Math.cos(o[0]), b[1] - hs * Math.sin(o[0]));
-            ctx.stroke();
+            c.beginPath();
+            c.moveTo(b[0], b[1]);
+            c.lineTo(b[0] - hs * Math.cos(o[0]), b[1] - hs * Math.sin(o[0]));
+            c.stroke();
           });
         }
       }
@@ -2031,6 +2068,269 @@ function reviewPage(user, msg, peer, annotations, opts) {
           } catch (e) { finish(); }
         });
       }
+      // ---- Voiceover (Oct 2026, Bobby) ----
+      var voPanel = document.getElementById('rv-vo-panel');
+      var voBtn = document.getElementById('rv-vo-btn');
+      var voRecord = document.getElementById('rv-vo-record');
+      var voCamBtn = document.getElementById('rv-vo-cam');
+      var voStop = document.getElementById('rv-vo-stop');
+      var voStatus = document.getElementById('rv-vo-status');
+      var voExisting = document.getElementById('rv-vo-existing');
+      var voToggle = document.getElementById('rv-vo-toggle');
+      var voAudio = document.getElementById('rv-vo-audio');
+      var camPip = document.getElementById('rv-cam-pip');
+      var voWithAudio = false, voCamOn = false, voStream = null, voRec = null, voChunks = [];
+      function voShowExisting() {
+        voExisting.hidden = !HAS_VOICEOVER;
+        if (HAS_VOICEOVER && !voAudio.src) voAudio.src = '/review/' + MSG_ID + '/voiceover/audio';
+      }
+      voShowExisting();
+      if (voBtn) voBtn.addEventListener('click', function () {
+        voPanel.hidden = !voPanel.hidden;
+        voBtn.classList.toggle('active', !voPanel.hidden);
+      });
+      if (voCamBtn) voCamBtn.addEventListener('click', function () {
+        voCamOn = !voCamOn;
+        voCamBtn.textContent = 'Camera: ' + (voCamOn ? 'on' : 'off');
+        voCamBtn.setAttribute('aria-pressed', voCamOn ? 'true' : 'false');
+      });
+      function voStopTracks() {
+        if (voStream) { try { voStream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {} voStream = null; }
+        camPip.hidden = true; camPip.srcObject = null;
+      }
+      if (voRecord) voRecord.addEventListener('click', function () {
+        if (!window.MediaRecorder || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          voStatus.textContent = 'Recording is not supported on this device.';
+          return;
+        }
+        var constraints = { audio: true, video: voCamOn ? { facingMode: 'user', width: 480 } : false };
+        navigator.mediaDevices.getUserMedia(constraints).then(function (stream) {
+          voStream = stream;
+          if (voCamOn) {
+            var vtracks = stream.getVideoTracks();
+            if (vtracks.length) { camPip.srcObject = stream; camPip.hidden = false; camPip.play().catch(function () {}); }
+          }
+          var mime = '';
+          if (MediaRecorder.isTypeSupported) {
+            if (MediaRecorder.isTypeSupported('audio/mp4')) mime = 'audio/mp4';
+            else if (MediaRecorder.isTypeSupported('audio/webm')) mime = 'audio/webm';
+          }
+          voChunks = [];
+          // Record audio only (camera is a live preview, not burned in).
+          var audioOnly = new MediaStream(stream.getAudioTracks());
+          voRec = mime ? new MediaRecorder(audioOnly, { mimeType: mime }) : new MediaRecorder(audioOnly);
+          voRec.ondataavailable = function (e) { if (e.data && e.data.size) voChunks.push(e.data); };
+          voRec.onstop = function () {
+            var blob = new Blob(voChunks, { type: mime || 'audio/mp4' });
+            voStopTracks();
+            voStatus.textContent = 'Uploading…';
+            var fd = new FormData();
+            fd.append('audio', blob, 'voiceover.m4a');
+            fetch('/review/' + MSG_ID + '/voiceover', { method: 'POST', body: fd, credentials: 'same-origin' })
+              .then(function (r) { return r.json(); })
+              .then(function (j) {
+                if (j && j.ok) {
+                  HAS_VOICEOVER = true; voAudio.src = '/review/' + MSG_ID + '/voiceover/audio?ts=' + Date.now();
+                  voShowExisting(); voStatus.textContent = 'Saved.';
+                } else { voStatus.textContent = 'Upload failed — try again.'; }
+                voRecord.hidden = false; voStop.hidden = true;
+              })
+              .catch(function () { voStatus.textContent = 'Upload failed — try again.'; voRecord.hidden = false; voStop.hidden = true; });
+          };
+          // Play the video from the top while recording.
+          try { video.pause(); } catch (e) {}
+          video.currentTime = 0;
+          video.muted = true;
+          video.play().then(function () {
+            voRec.start();
+            voRecord.hidden = true; voStop.hidden = false;
+            voStatus.textContent = 'Recording… talk through the swing.';
+          }).catch(function () {
+            voStopTracks();
+            voStatus.textContent = 'Could not play the video.';
+          });
+        }).catch(function () { voStatus.textContent = 'Mic access denied.'; });
+      });
+      if (voStop) voStop.addEventListener('click', function () {
+        try { video.pause(); } catch (e) {}
+        try { if (voRec && voRec.state !== 'inactive') voRec.stop(); } catch (e) {}
+      });
+      if (voToggle) voToggle.addEventListener('click', function () {
+        voWithAudio = !voWithAudio;
+        voToggle.textContent = 'Voiceover: ' + (voWithAudio ? 'on' : 'off');
+        voToggle.classList.toggle('active', voWithAudio);
+        if (!voWithAudio) { try { voAudio.pause(); } catch (e) {} }
+      });
+      // Keep narration in sync with the video.
+      video.addEventListener('play', function () {
+        if (voWithAudio && HAS_VOICEOVER) {
+          try { voAudio.currentTime = video.currentTime || 0; voAudio.play().catch(function () {}); } catch (e) {}
+        }
+      });
+      video.addEventListener('pause', function () { try { voAudio.pause(); } catch (e) {} });
+      video.addEventListener('seeked', function () {
+        if (voWithAudio && HAS_VOICEOVER && !video.paused) {
+          try { voAudio.currentTime = video.currentTime || 0; } catch (e) {}
+        }
+      });
+      var voRerecord = document.getElementById('rv-vo-rerecord');
+      if (voRerecord) voRerecord.addEventListener('click', function () {
+        voWithAudio = false; voToggle.textContent = 'Voiceover: off'; voToggle.classList.remove('active');
+        try { voAudio.pause(); } catch (e) {}
+        voRecord.click();
+      });
+      var voDelete = document.getElementById('rv-vo-delete');
+      if (voDelete) voDelete.addEventListener('click', function () {
+        if (!confirm('Delete this voiceover?')) return;
+        fetch('/review/' + MSG_ID + '/voiceover', { method: 'DELETE', credentials: 'same-origin' })
+          .then(function (r) { return r.json(); })
+          .then(function (j) {
+            if (j && j.ok) {
+              HAS_VOICEOVER = false; voWithAudio = false; voAudio.removeAttribute('src');
+              voShowExisting(); voToggle.textContent = 'Voiceover: off'; voToggle.classList.remove('active');
+            }
+          });
+      });
+
+      // ---- Favorite (Oct 2026, Bobby) ----
+      var favBtn = document.getElementById('rv-fav-btn');
+      function syncFavBtn() { if (favBtn) favBtn.textContent = IS_FAVORITE ? '\u2605 Fave' : '\u2606 Fave'; }
+      syncFavBtn();
+      if (favBtn) favBtn.addEventListener('click', function () {
+        fetch('/review/' + MSG_ID + '/favorite', { method: 'POST', credentials: 'same-origin' })
+          .then(function (r) { return r.json(); })
+          .then(function (j) { if (j && j.ok) { IS_FAVORITE = !!j.favorite; syncFavBtn(); } });
+      });
+
+      // ---- Compare side-by-side (Oct 2026, Bobby) ----
+      var cmpBtn = document.getElementById('rv-compare-btn');
+      var cmpPanel = document.getElementById('rv-compare-panel');
+      var cmpList = document.getElementById('rv-compare-list');
+      var cmpStage = document.getElementById('rv-compare-stage');
+      var cmpControls = document.getElementById('rv-compare-controls');
+      var cmpA = document.getElementById('rv-cmp-a');
+      var cmpB = document.getElementById('rv-cmp-b');
+      var cmpALabel = document.getElementById('rv-cmp-a-label');
+      var cmpBLabel = document.getElementById('rv-cmp-b-label');
+      var cmpPlay = document.getElementById('rv-cmp-play');
+      function cmpBuildList() {
+        cmpList.innerHTML = '';
+        if (!COMPARE_OPTIONS.length) {
+          cmpList.innerHTML = '<span class="hint-inline">No other videos in this thread yet.</span>';
+          return;
+        }
+        COMPARE_OPTIONS.forEach(function (opt) {
+          var b = document.createElement('button');
+          b.type = 'button'; b.className = 'rv-btn rv-compare-opt';
+          var img = opt.poster ? '<img src="' + opt.poster + '" alt="" onerror="this.style.display=\'none\'">' : '';
+          b.innerHTML = img + '<span>' + (opt.favorite ? '\u2605 ' : '') + opt.label.replace(/</g, '&lt;') + '</span>';
+          b.addEventListener('click', function () { cmpStart(opt); });
+          cmpList.appendChild(b);
+        });
+      }
+      function cmpSyncPlayBtn() { cmpPlay.textContent = (cmpA.paused || cmpB.paused) ? 'Play both' : 'Pause both'; }
+      function cmpStart(opt) {
+        cmpA.src = video.currentSrc || video.src;
+        cmpB.src = opt.url;
+        cmpALabel.textContent = 'This video';
+        cmpBLabel.textContent = (opt.favorite ? '\u2605 ' : '') + opt.label;
+        cmpStage.hidden = false; cmpControls.hidden = false;
+        [cmpA, cmpB].forEach(function (v) {
+          v.playbackRate = video.playbackRate || 1;
+          v.addEventListener('play', cmpSyncPlayBtn);
+          v.addEventListener('pause', cmpSyncPlayBtn);
+        });
+        cmpA.currentTime = 0; cmpB.currentTime = 0;
+        cmpSyncPlayBtn();
+      }
+      function cmpStop() {
+        [cmpA, cmpB].forEach(function (v) { try { v.pause(); } catch (e) {} v.removeAttribute('src'); v.load(); });
+        cmpStage.hidden = true; cmpControls.hidden = true;
+      }
+      if (cmpBtn) cmpBtn.addEventListener('click', function () {
+        var opening = cmpPanel.hidden;
+        cmpPanel.hidden = !opening;
+        cmpBtn.classList.toggle('active', opening);
+        if (opening) { cmpBuildList(); }
+        else { cmpStop(); }
+      });
+      if (cmpPlay) cmpPlay.addEventListener('click', function () {
+        if (cmpA.paused || cmpB.paused) {
+          try { cmpA.currentTime = Math.min(cmpA.currentTime, cmpB.currentTime || 0); } catch (e) {}
+          cmpA.play().catch(function () {}); cmpB.play().catch(function () {});
+        } else { cmpA.pause(); cmpB.pause(); }
+      });
+      var cmpExit = document.getElementById('rv-cmp-exit');
+      if (cmpExit) cmpExit.addEventListener('click', function () {
+        cmpStop(); cmpPanel.hidden = true; cmpBtn.classList.remove('active');
+      });
+      // Scrub drives both in compare mode.
+      scrub.addEventListener('input', function () {
+        if (!cmpStage.hidden && cmpA.duration && cmpB.duration) {
+          var t = (scrub.value / 1000) * Math.min(cmpA.duration, cmpB.duration);
+          try { cmpA.currentTime = t; } catch (e) {}
+          try { cmpB.currentTime = t; } catch (e) {}
+        }
+      });
+
+      // ---- Send to hitter (Oct 2026, Bobby): burn strokes into the video ----
+      var sendBtn = document.getElementById('rv-send-hitter');
+      if (sendBtn) sendBtn.addEventListener('click', function () {
+        if (!strokes.length && !confirm('No drawings on this video. Send it as-is?')) return;
+        if (!window.MediaRecorder || !HTMLCanvasElement.prototype.captureStream) {
+          alert('This device can\'t export video.');
+          return;
+        }
+        sendBtn.disabled = true;
+        sendBtn.textContent = 'Working…';
+        var origTime = video.currentTime, origMuted = video.muted, origRate = video.playbackRate;
+        function restore() {
+          video.muted = origMuted; video.playbackRate = origRate;
+          try { video.currentTime = origTime; } catch (e) {}
+          sendBtn.disabled = false; sendBtn.textContent = 'Send to hitter';
+        }
+        var expCanvas = document.createElement('canvas');
+        expCanvas.width = video.videoWidth || 720;
+        expCanvas.height = video.videoHeight || 1280;
+        var ectx = expCanvas.getContext('2d');
+        var stream, rec, chunks = [], drawTimer = null;
+        try {
+          stream = expCanvas.captureStream(30);
+          var mime = '';
+          if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('video/mp4')) mime = 'video/mp4';
+          rec = mime ? new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8000000 }) : new MediaRecorder(stream);
+        } catch (e) { restore(); alert('Could not start export.'); return; }
+        rec.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
+        rec.onstop = function () {
+          cancelAnimationFrame(drawTimer);
+          try { stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
+          var blob = new Blob(chunks, { type: 'video/mp4' });
+          var fd = new FormData();
+          fd.append('video', blob, 'marked-up.mp4');
+          fetch('/review/' + MSG_ID + '/send-to-hitter', { method: 'POST', body: fd, credentials: 'same-origin' })
+            .then(function (r) { return r.json(); })
+            .then(function (j) { restore(); alert(j && j.ok ? 'Sent to ' + PEER_NAME + '.' : 'Send failed — try again.'); })
+            .catch(function () { restore(); alert('Send failed — try again.'); });
+        };
+        function drawFrame() {
+          try { ectx.drawImage(video, 0, 0, expCanvas.width, expCanvas.height); } catch (e) {}
+          for (var i = 0; i < strokes.length; i++) drawStroke(strokes[i], ectx, expCanvas.width, expCanvas.height);
+        }
+        video.muted = true; video.playbackRate = 1; video.currentTime = 0;
+        var onEnded = function () {
+          video.removeEventListener('ended', onEnded);
+          try { if (rec.state !== 'inactive') rec.stop(); } catch (e) {}
+        };
+        video.addEventListener('ended', onEnded);
+        var onPlaying = function () {
+          video.removeEventListener('playing', onPlaying);
+          try { rec.start(); } catch (e) { restore(); return; }
+          (function loop() { drawFrame(); drawTimer = requestAnimationFrame(loop); })();
+        };
+        video.addEventListener('playing', onPlaying);
+        video.play().catch(function () { video.removeEventListener('playing', onPlaying); restore(); alert('Could not play video.'); });
+      });
+
       fitCanvas();
     })();
     </script>`

@@ -237,6 +237,9 @@ const logoUpload = multer({
 // Videos up to 100MB, images up to 10MB. Disk for now, R2 later.
 const MSG_ATTACH_DIR = process.env.ATTACHMENTS_DIR || path.join(data.DATA_DIR, 'message-attachments');
 try { fs.mkdirSync(MSG_ATTACH_DIR, { recursive: true }); } catch (e) {}
+// Voiceover narration audio files (Oct 2026, Bobby): one per review video.
+const VOICEOVER_DIR = path.join(data.DATA_DIR, 'message-voiceovers');
+try { fs.mkdirSync(VOICEOVER_DIR, { recursive: true }); } catch (e) {}
 // Poster thumbnails for video attachments (generated with ffmpeg on upload;
 // backfilled on boot). Served via /msg-posters/:file with the same auth as
 // attachments — this is what makes video thumbnails render on iOS, where
@@ -285,6 +288,21 @@ const msgAttachmentUpload = multer({
     cb(new Error('Attach a video (MP4/MOV) or photo.'));
   },
   limits: { fileSize: 100 * 1024 * 1024 },
+});
+
+// Voiceover narration uploads (Oct 2026, Bobby): audio only, small files.
+const voiceoverUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, VOICEOVER_DIR),
+    filename: (req, file, cb) => {
+      cb(null, `vo-${req.params.messageId}-${Date.now()}.m4a`);
+    },
+  }),
+  fileFilter: (req, file, cb) => {
+    if (/^audio\//.test(file.mimetype)) return cb(null, true);
+    cb(new Error('Attach audio.'));
+  },
+  limits: { fileSize: 25 * 1024 * 1024 },
 });
 
 // Serve uploaded logos. The filename is validated to a flat safe pattern so
@@ -3251,6 +3269,81 @@ app.post('/api/bible-study-choice', requireLogin, (req, res) => {
   if (c !== 0 && c !== 1) return res.status(400).json({ error: 'choice must be 0 or 1' });
   db.prepare('UPDATE users SET bible_study = ? WHERE id = ?').run(c, req.user.id);
   res.json({ ok: true });
+});
+
+// Voiceover narration (Oct 2026, Bobby): coach records audio over the video.
+// One voiceover per message; re-record replaces, DELETE removes.
+function canEditReview(user) {
+  return !(user.role === 'coach' && !user.canEdit);
+}
+app.post('/review/:messageId/voiceover', requireLogin, voiceoverUpload.single('audio'), (req, res) => {
+  const msg = reviewMessageRow(req.params.messageId);
+  if (!msg || !canReviewMessage(req.user, msg) || !canEditReview(req.user)) {
+    if (req.file) { try { fs.unlinkSync(req.file.path); } catch (e) {} }
+    return res.status(403).json({ ok: false });
+  }
+  if (!req.file) return res.status(400).json({ ok: false, error: 'no audio' });
+  const old = db.prepare('SELECT audio_path FROM message_voiceovers WHERE message_id = ?').get(msg.id);
+  if (old && old.audio_path) { try { fs.unlinkSync(path.join(VOICEOVER_DIR, path.basename(old.audio_path))); } catch (e) {} }
+  db.prepare(`INSERT INTO message_voiceovers (message_id, audio_path, created_at, created_by)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(message_id) DO UPDATE SET audio_path = excluded.audio_path, created_at = excluded.created_at, created_by = excluded.created_by`)
+    .run(msg.id, req.file.filename, new Date().toISOString(), req.user.id);
+  res.json({ ok: true });
+});
+app.get('/review/:messageId/voiceover/audio', requireLogin, (req, res) => {
+  const msg = reviewMessageRow(req.params.messageId);
+  if (!msg || !canReviewMessage(req.user, msg)) return res.status(403).end();
+  const row = db.prepare('SELECT audio_path FROM message_voiceovers WHERE message_id = ?').get(msg.id);
+  if (!row || !row.audio_path) return res.status(404).end();
+  const p = path.join(VOICEOVER_DIR, path.basename(row.audio_path));
+  if (!p.startsWith(VOICEOVER_DIR + path.sep) || !fs.existsSync(p)) return res.status(404).end();
+  res.sendFile(p);
+});
+app.delete('/review/:messageId/voiceover', requireLogin, (req, res) => {
+  const msg = reviewMessageRow(req.params.messageId);
+  if (!msg || !canReviewMessage(req.user, msg) || !canEditReview(req.user)) return res.status(403).json({ ok: false });
+  const row = db.prepare('SELECT audio_path FROM message_voiceovers WHERE message_id = ?').get(msg.id);
+  if (row && row.audio_path) { try { fs.unlinkSync(path.join(VOICEOVER_DIR, path.basename(row.audio_path))); } catch (e) {} }
+  db.prepare('DELETE FROM message_voiceovers WHERE message_id = ?').run(msg.id);
+  res.json({ ok: true });
+});
+// Favorite reference clips (Oct 2026, Bobby): coach stars message videos;
+// favorites surface at the top of the compare picker.
+app.post('/review/:messageId/favorite', requireLogin, (req, res) => {
+  const msg = reviewMessageRow(req.params.messageId);
+  if (!msg || !canReviewMessage(req.user, msg) || req.user.role !== 'coach') return res.status(403).json({ ok: false });
+  const existing = db.prepare('SELECT 1 FROM message_favorites WHERE message_id = ? AND user_id = ?').get(msg.id, req.user.id);
+  if (existing) {
+    db.prepare('DELETE FROM message_favorites WHERE message_id = ? AND user_id = ?').run(msg.id, req.user.id);
+    return res.json({ ok: true, favorite: false });
+  }
+  db.prepare('INSERT INTO message_favorites (message_id, user_id, created_at) VALUES (?, ?, ?)')
+    .run(msg.id, req.user.id, new Date().toISOString());
+  res.json({ ok: true, favorite: true });
+});
+// Send marked-up video to hitter (Oct 2026, Bobby): the client burns the
+// annotation strokes into the video via canvas capture and uploads the
+// result; the server files it as a normal video message in the thread.
+app.post('/review/:messageId/send-to-hitter', requireLogin, (req, res) => {
+  const msg = reviewMessageRow(req.params.messageId);
+  if (!msg || !canReviewMessage(req.user, msg) || !canEditReview(req.user) || req.user.role !== 'coach') {
+    return res.status(403).json({ ok: false });
+  }
+  msgAttachmentUpload.single('video')(req, res, (err) => {
+    if (err || !req.file) return res.status(400).json({ ok: false, error: 'upload failed' });
+    const peer = reviewPeer(req.user, msg);
+    const athleteId = peer && peer.id ? peer.id : null;
+    if (!athleteId) {
+      try { fs.unlinkSync(req.file.path); } catch (e) {}
+      return res.status(400).json({ ok: false, error: 'no recipient' });
+    }
+    const body = String((req.body && req.body.body) || 'Here\'s your video with my notes.').slice(0, 500);
+    const newId = sendMessage(req.user.id, athleteId, body, req.file);
+    try { makeVideoPoster(req.file.filename); } catch (e) {}
+    try { notifyMessageRecipient(req.user.id, athleteId, body, req.file); } catch (e) {}
+    res.json({ ok: true, messageId: newId });
+  });
 });
 // Audio transcription (Sep 23 2026): the app records with getUserMedia
 // (iOS remembers mic permission) and Gemini transcribes. Replaces the
@@ -9493,6 +9586,46 @@ function sanitizeStrokes(strokes) {
   }
   return out;
 }
+// Compare picker options (Oct 2026, Bobby): other videos in this thread
+// plus the coach's favorited reference clips. Returns [{id, label, url, poster, favorite}].
+function reviewCompareOptions(user, msg) {
+  const out = [];
+  const seen = new Set([msg.id]);
+  const pushMsg = (m, favorite) => {
+    if (!m || seen.has(m.id)) return;
+    const f = String(m.attachment_path || '');
+    if (!/\.(mp4|mov|webm)$/i.test(f)) return;
+    seen.add(m.id);
+    const when = String(m.created_at || '').slice(0, 10);
+    const who = m.sender_id === user.id ? 'You' : 'Hitter';
+    out.push({
+      id: m.id, label: `${who} · ${when || 'video'}`,
+      url: `/msg-attachments/${encodeURIComponent(f)}`,
+      poster: `/msg-posters/${encodeURIComponent(f.replace(/\.[^.]+$/, ''))}.jpg`,
+      favorite: !!favorite,
+    });
+  };
+  try {
+    // Thread videos: messages between this coach and this athlete.
+    const peer = reviewPeer(user, msg);
+    const peerId = peer && peer.id ? peer.id : null;
+    if (user.role === 'coach' && peerId) {
+      for (const m of coachThreadMessages(peerId)) pushMsg(m, false);
+    } else if (user.role === 'athlete') {
+      for (const m of threadMessages(user.id, peerId)) pushMsg(m, false);
+    }
+    // Favorites first (coach only).
+    if (user.role === 'coach') {
+      const favs = db.prepare(
+        `SELECT m.* FROM message_favorites f JOIN messages m ON m.id = f.message_id
+         WHERE f.user_id = ? ORDER BY f.created_at DESC LIMIT 20`
+      ).all(user.id);
+      for (const m of favs) pushMsg(m, true);
+      out.sort((a, b) => (b.favorite - a.favorite));
+    }
+  } catch (e) { console.error('compare options failed', e.message); }
+  return out.slice(0, 40);
+}
 app.get('/review/:messageId', requireLogin, (req, res) => {
   const msg = reviewMessageRow(req.params.messageId);
   if (!msg || !canReviewMessage(req.user, msg)) {
@@ -9508,11 +9641,20 @@ app.get('/review/:messageId', requireLogin, (req, res) => {
   const isAthlete = req.user.role === 'athlete';
   const backHref = isAthlete ? (peer.id ? `/messages/${peer.id}` : '/messages')
     : (peer.id ? `/coach/messages/${peer.id}` : '/coach/messages');
+  // Voiceover + favorites + compare options (Oct 2026, Bobby)
+  const voRow = db.prepare('SELECT message_id FROM message_voiceovers WHERE message_id = ?').get(msg.id);
+  const favRow = req.user.role === 'coach'
+    ? db.prepare('SELECT 1 FROM message_favorites WHERE message_id = ? AND user_id = ?').get(msg.id, req.user.id)
+    : null;
+  const compareOptions = reviewCompareOptions(req.user, msg);
   res.send(views.reviewPage(req.user, msg, peer, annotations, {
     tabs: isAthlete ? views.userTabs('messages', req.user) : views.coachTabs('messages', req.user.approvalCount, req.user),
     backHref, backLabel: isAthlete ? 'Back to thread' : 'Back to Messages',
     canSave: !(req.user.role === 'coach' && !req.user.canEdit),
     messageId: msg.id,
+    hasVoiceover: !!voRow,
+    isFavorite: !!favRow,
+    compareOptions,
   }));
 });
 app.post('/review/:messageId', requireLogin, (req, res) => {
