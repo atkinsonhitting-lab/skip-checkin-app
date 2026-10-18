@@ -2056,7 +2056,18 @@ function messagesInboxPage(user, conversations, coach) {
     title: 'Messages',
     user,
     tabs: userTabs('messages', user),
-    body: `<h1 class="page-title">Messages</h1>${rows ? `<div class="card">${rows}</div>` : empty}`,
+    body: `<h1 class="page-title">Messages</h1>
+    <div style="margin:0 0 12px"><button type="button" class="rv-btn" id="fix-thumbs" style="font-size:13px">Fix video thumbnails</button> <span id="fix-thumbs-msg" class="hint-inline"></span></div>
+    <script>
+    document.getElementById('fix-thumbs').addEventListener('click', function () {
+      var btn = this, msg = document.getElementById('fix-thumbs-msg');
+      btn.disabled = true; msg.textContent = 'Working… this takes a minute.';
+      fetch('/coach/posters/backfill', { method: 'POST', credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (j) { msg.textContent = j.ok ? 'Done — reload in a minute to see thumbnails.' : ('Error: ' + (j.error || 'unknown')); })
+        .catch(function () { msg.textContent = 'Error — try again.'; btn.disabled = false; });
+    });
+    </script>${rows ? `<div class="card">${rows}</div>` : empty}`,
   });
 }
 
