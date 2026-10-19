@@ -4956,6 +4956,31 @@ function getBobbyLifting() {
   if (!row) return null;
   return getLifting(row.id);
 }
+// Assign Phase 1 lifting to Bobby's test REMOTE ATHLETE entry (Oct 2026).
+// Bobby has a "Bobby Atkinson" athlete in his remote hitters list; this links
+// that athlete's remote program to the Phase 1 lifting program so it shows
+// in the remote/UNCOMMON section. Runs on boot; idempotent.
+function assignBobbyAthleteLifting() {
+  try {
+    const progId = seedBobbyLifting();
+    if (!progId) { console.log('assignBobbyAthleteLifting: Phase 1 program not seeded, skipping'); return; }
+    const athlete = db.prepare(
+      "SELECT id, athlete_name, first_name, last_name, remote_program_id FROM users WHERE role = 'athlete' AND (lower(athlete_name) LIKE '%bobby atkinson%' OR lower(coalesce(first_name,'') || ' ' || coalesce(last_name,'')) LIKE '%bobby atkinson%') LIMIT 1"
+    ).get();
+    if (!athlete) { console.log('assignBobbyAthleteLifting: no Bobby Atkinson athlete found'); return; }
+    if (!athlete.remote_program_id) { console.log('assignBobbyAthleteLifting: athlete id ' + athlete.id + ' has no remote_program_id'); return; }
+    const cur = db.prepare('SELECT lifting_program_id FROM remote_programs WHERE id = ?').get(athlete.remote_program_id);
+    if (cur && Number(cur.lifting_program_id) === Number(progId)) {
+      console.log('assignBobbyAthleteLifting: already assigned (remote_program ' + athlete.remote_program_id + ')');
+      return;
+    }
+    db.prepare('UPDATE remote_programs SET lifting_program_id = ?, updated_at = ? WHERE id = ?')
+      .run(progId, new Date().toISOString(), athlete.remote_program_id);
+    console.log('assignBobbyAthleteLifting: assigned Phase 1 (program ' + progId + ') to athlete id ' + athlete.id + ' (remote_program ' + athlete.remote_program_id + ')');
+  } catch (e) {
+    console.log('assignBobbyAthleteLifting failed:', e.message);
+  }
+}
 // Bobby's training week (Chicago time): Mon=Day 1, Tue=Day 2, Thu=Day 3,
 // Fri=Day 4. Wed/Sat/Sun = rest (no lifting). ?lday=N overrides.
 function bobbyDayIdx(req) {
@@ -10530,6 +10555,7 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Skip listening on port ${PORT}`);
   seedBobbyLifting();
+  assignBobbyAthleteLifting();
   const n = db.prepare("SELECT COUNT(*) AS n FROM users WHERE role != 'coach'").get().n;
   console.log(`Players signed up: ${n}`);
   if (!process.env.SESSION_SECRET && isProd) {
