@@ -2357,14 +2357,21 @@ function messagesInboxPage(user, conversations, coach) {
 
 // Coach inbox: one row per athlete with message traffic, plus a compose
 // form for full coaches to start a new thread.
+// Coach inbox (Oct 2026, Bobby): clean iMessage-style conversation list.
+// No banners or composer card at the top — the tab opens straight onto the
+// threads. Compose + Blast live in the slim top bar and open a bottom sheet.
 function coachMessagesPage(user, rows, athletes, canSend, error) {
   const list = (rows || [])
     .map((r) => {
       const name = peerName(r.athlete);
+      const initial = ((name || '').trim()[0] || '?').toUpperCase();
       const preview = r.lastBody ? String(r.lastBody).slice(0, 80) : 'No messages yet';
-      return `<a class="msg-row" href="/coach/messages/${r.athlete.id}">
-        <div style="min-width:0"><strong>${esc(name)}</strong><div class="hint-inline">${esc(r.athlete.email || '')}</div><div class="hint-inline" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(preview)}</div></div>
-        ${r.unread > 0 ? `<span class="tab-badge">${r.unread}</span>` : ''}
+      return `<a class="imsg-thread-row" href="/coach/messages/${r.athlete.id}">
+        <span class="imsg-avatar">${esc(initial)}</span>
+        <span class="imsg-thread-main">
+          <span class="imsg-thread-top"><strong>${esc(name)}</strong>${r.lastAt ? `<span class="imsg-time" data-ts="${esc(r.lastAt)}"></span>` : ''}</span>
+          <span class="imsg-thread-sub"><span>${esc(preview)}</span>${r.unread > 0 ? `<span class="imsg-unread">${r.unread}</span>` : ''}</span>
+        </span>
       </a>`;
     })
     .join('');
@@ -2375,19 +2382,86 @@ function coachMessagesPage(user, rows, athletes, canSend, error) {
     title: 'Messages',
     user,
     tabs: coachTabs('messages', user.approvalCount, user),
-    body: `<h1 class="page-title">Messages</h1>
+    body: `<div class="imsg-inbox-head">
+      <h1 class="page-title" style="margin:0">Messages</h1>
+      ${canSend ? `<div class="imsg-inbox-actions">
+        <button type="button" class="imsg-blast-btn" id="blast-open">Blast</button>
+        <button type="button" class="imsg-compose-btn" id="compose-open" aria-label="New message">✎</button>
+      </div>` : `<span class="hint-inline">View-only</span>`}
+    </div>
     ${error ? `<div class="error">${esc(error)}</div>` : ''}
-    ${canSend ? `<div class="card" style="margin-bottom:16px">
-      <h3 style="margin-top:0">New message</h3>
-      <form method="post" action="/coach/messages/new" enctype="multipart/form-data" class="form">
-        <label>Athlete<select name="athlete_id" required><option value="">Pick an athlete\u2026</option>${options}</select></label>
-        <label style="font-weight:400"><input type="checkbox" name="all_remote" value="1" style="display:inline-block;width:auto;margin:0 8px 0 0;vertical-align:middle" onchange="var s=this.form.querySelector('select[name=athlete_id]');if(s){s.disabled=this.checked;s.required=!this.checked;}"> Send to all remote hitters (separate chats)</label>
-        <label>Message<textarea name="body" rows="3" maxlength="5000" placeholder="Write a message\u2026"></textarea></label>
-        <label>Attach a video or photo<input type="file" name="attachment" accept="video/*,image/*"></label>
-        <button type="submit" class="btn-primary">Send</button>
-      </form>
-    </div>` : ''}
-    ${list ? `<div class="card">${list}</div>` : `<div class="card empty">No message threads yet.</div>`}`,
+    ${list ? `<div class="imsg-thread-list">${list}</div>` : `<div class="imsg-empty">No message threads yet.</div>`}
+    ${canSend ? `<div class="imsg-sheet" id="msg-sheet" hidden>
+      <div class="imsg-sheet-card">
+        <div class="imsg-sheet-grab"></div>
+        <div class="imsg-sheet-head"><h3>New message</h3><button type="button" class="imsg-sheet-x" id="sheet-close" aria-label="Close">×</button></div>
+        <form method="post" action="/coach/messages/new" enctype="multipart/form-data" autocomplete="off">
+          <div class="imsg-seg">
+            <button type="button" class="on" data-mode="blast">Blast · all remote hitters</button>
+            <button type="button" data-mode="one">One athlete</button>
+          </div>
+          <input type="hidden" name="all_remote" value="1" id="sheet-all-remote">
+          <label class="imsg-sheet-to" id="sheet-athlete-wrap" hidden>Athlete
+            <select name="athlete_id" id="sheet-athlete"><option value="">Pick an athlete…</option>${options}</select>
+          </label>
+          <textarea name="body" rows="4" maxlength="5000" placeholder="Write a message…" class="imsg-sheet-text"></textarea>
+          <div class="imsg-sheet-row">
+            <label class="imsg-clip" title="Attach a video or photo">📎<input type="file" name="attachment" accept="video/*,image/*" hidden></label>
+            <span class="hint-inline imsg-sheet-file" id="sheet-file"></span>
+            <button type="submit" class="btn-primary" id="sheet-send">Send blast</button>
+          </div>
+        </form>
+      </div>
+    </div>
+    <script>
+    (function () {
+      var sheet = document.getElementById('msg-sheet');
+      var allRemote = document.getElementById('sheet-all-remote');
+      var athleteWrap = document.getElementById('sheet-athlete-wrap');
+      var athleteSel = document.getElementById('sheet-athlete');
+      var sendBtn = document.getElementById('sheet-send');
+      function setMode(m) {
+        var blast = m !== 'one';
+        var btns = sheet.querySelectorAll('.imsg-seg button');
+        for (var i = 0; i < btns.length; i++) btns[i].classList.toggle('on', btns[i].getAttribute('data-mode') === (blast ? 'blast' : 'one'));
+        allRemote.disabled = !blast;
+        athleteWrap.hidden = blast;
+        athleteSel.required = !blast;
+        sendBtn.textContent = blast ? 'Send blast' : 'Send';
+      }
+      var segBtns = sheet.querySelectorAll('.imsg-seg button');
+      for (var i = 0; i < segBtns.length; i++) (function (b) {
+        b.addEventListener('click', function () { setMode(b.getAttribute('data-mode')); });
+      })(segBtns[i]);
+      document.getElementById('blast-open').addEventListener('click', function () { setMode('blast'); sheet.hidden = false; });
+      document.getElementById('compose-open').addEventListener('click', function () { setMode('one'); sheet.hidden = false; });
+      document.getElementById('sheet-close').addEventListener('click', function () { sheet.hidden = true; });
+      sheet.addEventListener('click', function (e) { if (e.target === sheet) sheet.hidden = true; });
+      var fileInput = sheet.querySelector('input[type="file"]');
+      fileInput.addEventListener('change', function () {
+        document.getElementById('sheet-file').textContent = (fileInput.files && fileInput.files[0] && fileInput.files[0].name) || '';
+      });
+      // iMessage-style relative timestamps (created_at is UTC).
+      var els = document.querySelectorAll('.imsg-time[data-ts]');
+      for (var j = 0; j < els.length; j++) (function (el) {
+        var d = new Date(String(el.getAttribute('data-ts')).replace(' ', 'T') + 'Z');
+        if (isNaN(d.getTime())) return;
+        var now = new Date();
+        var txt;
+        if (d.toDateString() === now.toDateString()) {
+          var h = d.getHours(), ap = h >= 12 ? 'PM' : 'AM';
+          h = h % 12; if (h === 0) h = 12;
+          txt = h + ':' + String(d.getMinutes()).padStart(2, '0') + ' ' + ap;
+        } else {
+          var y = new Date(now); y.setDate(y.getDate() - 1);
+          if (d.toDateString() === y.toDateString()) txt = 'Yesterday';
+          else if ((now - d) < 6 * 864e5) txt = d.toLocaleDateString(undefined, { weekday: 'long' });
+          else txt = d.toLocaleDateString(undefined, { month: 'numeric', day: 'numeric', year: '2-digit' });
+        }
+        el.textContent = txt;
+      })(els[j]);
+    })();
+    </script>` : ''}`,
   });
 }
 
