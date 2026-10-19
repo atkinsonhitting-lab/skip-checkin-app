@@ -3609,8 +3609,16 @@ function todayProgramPage(user, p, opts) {
         : movementHtml ? viewHeadHtml(secLabels.movement, 'Warm-up') + sectionHtml(`${esc(secLabels.movement)} · Warm-up`, movementHtml)
         : viewEmptyHtml(secLabels.movement);
     } else {
+      // Bobby (Oct 19 2026): Finish button at the bottom of the day's hitting
+      // plan — the hitter taps it when done. Uses the normal check-off
+      // pipeline so it persists and counts in progress.
+      const finishKey = `hit::td::finished::${today}`;
+      const finishDone = !!checkoffs[finishKey];
+      const finishHtml = hittingHtml ? (finishDone
+        ? `<div class="td-card" style="text-align:center"><p style="margin:0;font-size:16px;font-weight:800">🔒 Hitting complete for today</p><p class="td-hint" style="margin:6px 0 0">Nice work. See you tomorrow.</p></div>`
+        : `<form method="post" action="/program/check" style="margin-top:18px"><input type="hidden" name="kind" value="hit"><input type="hidden" name="sub" value="today">${viewInput}<input type="hidden" name="day" value="${esc(todayLabel)}"><input type="hidden" name="item_key" value="${esc(finishKey)}"><button type="submit" class="wo-bigbtn" style="width:100%">✓ Finish Hitting</button></form>`) : '';
       viewContent = !showSec('hitting') ? notPickedHtml(secLabels.hitting)
-        : hittingHtml ? viewHeadHtml(secLabels.hitting, 'Drills & training environments') + sectionHtml(esc(secLabels.hitting), hittingHtml)
+        : hittingHtml ? viewHeadHtml(secLabels.hitting, 'Drills & training environments') + sectionHtml(esc(secLabels.hitting), hittingHtml) + finishHtml
         : viewEmptyHtml(secLabels.hitting);
     }
     content = switcherHtml + viewContent;
