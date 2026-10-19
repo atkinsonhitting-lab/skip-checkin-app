@@ -1785,6 +1785,7 @@ function reviewPage(user, msg, peer, annotations, opts) {
   const name = peerName(peer);
   const f = String(msg.attachment_path || '');
   const url = `/msg-attachments/${encodeURIComponent(f)}`;
+  const posterUrl = `/msg-posters/${encodeURIComponent(f.replace(/\.[^.]+$/, ''))}.jpg`;
   const initial = JSON.stringify(annotations && typeof annotations === 'object' ? annotations : { strokes: [] }).replace(/</g, '\\u003c');
   const senderName = msg.sender_id === user.id ? 'You' : name;
   const writeupDate = msg.created_at ? esc(fmtDate(msg.created_at)) : '';
@@ -1797,7 +1798,7 @@ function reviewPage(user, msg, peer, annotations, opts) {
     <h1 class="page-title">Video review</h1>
     ${writeup}
     <div class="review-stage">
-      <video id="rv-video" src="${url}" playsinline preload="auto" onloadedmetadata="try{this.currentTime=Math.min(0.1,this.duration/2||0.1)}catch(e){}"></video>
+      <video id="rv-video" src="${url}" poster="${posterUrl}" playsinline preload="metadata"></video>
       <canvas id="rv-canvas"></canvas>
       <video id="rv-cam-pip" playsinline muted hidden></video>
     </div>
