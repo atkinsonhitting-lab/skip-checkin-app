@@ -399,7 +399,7 @@ ${brandCss}
 <meta name="apple-mobile-web-app-title" content="Diamond Daily">
 <meta name="theme-color" content="${brand ? brand.primary : '#0a0a0a'}">
 </head>
-<body${tabbarHtml ? ' class="has-tabbar"' : ''}>
+<body class="${[tabbarHtml ? 'has-tabbar' : '', (user && user.remoteProgramId) ? 'uc-theme' : ''].filter(Boolean).join(' ')}">
 <header class="topbar">
   <div class="topbar-left">${tabHtml ? `<button type="button" id="drawer-btn" aria-label="Open menu">\u2630</button>` : ''}${brandBlock}</div>
   ${user ? `<div class="userbox">${esc(user.displayName)} · <a href="/logout">Log out</a></div>` : ''}
@@ -3297,6 +3297,13 @@ const realExercises = (exs) =>
 // existing /program/check endpoint with sub=today. Substitute links use
 // the existing /program/substitute flow. Reorder + move-day are
 // client-side-only in this preview (nothing persists).
+// UNCOMMON branding (Oct 2026, Bobby): wordmark hero banner for the
+// remote (UNCOMMON) surfaces, matching the uncommon-site sales page.
+function ucHero(tagline) {
+  var t = tagline ? '<p class="uc-tagline">' + esc(tagline) + '</p>' : '';
+  return '<div class="uc-hero"><p class="uc-wordmark">UNCOMMON</p>' + t + '</div>';
+}
+
 function todayProgramPage(user, p, opts) {
   const o = opts || {};
   const prog = (p && p.prog) || {};
@@ -3506,6 +3513,8 @@ function todayProgramPage(user, p, opts) {
     { href: '/messages', label: 'Messages' },
   ];
 
+  const ucTop = (user && user.remoteProgramId) ? ucHero("Train uncommon.") : '<p class="td-eyebrow">ATKINSON HITTING</p>';
+
   return layout({
     title: 'Today',
     user,
@@ -3542,7 +3551,7 @@ function todayProgramPage(user, p, opts) {
 .td-move{width:100%;background:#111;color:#fff;border:1px solid #333;border-radius:10px;padding:12px;font-size:13px;font-weight:600;margin-top:20px;cursor:pointer}
 .td-movenote{font-size:12px;color:#888;margin:8px 0 0;text-align:center}
 </style>
-<p class="td-eyebrow">ATKINSON HITTING</p>
+${ucTop}
 <h1 class="td-h1">Today</h1>
 <p class="td-date">${esc(dateLabel)}${todayLabel ? ` · ${esc(todayLabel)}` : ''}</p>
 <div class="td-progress"><span>${doneItems} of ${totalItems} complete</span><span>${pct}%</span></div>
@@ -3907,7 +3916,8 @@ function programPage(user, p, opts) {
     title: 'Your Program',
     user,
     tabs: userTabs('program', user),
-    body: `<h1 class="page-title">Your Program</h1>
+    body: `${ucHero('Train uncommon.')}
+    <h1 class="page-title">Your Program</h1>
     <p><a href="/program/hitting-plan" class="btn" style="display:inline-block;text-decoration:none">📄 Hitting Plan</a></p>
     ${meta ? `<p class="lede">${meta}</p>` : ''}
     ${tabHtml}

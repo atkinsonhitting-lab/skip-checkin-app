@@ -1715,3 +1715,94 @@ a.ws-cell:active { background: #2c2c2e; }
 .today-pick-form { display: flex; flex-wrap: wrap; gap: 8px; }
 .tp-chip { padding: 10px 14px; border-radius: 20px; border: 1px solid var(--line); background: var(--bg2); color: var(--text); font-size: 14px; font-weight: 700; font-family: inherit; cursor: pointer; }
 .tp-chip.on { background: var(--red); border-color: var(--red); color: #fff; }
+
+/* ============ UNCOMMON theme (matches uncommon-site sales page) ============
+   Applied via body.uc-theme for remote (UNCOMMON) athletes. Visual reskin
+   only — no layout or functionality changes. */
+body.uc-theme {
+  --red: #c41e33;
+  --red-dark: #a3162a;
+  --uc-baby: #7DD3FC;
+  --uc-muted: #b8b8b8;
+  background: #000;
+}
+body.uc-theme .topbar {
+  border-bottom: 3px solid #a3162a;
+  background: rgba(0, 0, 0, .96);
+}
+/* UNCOMMON wordmark hero banner */
+.uc-hero {
+  margin: 0 -16px 18px;
+  padding: 26px 20px 22px;
+  text-align: center;
+  background: radial-gradient(ellipse 80% 70% at 50% 0%, rgba(196, 30, 51, 0.14), transparent 70%);
+  border-bottom: 1px solid #2a2a2a;
+}
+.uc-wordmark {
+  display: inline-block;
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: .18em;
+  color: #fff;
+  border-bottom: 3px solid #a3162a;
+  padding-bottom: 4px;
+  margin: 0;
+}
+.uc-tagline {
+  margin: 10px 0 0;
+  font-size: 14px;
+  color: var(--uc-muted);
+  font-style: italic;
+}
+/* Eyebrow section labels (website style) */
+body.uc-theme .td-eyebrow,
+.uc-eyebrow {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: #c41e33;
+  margin: 0 0 8px;
+}
+body.uc-theme .td-sec-head,
+body.uc-theme .prog-sec-head {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: #c41e33;
+  border-bottom: 1px solid #2a2a2a;
+}
+body.uc-theme .td-subhead {
+  letter-spacing: .12em;
+  color: #c41e33;
+}
+/* Pill buttons in website red */
+body.uc-theme .btn-primary {
+  background: #a3162a;
+  border-radius: 999px;
+  font-weight: 700;
+  letter-spacing: .02em;
+}
+body.uc-theme .btn-primary:active { background: #c41e33; }
+body.uc-theme .tp-chip.on,
+body.uc-theme .tab.active,
+body.uc-theme .pill input:checked + span {
+  background: #a3162a;
+  border-color: #a3162a;
+}
+/* Cards with website treatment */
+body.uc-theme .card,
+body.uc-theme .td-card {
+  background: #0a0a0a;
+  border: 1px solid #2a2a2a;
+  border-left: 3px solid #a3162a;
+  border-radius: 12px;
+}
+body.uc-theme .card h2 { border-left-color: #c41e33; }
+body.uc-theme .card h3 { color: #c41e33; letter-spacing: .12em; }
+/* Accent highlights */
+body.uc-theme .td-barfill { background: #c41e33; }
+body.uc-theme .routine-station { color: #c41e33; }
+body.uc-theme a { color: #c41e33; }
+body.uc-theme .td-checkbtn { color: #c41e33; }
