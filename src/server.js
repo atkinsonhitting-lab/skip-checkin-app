@@ -2216,7 +2216,8 @@ function buildWorkoutDay(userId, lifting, ldayIdx, today) {
           });
       return {
         type: 'speed', key, name: String(s.name || ''),
-        volume: String(s.volume || ''), notes: String(s.notes || ''), video: String(s.video || ''),
+        volume: String(s.volume || ''), notes: String(s.notes || ''),
+        desc: String(s.desc || ''), pair: String(s.pair || ''), video: String(s.video || ''),
         intent: String(s.intent || ''), done: !!checkoffs[key],
         dispSets, progSetCount: vol.sets, progReps: vol.reps,
       };
@@ -2242,7 +2243,8 @@ function buildWorkoutDay(userId, lifting, ldayIdx, today) {
           });
       return {
         type: 'medball', key, name: String(s.name || ''),
-        volume: String(s.volume || ''), notes: String(s.notes || ''), video: String(s.video || ''),
+        volume: String(s.volume || ''), notes: String(s.notes || ''),
+        desc: String(s.desc || ''), pair: String(s.pair || ''), video: String(s.video || ''),
         intent: String(s.intent || ''), done: !!checkoffs[key],
         dispSets, progSetCount: vol.sets, progReps: vol.reps,
       };
@@ -2274,6 +2276,7 @@ function buildWorkoutDay(userId, lifting, ldayIdx, today) {
         type: 'lift', key, name,
         sets: String(ex.sets || ''), reps: String(ex.reps || ''),
         target_rpe: String(ex.target_rpe || ''), notes: String(ex.notes || ''),
+        desc: String(ex.desc || ''), pair: String(ex.pair || ''),
         video: String(ex.video || ''),
         section: String(ex.section || 'strength'), intent: String(ex.intent || ''),
         suggested_weight: ex.suggested_weight != null ? String(ex.suggested_weight) : '',
@@ -4919,12 +4922,102 @@ function requireLiftingCoach(req, res, next) {
   if (!u.canEdit) return res.status(403).send('View-only coaches cannot change programs.');
   next();
 }
+// ---- Bobby's personal lifting program (Oct 2026) ----
+// "Phase 1 — 4-Day Upper/Lower", seeded from src/bobby_phase1.json on boot.
+// Bobby trains it himself as a coach: /coach/my-lifting (day view) and
+// /coach/my-workout (guided flow). Logging reuses program_checkoffs with
+// Bobby's own user id via /api/coach/my-log.
+const BOBBY_PHASE1_NAME = 'Phase 1 \u2014 4-Day Upper/Lower (Bobby)';
+let _bobbyPhase1Data = null;
+function bobbyPhase1Data() {
+  if (!_bobbyPhase1Data) {
+    try {
+      _bobbyPhase1Data = JSON.parse(require('fs').readFileSync(__dirname + '/bobby_phase1.json', 'utf8'));
+    } catch (e) { _bobbyPhase1Data = { days: [], notes: [] }; }
+  }
+  return _bobbyPhase1Data;
+}
+function seedBobbyLifting() {
+  try {
+    const existing = db.prepare('SELECT id FROM lifting_programs WHERE name = ?').get(BOBBY_PHASE1_NAME);
+    if (existing) return existing.id;
+    const info = db.prepare(
+      'INSERT INTO lifting_programs (name, is_template, program_json, updated_at) VALUES (?, 0, ?, ?)'
+    ).run(BOBBY_PHASE1_NAME, JSON.stringify(bobbyPhase1Data()), new Date().toISOString());
+    console.log('Seeded Bobby Phase 1 lifting program, id', info.lastInsertRowid);
+    return info.lastInsertRowid;
+  } catch (e) {
+    console.log('seedBobbyLifting failed:', e.message);
+    return null;
+  }
+}
+function getBobbyLifting() {
+  const row = db.prepare('SELECT * FROM lifting_programs WHERE name = ?').get(BOBBY_PHASE1_NAME);
+  if (!row) return null;
+  return getLifting(row.id);
+}
+// Bobby's training week (Chicago time): Mon=Day 1, Tue=Day 2, Thu=Day 3,
+// Fri=Day 4. Wed/Sat/Sun = rest (no lifting). ?lday=N overrides.
+function bobbyDayIdx(req) {
+  const q = parseInt(req.query.lday, 10);
+  if (req.query.lday != null && String(req.query.lday).trim() !== '' && Number.isFinite(q)) {
+    return Math.max(0, Math.min(3, q));
+  }
+  try {
+    const chi = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+    const map = { 1: 0, 2: 1, 4: 2, 5: 3 };
+    return map[chi.getDay()] != null ? map[chi.getDay()] : -1;
+  } catch (e) { return -1; }
+}
+
 function liftingProgramsList() {
   return db.prepare('SELECT * FROM lifting_programs ORDER BY is_template DESC, name').all().map((r) => ({
     id: r.id, name: r.name, is_template: r.is_template,
     days: (() => { try { return JSON.parse(r.program_json || '{}').days || []; } catch (e) { return []; } })(),
   }));
 }
+// Bobby's personal lifting (Oct 2026): day view with Start Workout.
+app.get('/coach/my-lifting', requireLiftingCoach, (req, res) => {
+  if (req.user.viewAs) return res.redirect('/coach');
+  const lifting = getBobbyLifting();
+  if (!lifting) return res.status(500).send('Program not seeded yet — restart the app.');
+  const today = chiToday();
+  const dayIdx = bobbyDayIdx(req);
+  const days = (Array.isArray(lifting.days) ? lifting.days : [])
+    .filter((d) => (Array.isArray(d.exercises) ? d.exercises : []).some((ex) => String((ex && ex.name) || '').trim()));
+  const checkoffs = getCheckoffs(req.user.id, today);
+  res.send(views.myLiftingPage(req.user, lifting, {
+    tabs: views.coachTabs('my-lifting', req.user.approvalCount, req.user),
+    days, dayIdx, today, checkoffs,
+    notes: Array.isArray(lifting.notes) ? lifting.notes : [],
+  }));
+});
+// Bobby's personal lifting (Oct 2026): guided workout flow. Reuses the
+// athlete workout builder + page; logging goes to /api/coach/my-log.
+app.get('/coach/my-workout', requireLiftingCoach, (req, res) => {
+  if (req.user.viewAs) return res.redirect('/coach');
+  const lifting = getBobbyLifting();
+  if (!lifting) return res.status(500).send('Program not seeded yet — restart the app.');
+  const today = chiToday();
+  let dayIdx = bobbyDayIdx(req);
+  if (dayIdx < 0) dayIdx = 0;
+  const wd = buildWorkoutDay(req.user.id, lifting, dayIdx, today);
+  if (!wd.day) return res.redirect('/coach/my-lifting');
+  const phaseNotes = (Array.isArray(lifting.notes) ? lifting.notes : []);
+  res.send(views.workoutPage(req.user, { prog: {} }, wd, dayIdx, false, phaseNotes, {
+    coachMode: true,
+    backUrl: '/coach/my-lifting?lday=' + dayIdx,
+    logUrl: '/api/coach/my-log',
+    tabs: views.coachTabs('my-lifting', req.user.approvalCount, req.user),
+  }));
+});
+// Bobby's personal lift logging (Oct 2026): same core as /api/program/log,
+// keyed to the coach's own user id. View-only coaches are already blocked
+// by requireLiftingCoach (canEdit required).
+app.post('/api/coach/my-log', requireLiftingCoach, (req, res) => {
+  if (req.user.viewAs) return res.status(403).json({ ok: false, error: 'read-only' });
+  res.json(applyProgramLog(req.user.id, req.body || {}));
+});
 app.get('/coach/lifting', requireLiftingCoach, (req, res) => {
   res.send(views.liftingProgramsPage(req.user, {
     templates: liftingProgramsList().filter((l) => l.is_template),
@@ -10436,6 +10529,7 @@ setInterval(async () => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Skip listening on port ${PORT}`);
+  seedBobbyLifting();
   const n = db.prepare("SELECT COUNT(*) AS n FROM users WHERE role != 'coach'").get().n;
   console.log(`Players signed up: ${n}`);
   if (!process.env.SESSION_SECRET && isProd) {

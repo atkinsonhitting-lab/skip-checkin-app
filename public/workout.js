@@ -43,6 +43,17 @@
   var finishEl = document.getElementById('wo-finish');
   var finishStatsEl = document.getElementById('wo-finish-stats');
 
+  // Pairing (Oct 2026, Bobby): consecutive items sharing a non-empty
+  // `pair` id render together on one screen, visually grouped.
+  var screens = [];
+  (function () {
+    var cur = null, curPair = null;
+    items.forEach(function (it) {
+      var p = it.pair || '';
+      if (p && p === curPair && cur) { cur.push(it); }
+      else { cur = [it]; screens.push(cur); curPair = p || null; if (!p) curPair = '__single__' + screens.length; }
+    });
+  })();
   var idx = 0;
   var restTimer = null;
   var restLeft = 0;
@@ -111,7 +122,7 @@
   var PREVIEW = !!window.WO_PREVIEW;
   function log(payload) {
     if (PREVIEW) return Promise.resolve({ ok: true, preview: true });
-    return fetch('/api/program/log', {
+    return fetch(window.WO_LOG_URL || '/api/program/log', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -120,17 +131,30 @@
   }
 
   /* ---------- render current item ---------- */
-  function render() {
-    var it = items[idx];
-    prevBtn.disabled = idx === 0;
-    nextBtn.disabled = idx === items.length - 1;
-    if (it.type === 'lift') body.innerHTML = liftHtml(it);
-    else if (it.type === 'mobility') body.innerHTML = mobilityHtml(it);
-    else body.innerHTML = blockHtml(it);
-    wireVideo();
+  function itemHtml(it) {
+    if (it.type === 'lift') return liftHtml(it);
+    if (it.type === 'mobility') return mobilityHtml(it);
+    return blockHtml(it);
+  }
+  function wireItem(it) {
     if (it.type === 'lift') wireLift(it);
     else if (it.type === 'mobility') wireMobility(it);
     else wireBlock(it);
+  }
+  function render() {
+    var screen = screens[idx] || [];
+    prevBtn.disabled = idx === 0;
+    nextBtn.disabled = idx === screens.length - 1;
+    if (screen.length > 1) {
+      body.innerHTML = '<div class="wo-pair-group"><div class="wo-pair-badge">\u2194 Paired — alternate these</div>' +
+        screen.map(itemHtml).join('') + '</div>';
+    } else if (screen.length === 1) {
+      body.innerHTML = itemHtml(screen[0]);
+    } else {
+      body.innerHTML = '<div class="card empty">No work programmed for this day.</div>';
+    }
+    wireVideo();
+    screen.forEach(wireItem);
     syncProgress();
     window.scrollTo(0, 0);
   }
@@ -193,6 +217,7 @@
       '<div class="wo-kicker">' + kindLabel + '</div>' +
       '<h2 class="wo-name">' + esc(it.name) + intentBadge(it) + '</h2>' +
       (meta ? '<p class="wo-meta">' + esc(meta) + '</p>' : '') +
+      (it.desc ? '<p class="wo-desc">' + esc(it.desc) + '</p>' : '') +
       videoHtml(it) +
       '<div class="wo-sets">' + rows + '</div>' +
       '</div>';
@@ -235,6 +260,7 @@
       '<h2 class="wo-name">' + esc(it.name) + intentBadge(it) + '</h2>' +
       (rx ? '<p class="wo-meta">' + esc(rx) + '</p>' : '') +
       (it.notes ? '<p class="wo-notes">' + esc(it.notes) + '</p>' : '') +
+      (it.desc ? '<p class="wo-desc">' + esc(it.desc) + '</p>' : '') +
       lastLine +
       videoHtml(it) +
       '<div class="wo-sets">' + rows + '</div>' +
@@ -347,7 +373,8 @@
   /* ---------- rest timer ---------- */
   function startRest(it, exerciseDone) {
     var secs = it.rest || 120;
-    var nextIt = items[idx + 1];
+    var nextScreen = screens[idx + 1] || [];
+    var nextIt = nextScreen[0];
     restNextEl.textContent = exerciseDone && nextIt ? 'Next: ' + nextIt.name : '';
     restLeft = secs;
     restTimeEl.textContent = fmtRest(restLeft);
@@ -380,7 +407,7 @@
   /* ---------- nav ---------- */
   function advance() {
     stopRest();
-    if (idx < items.length - 1) {
+    if (idx < screens.length - 1) {
       idx++;
       render();
     } else {
@@ -391,7 +418,7 @@
     if (idx > 0) { stopRest(); idx--; render(); }
   });
   nextBtn.addEventListener('click', function () {
-    if (idx < items.length - 1) { stopRest(); idx++; render(); }
+    if (idx < screens.length - 1) { stopRest(); idx++; render(); }
     else showFinish();
   });
 
@@ -413,9 +440,11 @@
     buzz(30);
   }
 
-  // Resume at the first incomplete movement.
-  for (var f = 0; f < items.length; f++) {
-    if (!itemDone(items[f])) { idx = f; break; }
+  // Resume at the first screen with an incomplete movement.
+  for (var f = 0; f < screens.length; f++) {
+    var scr = screens[f];
+    var anyOpen = scr.some(function (it) { return !itemDone(it); });
+    if (anyOpen) { idx = f; break; }
     idx = f;
   }
   render();

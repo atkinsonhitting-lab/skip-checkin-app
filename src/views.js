@@ -495,10 +495,11 @@ function coachTabs(active, approvalCount, user) {
   // Lifting programs + Finances are Bobby's pages: full-access global coaches
   // only. Cam (view-only) and organization coaches never see them.
   if (user && user.role === 'coach' && !user.organizationId && user.canEdit !== false) {
-    tabs.splice(6, 0, { href: '/coach/lifting', label: 'Lifting', active: active === 'lifting' });
-    tabs.splice(7, 0, { href: '/coach/finances', label: 'Finances', active: active === 'finances' });
-    tabs.splice(8, 0, { href: '/coach/mental-questions', label: 'Questionnaire', active: active === 'mental-questions' });
-    tabs.splice(9, 0, { href: '/coach/video-library', label: 'Exercise Videos', active: active === 'video-library' });
+    tabs.splice(6, 0, { href: '/coach/my-lifting', label: 'My Lifting', active: active === 'my-lifting' });
+    tabs.splice(7, 0, { href: '/coach/lifting', label: 'Lifting', active: active === 'lifting' });
+    tabs.splice(8, 0, { href: '/coach/finances', label: 'Finances', active: active === 'finances' });
+    tabs.splice(9, 0, { href: '/coach/mental-questions', label: 'Questionnaire', active: active === 'mental-questions' });
+    tabs.splice(10, 0, { href: '/coach/video-library', label: 'Exercise Videos', active: active === 'video-library' });
   }
   return tabs;
 }
@@ -3936,7 +3937,75 @@ function programPage(user, p, opts) {
 // time — Speed → Med Ball → Lifts — big inputs, one-tap set logging,
 // rest timer, no page reloads. The day JSON rides in window.WO_DAY;
 // /workout.js renders and runs the session.
-function workoutPage(user, program, wd, ldayIdx, preview, phaseNotes) {
+// ---- Bobby's personal lifting (Oct 2026) ----
+// Day view for /coach/my-lifting: the 4 Phase 1 days, today's day
+// highlighted, each with a Start Workout button into the guided flow.
+function myLiftingPage(user, lifting, o) {
+  const days = (o && Array.isArray(o.days) ? o.days : []);
+  const dayIdx = o && typeof o.dayIdx === 'number' ? o.dayIdx : -1;
+  const checkoffs = (o && o.checkoffs) || {};
+  const notes = (o && Array.isArray(o.notes) ? o.notes : []);
+  const today = (o && o.today) || '';
+  const intentTag = (ex) => {
+    if (ex.intent === 'max') return ' <span class="intent-badge">\u26a1 EXPLOSIVE</span>';
+    if (ex.intent === 'ecc') return ' <span class="intent-badge intent-ecc">ECCENTRIC 4-1-X</span>';
+    return '';
+  };
+  const dayCards = days.map((d, i) => {
+    const label = String(d.label || ('Day ' + (i + 1)));
+    const exs = (Array.isArray(d.exercises) ? d.exercises : [])
+      .filter((ex) => String((ex && ex.name) || '').trim());
+    const isToday = i === dayIdx;
+    // Count logged sets today for this day's exercises.
+    let doneSets = 0, totalSets = 0;
+    for (const ex of exs) {
+      const key = 'lift::' + label + '::' + String(ex.name || '');
+      const row = checkoffs[key];
+      let sets = [];
+      try { sets = JSON.parse(row && row.sets_json ? row.sets_json : '[]'); } catch (e) { sets = []; }
+      if (Array.isArray(sets) && sets.length) {
+        totalSets += sets.length;
+        doneSets += sets.filter((s) => s && s.done).length;
+      } else {
+        totalSets += Math.max(1, Math.min(20, parseInt(ex.sets, 10) || 3));
+      }
+    }
+    const rows = exs.map((ex) => {
+      const vol = [ex.sets, ex.reps].filter(Boolean).join(' \u00d7 ') || '';
+      const pairTag = ex.pair ? ' <span class="pair-badge">paired</span>' : '';
+      return '<div class="routine-row"><span class="routine-name">' + esc(ex.name || '') +
+        intentTag(ex) + pairTag + '</span>' +
+        (vol ? '<span class="hint-inline">' + esc(vol) + '</span>' : '') + '</div>';
+    }).join('');
+    return '<div class="card' + (isToday ? ' today-card' : '') + '" style="margin:0 0 12px' +
+      (isToday ? ';border:2px solid var(--red)' : '') + '">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px">' +
+      '<h3 style="margin:0">' + esc(label) + (isToday ? ' <span class="hint-inline">· today</span>' : '') + '</h3>' +
+      '<a class="btn-primary" href="/coach/my-workout?lday=' + i + '" style="text-decoration:none;white-space:nowrap">Start Workout</a>' +
+      '</div>' +
+      (totalSets ? '<p class="hint" style="margin:6px 0 0">' + doneSets + ' / ' + totalSets + ' sets logged today</p>' : '') +
+      '<div style="margin-top:8px">' + rows + '</div>' +
+      '</div>';
+  }).join('');
+  const notesHtml = notes.length
+    ? '<div class="card" style="margin:0 0 12px"><h3 style="margin-top:0">Phase 1 — how it works</h3>' +
+      notes.map((n) => '<p style="margin:4px 0">' + esc(n) + '</p>').join('') + '</div>'
+    : '';
+  const restHtml = dayIdx < 0
+    ? '<div class="card" style="margin:0 0 12px"><p style="margin:0"><strong>Rest day.</strong> ' +
+      'Pick any day below to run it anyway.</p></div>'
+    : '';
+  return layout({
+    title: 'My Lifting · Phase 1',
+    user,
+    tabs: (o && o.tabs) || [],
+    body: '<h1 class="page-title">My Lifting</h1>' +
+      '<p class="lede" style="margin-top:0">' + esc((lifting && lifting.name) || 'Phase 1') + '</p>' +
+      restHtml + notesHtml + dayCards,
+  });
+}
+
+function workoutPage(user, program, wd, ldayIdx, preview, phaseNotes, opts) {
   // Bobby (Sep 23 2026): mobility pairs WITH the lifting — the guided workout
   // opens with the athlete's mobility blocks, then Speed → Med Ball → Lifts.
   const progRoutine = (program && program.prog && Array.isArray(program.prog.routine)) ? program.prog.routine : [];
@@ -3951,6 +4020,10 @@ function workoutPage(user, program, wd, ldayIdx, preview, phaseNotes) {
   const wdMob = wd && wd.day ? { ...wd, day: { ...wd.day, mobility: mobItems } } : wd;
   const dayJson = JSON.stringify(wdMob).replace(/</g, '\\u003c');
   const lday = Number(ldayIdx) || 0;
+  const o2 = opts || {};
+  const woBackUrl = o2.backUrl || ('/program?sub=lifting&lday=' + lday);
+  const woLogUrl = o2.logUrl || '/api/program/log';
+  const woTabs = Array.isArray(o2.tabs) ? o2.tabs : [];
   const previewBanner = preview
     ? '<div class="card" style="margin:0 0 12px;background:#fff8e1;border:1px solid #f0d060"><p style="margin:0"><strong>Preview</strong> — you\'re viewing as a coach. Logging is disabled.</p></div>'
     : '';
@@ -3975,10 +4048,10 @@ function workoutPage(user, program, wd, ldayIdx, preview, phaseNotes) {
   return layout({
     title: wd.day.label + ' · Lift',
     user,
-    tabs: [],
+    tabs: woTabs,
     body: `${previewBanner}${phaseHtml}<div class="wo">
       <div class="wo-top">
-        <a class="wo-end" href="/program?sub=lifting&lday=${lday}">✕ End</a>
+        <a class="wo-end" href="${esc(woBackUrl)}">✕ End</a>
         <div class="wo-prog"><div class="wo-bar"><div class="wo-fill" id="wo-fill"></div></div>
         <div class="wo-count" id="wo-count"></div></div>
         <div class="wo-day">${esc(wd.day.label)}</div>
@@ -4006,11 +4079,11 @@ function workoutPage(user, program, wd, ldayIdx, preview, phaseNotes) {
           <div class="wo-finish-emoji">🔒</div>
           <h2>Workout complete</h2>
           <p class="hint" id="wo-finish-stats"></p>
-          <a class="btn-primary" href="/program?sub=lifting&lday=${lday}" style="display:block;text-align:center;text-decoration:none">Back to program</a>
+          <a class="btn-primary" href="${esc(woBackUrl)}" style="display:block;text-align:center;text-decoration:none">Back to program</a>
         </div>
       </div>
     </div>
-    <script>window.WO_DAY = ${dayJson}; window.WO_PREVIEW = ${preview ? 'true' : 'false'};</script>
+    <script>window.WO_DAY = ${dayJson}; window.WO_PREVIEW = ${preview ? 'true' : 'false'}; window.WO_LOG_URL = ${JSON.stringify(woLogUrl)}; window.WO_BACK_URL = ${JSON.stringify(woBackUrl)};</script>
     <script src="/workout.js?v=${ASSET_V}"></script>`,
   });
 }
@@ -7502,6 +7575,7 @@ module.exports = {
   messagesInboxPage,
   messageThreadPage,
   reviewPage,
+  myLiftingPage,
   coachMessagesPage,
   coachHomePage,
   coachHittersPage,

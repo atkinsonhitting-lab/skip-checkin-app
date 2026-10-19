@@ -1683,6 +1683,14 @@ a.ws-cell:active { background: #2c2c2e; }
 .phase-banner { border: 1px solid #3a3a3e; border-left: 4px solid var(--red, #e5383b); border-radius: 12px; background: var(--bg2); padding: 12px 14px; margin: 12px 0; }
 .phase-banner .phase-title { font-weight: 800; font-size: 15px; margin-bottom: 4px; }
 .phase-banner .phase-notes { font-size: 13.5px; color: var(--text); line-height: 1.45; }
+/* Paired exercises (Oct 2026, Bobby): grouped on one workout screen. */
+.wo-pair-group { border: 2px solid #7c5cd6; border-radius: 18px; padding: 12px; background: rgba(124, 92, 214, 0.08); }
+.wo-pair-group .wo-card { margin-bottom: 10px; }
+.wo-pair-group .wo-card:last-child { margin-bottom: 0; }
+.wo-pair-badge { display: inline-block; font-size: 11px; font-weight: 800; letter-spacing: 0.6px; text-transform: uppercase; color: #cdbcf5; margin-bottom: 10px; }
+.wo-desc { font-size: 14px; line-height: 1.5; color: var(--text); background: rgba(255, 255, 255, 0.04); border-left: 3px solid var(--red); padding: 8px 10px; border-radius: 0 8px 8px 0; margin: 10px 0; }
+.pair-badge { display: inline-block; font-size: 10px; font-weight: 800; letter-spacing: 0.4px; text-transform: uppercase; color: #cdbcf5; border: 1px solid #7c5cd6; border-radius: 999px; padding: 2px 8px; margin-left: 8px; vertical-align: middle; white-space: nowrap; }
+.today-card { background: var(--bg2); }
 .intent-badge { display: inline-block; font-size: 10.5px; font-weight: 800; letter-spacing: 0.4px; color: #0a0a0a; background: #ffd60a; border-radius: 999px; padding: 2px 8px; margin-left: 8px; vertical-align: middle; white-space: nowrap; }
 .intent-badge.intent-ecc { background: #7dd3fc; color: #0a0a0a; }
 .flow-num { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; background: var(--red, #e5383b); color: #fff; font-size: 13px; font-weight: 800; margin-right: 6px; vertical-align: middle; }
