@@ -49,10 +49,7 @@ function ytIdOf(url) {
   return m ? m[1] : '';
 }
 function intentBadgeHtml(intent) {
-  const s = String(intent || '').toLowerCase();
-  if (s === 'max') return ' <span class="intent-badge">⚡ MAX INTENT</span>';
-  if (s === 'ecc') return ' <span class="intent-badge intent-ecc">🐌 ECCENTRIC</span>';
-  return '';
+  return ''; // (Oct 19 2026, Bobby) intent badges removed — exercises show names only
 }
 // Lifting video control: YouTube demos expand inline (tap ▶, plays in page);
 // anything else falls back to the plain watch link.
@@ -4014,11 +4011,7 @@ function myLiftingPage(user, lifting, o) {
   const checkoffs = (o && o.checkoffs) || {};
   const notes = (o && Array.isArray(o.notes) ? o.notes : []);
   const today = (o && o.today) || '';
-  const intentTag = (ex) => {
-    if (ex.intent === 'max') return ' <span class="intent-badge">\u26a1 EXPLOSIVE</span>';
-    if (ex.intent === 'ecc') return ' <span class="intent-badge intent-ecc">ECCENTRIC 4-1-X</span>';
-    return '';
-  };
+  const intentTag = (ex) => ''; // (Oct 19 2026, Bobby) intent badges removed — exercises show names only
   const dayCards = days.map((d, i) => {
     const label = String(d.label || ('Day ' + (i + 1)));
     const exs = (Array.isArray(d.exercises) ? d.exercises : [])

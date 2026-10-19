@@ -217,9 +217,7 @@
   }
 
   function intentBadge(it) {
-    if (it.intent === 'max') return ' <span class="intent-badge">⚡ MAX INTENT</span>';
-    if (it.intent === 'ecc') return ' <span class="intent-badge intent-ecc">🐌 ECCENTRIC</span>';
-    return '';
+  return ''; // (Oct 19 2026, Bobby) intent badges removed — exercises show names only
   }
 
   function blockHtml(it) {
