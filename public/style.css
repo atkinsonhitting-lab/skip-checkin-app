@@ -1805,7 +1805,44 @@ body.uc-theme .card h3 { color: #c41e33; letter-spacing: .12em; }
 body.uc-theme .td-barfill { background: #c41e33; }
 body.uc-theme .routine-station { color: #c41e33; }
 body.uc-theme a { color: #c41e33; }
-body.uc-theme .td-checkbtn { color: #c41e33; }
+body.uc-theme .td-checkbtn { color: var(--uc-baby); }
+body.uc-theme .checkbtn { color: var(--uc-baby); }
+
+/* Baby blue presence — the website uses it for hero accents, outlined pill
+   badges, and result/metric numbers. Red stays primary. */
+body.uc-theme .uc-hero {
+  background:
+    radial-gradient(ellipse 80% 70% at 50% 0%, rgba(196, 30, 51, 0.14), transparent 70%),
+    radial-gradient(ellipse 45% 40% at 50% 100%, rgba(125, 211, 252, 0.08), transparent 70%);
+}
+body.uc-theme .uc-wordmark { text-shadow: 0 0 22px rgba(125, 211, 252, 0.28); }
+.uc-wordmark-top {
+  font-size: 15px;
+  letter-spacing: .16em;
+  border-bottom-width: 2px;
+  padding-bottom: 3px;
+}
+/* Outlined pill badges in baby blue (website pill style) */
+body.uc-theme .uc-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--uc-baby);
+  border: 1px solid var(--uc-baby);
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+body.uc-theme .pair-badge,
+body.uc-theme .wo-pair-badge { color: var(--uc-baby); border-color: var(--uc-baby); }
+body.uc-theme .wo-pair-group { border-color: rgba(125, 211, 252, .45); background: rgba(125, 211, 252, .06); }
+/* Result/metric numbers in baby blue (website colors results baby blue) */
+body.uc-theme .stat-num,
+body.uc-theme .streak-num { color: var(--uc-baby); }
+/* Section eyebrow labels get a baby blue tick */
+body.uc-theme .td-sec-head,
+body.uc-theme .prog-sec-head { border-bottom-color: rgba(125, 211, 252, .25); }
 
 /* UNCOMMON wordmark (standalone — works on coach views too) */
 .uc-wordmark {

@@ -370,7 +370,12 @@ function layout({ title, user, tabs, body }) {
   const brandCss = brand
     ? `<style>:root{--red:${brand.primary};--red-dark:${brand.primaryDark};}.topbar{border-bottom-color:${brand.accent};}.brand-powered{font-size:9px;opacity:.55;letter-spacing:1px;margin-left:6px;font-weight:700;}.brand-logo-org{object-fit:contain;background:transparent;border:none;border-radius:0;}</style>`
     : '';
-  const brandBlock = brand
+  // Bobby (Oct 2026): UNCOMMON/remote views never show the Atkinson Hitting
+  // picture logo — they get the UNCOMMON wordmark instead.
+  const isUc = !!(user && user.remoteProgramId);
+  const brandBlock = isUc
+    ? `<div class="brand"><span class="uc-wordmark uc-wordmark-top">UNCOMMON</span></div>`
+    : brand
     ? `<div class="brand"><img src="${esc(brand.logoUrl || '/diamond-daily-logo.jpg')}" class="brand-logo-icon${brand.logoUrl ? ' brand-logo-org' : ''}" alt=""> ${esc(brand.orgName)} <span class="brand-powered">POWERED BY DIAMOND DAILY</span></div>`
     : `<div class="brand"><img src="/diamond-daily-logo.jpg" class="brand-logo-icon" alt=""> DIAMOND DAILY</div>`;
   const drawer = tabHtml
@@ -6875,7 +6880,7 @@ function mobilityPage(user, p, opts) {
     user,
     tabs: userTabs('program', user),
     body: `<div class="doc-page">
-      <div class="doc-header"><div class="doc-logo">ATKINSON<br>HITTING</div></div>
+      <div class="doc-header">${(user && user.remoteProgramId) ? '<p class="uc-wordmark" style="color:#111;border-bottom-color:#a3162a">UNCOMMON</p>' : '<div class="doc-logo">ATKINSON<br>HITTING</div>'}</div>
       <h1 class="doc-sec-title">Warm-up & Med Ball - ${esc(athleteName)}</h1>
       <p style="text-align:center;margin:-8px 0 16px"><a href="/program/hitting-plan" style="color:#666;font-size:14px">‹ Hitting Program</a></p>
       <p style="text-align:center;margin-bottom:20px"><a href="/program/mobility-workout" class="btn" style="display:inline-block;text-decoration:none;padding:12px 24px;background:#111;color:#fff;border-radius:8px;font-weight:700">▶ Start Workout</a></p>
