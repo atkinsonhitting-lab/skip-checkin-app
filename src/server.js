@@ -2310,7 +2310,7 @@ function buildWorkoutDay(userId, lifting, ldayIdx, today) {
       return {
         type: 'speed', key, name: String(s.name || ''),
         volume: String(s.volume || ''), notes: String(s.notes || ''),
-        desc: String(s.desc || ''), pair: String(s.pair || ''), video: String(s.video || ''),
+        desc: String(s.desc || ''), pair: String(s.pair || ''), video: String(s.video || ''), video_url: String(s.video_url || ''),
         intent: String(s.intent || ''), done: !!checkoffs[key],
         dispSets, progSetCount: vol.sets, progReps: vol.reps,
       };
@@ -2337,7 +2337,7 @@ function buildWorkoutDay(userId, lifting, ldayIdx, today) {
       return {
         type: 'medball', key, name: String(s.name || ''),
         volume: String(s.volume || ''), notes: String(s.notes || ''),
-        desc: String(s.desc || ''), pair: String(s.pair || ''), video: String(s.video || ''),
+        desc: String(s.desc || ''), pair: String(s.pair || ''), video: String(s.video || ''), video_url: String(s.video_url || ''),
         intent: String(s.intent || ''), done: !!checkoffs[key],
         dispSets, progSetCount: vol.sets, progReps: vol.reps,
       };
@@ -2371,6 +2371,7 @@ function buildWorkoutDay(userId, lifting, ldayIdx, today) {
         target_rpe: String(ex.target_rpe || ''), notes: String(ex.notes || ''),
         desc: String(ex.desc || ''), pair: String(ex.pair || ''),
         video: String(ex.video || ''),
+        video_url: String(ex.video_url || ''),
         section: String(ex.section || 'strength'), intent: String(ex.intent || ''),
         suggested_weight: ex.suggested_weight != null ? String(ex.suggested_weight) : '',
         rest: Math.max(15, Math.min(600, parseInt(ex.rest, 10) || 120)),
@@ -2910,6 +2911,13 @@ app.get('/program/workout', requireLogin, requireWaiver, (req, res) => {
   const today = chiToday();
   const days = (Array.isArray(lifting.days) ? lifting.days : [])
     .filter((d) => (Array.isArray(d.exercises) ? d.exercises : []).some((ex) => String((ex && ex.name) || '').trim()));
+  // Bobby (Oct 19 2026): Start Workout → day picker. No lday param means
+  // the hitter picks Day 1/2/3/4 freely — no schedule, no weekday mapping.
+  const qDay = parseInt(req.query.lday, 10);
+  const hasLday = req.query.lday != null && String(req.query.lday).trim() !== '' && Number.isFinite(qDay);
+  if (!hasLday) {
+    return res.send(views.workoutDayPicker(req.user, lifting, { backUrl: '/program?sub=lifting' }));
+  }
   const ldayIdx = pickLiftingDayIdx(req, p, days.length);
   const wd = buildWorkoutDay(req.user.id, lifting, ldayIdx, today);
   if (!wd.day) return res.redirect('/program?sub=lifting');

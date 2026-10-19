@@ -100,11 +100,20 @@
   }
 
   function videoHtml(it) {
+    // Bobby (Oct 19 2026): optional per-exercise video_url (direct link) —
+    // renders as an HTML5 player above the YouTube demo video if present.
+    var out = '';
+    var vurl = String((it && it.video_url) || '').trim();
+    if (vurl) {
+      out += '<div class="wo-video-url"><video src="' + esc(vurl) + '" controls playsinline preload="metadata" style="width:100%;border-radius:10px"></video></div>';
+    }
     var id = ytId(it.video);
-    if (!id) return '';
-    return '<div class="wo-video" data-yt="' + id + '">' +
-      '<img src="https://i.ytimg.com/vi/' + id + '/hqdefault.jpg" alt="Demo video" loading="lazy">' +
-      '<span class="wo-play">▶</span></div>';
+    if (id) {
+      out += '<div class="wo-video" data-yt="' + id + '">' +
+        '<img src="https://i.ytimg.com/vi/' + id + '/hqdefault.jpg" alt="Demo video" loading="lazy">' +
+        '<span class="wo-play">\u25b6</span></div>';
+    }
+    return out;
   }
 
   function esc(s) {

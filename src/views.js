@@ -371,7 +371,12 @@ function layout({ title, user, tabs, body }) {
   const brandCss = brand
     ? `<style>:root{--red:${brand.primary};--red-dark:${brand.primaryDark};}.topbar{border-bottom-color:${brand.accent};}.brand-powered{font-size:9px;opacity:.55;letter-spacing:1px;margin-left:6px;font-weight:700;}.brand-logo-org{object-fit:contain;background:transparent;border:none;border-radius:0;}</style>`
     : '';
-  const brandBlock = brand
+  // Bobby (Oct 2026): UNCOMMON/remote views never show the Atkinson Hitting
+  // picture logo — they get the UNCOMMON wordmark instead.
+  const isUc = !!(user && user.remoteProgramId);
+  const brandBlock = isUc
+    ? `<div class="brand"><span class="uc-wordmark uc-wordmark-top">UNCOMMON</span></div>`
+    : brand
     ? `<div class="brand"><img src="${esc(brand.logoUrl || '/diamond-daily-logo.jpg')}" class="brand-logo-icon${brand.logoUrl ? ' brand-logo-org' : ''}" alt=""> ${esc(brand.orgName)} <span class="brand-powered">POWERED BY DIAMOND DAILY</span></div>`
     : `<div class="brand"><img src="/diamond-daily-logo.jpg" class="brand-logo-icon" alt=""> DIAMOND DAILY</div>`;
   const drawer = tabHtml
@@ -3526,6 +3531,12 @@ function todayProgramPage(user, p, opts) {
   }
 
   // Lifting: Speed -> Power is inside Med Ball; here are the lifts.
+  // Bobby (Oct 19 2026): prominent Start Workout button at the top of the
+  // Today Lifting view — launches the guided tap-through workout flow.
+  const todayStartBtn = `<a class="start-workout" href="/program/workout">
+    <span class="start-workout-play">▶</span>
+    <span class="start-workout-text"><strong>Start Workout</strong>
+    <span>Pick your day, then walk through it — log as you go</span></span></a>`;
   let liftHtml = '';
   if (curDay) {
     const daySpeedAll = (Array.isArray(curDay.speed) ? curDay.speed : []).filter((s) => String((s && s.name) || '').trim());
@@ -3539,7 +3550,7 @@ function todayProgramPage(user, p, opts) {
       const vol = [ex.sets && ex.reps ? `${ex.sets} × ${ex.reps}` : '', ex.notes].filter(Boolean).join(' — ');
       return checkRow('lift', `lift::${liftDayLabel}::${ex.name}`, ex.name, vol, ex.video || '', liftExtra);
     }).join('') + heldHtml(heldEx);
-    liftHtml = speedHtml + exHtml;
+    liftHtml = todayStartBtn + speedHtml + exHtml;
   }
 
   const sectionHtml = (title, rowsHtml) => rowsHtml
@@ -3988,12 +3999,12 @@ function programPage(user, p, opts) {
           : '<strong>OFF day</strong> — no lifting today. True rest.';
       content = `${weekStripTop}<div class="card"><p style="margin:0">${restCopy}</p></div>${YT_TOGGLE_SCRIPT}`;
     } else {
-      // Bobby (Sep 23 2026): Start Lift goes at the very top of the lifting tab.
-      // Always show when there's a lifting day (not rest day).
-      const topStartBtn = `<a class="start-workout" href="/program/workout?lday=${effLday}">
+      // Bobby (Oct 19 2026): Start Workout → day picker (free choice of
+      // Day 1/2/3/4, no schedule). Always show when there's a lifting day.
+      const topStartBtn = `<a class="start-workout" href="/program/workout">
         <span class="start-workout-play">▶</span>
-        <span class="start-workout-text"><strong>Start Lift</strong>
-        <span>Walk through it — video + logging as you go</span></span></a>`;
+        <span class="start-workout-text"><strong>Start Workout</strong>
+        <span>Pick your day, then walk through it — video + logging as you go</span></span></a>`;
       // Bobby (Sep 23 2026): mobility pairs WITH the lifting — no standalone
       // Mobility tab for lifters. Mobility blocks render first, as the warm-up.
       const mobBlocks = routine.filter((c) => kindOf(c.category) === 'mobility' && realItems(c.items).length);
@@ -4233,6 +4244,38 @@ function workoutPage(user, program, wd, ldayIdx, preview, phaseNotes, opts) {
   });
 }
 
+// ---- Workout day picker (Oct 19 2026, Bobby) ----
+// Start Workout → the hitter picks which day of the lifting program to run.
+// No schedule: free choice, Day 1/2/3/4 any day. No weekday hints, no
+// "today's day" suggestion — the hitter decides.
+function workoutDayPicker(user, lifting, o) {
+  const oo = o || {};
+  const days = (lifting && Array.isArray(lifting.days) ? lifting.days : [])
+    .filter((d) => (Array.isArray(d.exercises) ? d.exercises : []).some((ex) => String((ex && ex.name) || '').trim()));
+  const cards = days.map((d, i) => {
+    const label = String(d.label || ('Day ' + (i + 1)));
+    const exs = d.exercises.filter((ex) => String((ex && ex.name) || '').trim());
+    const preview = exs.slice(0, 3).map((ex) => String(ex.name)).join(' · ');
+    return `<a class="wo-daycard" href="/program/workout?lday=${i}">` +
+      `<span class="wo-daycard-label">${esc(label)}</span>` +
+      `<span class="hint-inline">${exs.length} exercise${exs.length === 1 ? '' : 's'}</span>` +
+      (preview ? `<span class="wo-daycard-exs">${esc(preview)}${exs.length > 3 ? ' · …' : ''}</span>` : '') +
+      `<span class="wo-daycard-go">Start →</span></a>`;
+  }).join('');
+  return layout({
+    title: 'Pick your day',
+    user,
+    tabs: [],
+    body: `<div class="wo-picker">` +
+      `<p class="wo-kicker">${esc((lifting && lifting.name) || 'Lifting')}</p>` +
+      `<h1 class="sess-title">Which day are you running?</h1>` +
+      `<p class="lede">Pick any day — your call.</p>` +
+      (cards || '<div class="card empty">No lifting days programmed.</div>') +
+      `<p style="margin-top:14px"><a href="${esc(oo.backUrl || '/program?sub=lifting')}" class="hint-inline">← Back to program</a></p>` +
+      `</div>`,
+  });
+}
+
 // ---- Guided Today session (Sep 2026) ----
 // Today → pick your order → tap through every exercise → done. One guided
 // flow for Mobility, Med Ball, Hitting, and Lifting, in the order the athlete
@@ -4370,16 +4413,17 @@ function liftWeekStrip(sched, weekday, days, ldayIdx) {
   return `<div class="wk-strip">${pills}</div>`;
 }
 
-// Start Lift button — lives at the very top of the lifting tab (Sep 23 2026,
-// Bobby: "that needs to be at the top"). Visible to coaches in view-as too so
-// Bobby can test the flow; the workout page renders in preview mode for them.
+// Start Workout button (Oct 19 2026, Bobby: Start Workout → day picker,
+// free choice of Day 1/2/3/4). Lives at the very top of the lifting tab.
+// Visible to coaches in view-as too so Bobby can test the flow; the workout
+// page renders in preview mode for them.
 function startLiftButton(ldayIdx, doneEx, totalSets) {
   const sub = totalSets > 0
-    ? `${doneEx}/${totalSets} exercises done — walk through it, video + logging as you go`
-    : 'Walk through it — video + logging as you go';
-  return `<a class="start-workout" href="/program/workout?lday=${ldayIdx}">
+    ? `${doneEx}/${totalSets} exercises done — pick your day, walk through it, video + logging as you go`
+    : 'Pick your day — video + logging as you go';
+  return `<a class="start-workout" href="/program/workout">
     <span class="start-workout-play">▶</span>
-    <span class="start-workout-text"><strong>Start Lift</strong>
+    <span class="start-workout-text"><strong>Start Workout</strong>
     <span>${sub}</span></span></a>`;
 }
 
@@ -6922,7 +6966,7 @@ function mobilityPage(user, p, opts) {
     user,
     tabs: userTabs('program', user),
     body: `<div class="doc-page">
-      <div class="doc-header"><div class="doc-logo">ATKINSON<br>HITTING</div></div>
+      <div class="doc-header">${(user && user.remoteProgramId) ? '<p class="uc-wordmark" style="color:#111;border-bottom-color:#a3162a">UNCOMMON</p>' : '<div class="doc-logo">ATKINSON<br>HITTING</div>'}</div>
       <h1 class="doc-sec-title">Warm-up & Med Ball - ${esc(athleteName)}</h1>
       <p style="text-align:center;margin:-8px 0 16px"><a href="/program/hitting-plan" style="color:#666;font-size:14px">‹ Hitting Program</a></p>
       <p style="text-align:center;margin-bottom:20px"><a href="/program/mobility-workout" class="btn" style="display:inline-block;text-decoration:none;padding:12px 24px;background:#111;color:#fff;border-radius:8px;font-weight:700">▶ Start Workout</a></p>
@@ -7747,6 +7791,7 @@ module.exports = {
   programPage,
   todayProgramPage,
   workoutPage,
+  workoutDayPicker,
   sessionPage,
   programRoutinePage,
   mentalGamePage,
