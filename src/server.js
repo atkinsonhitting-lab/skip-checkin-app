@@ -6440,182 +6440,6 @@ function progressionRead(userId) {
     adjustments,
   };
 }
-// Questionnaire resubmission (Sep 23 2026, Bobby: "that's the whole premise" —
-// the program must stay built from the athlete's answers, so when answers
-// change the program follows). Safe regeneration: the lifting draft rebuilds
-// ONLY when Bobby hasn't hand-customized it (source != 'custom'); the hitting
-// program rebuilds ONLY while it's still an intake draft. Custom work is
-// never overwritten.
-app.get('/questionnaire', requireLogin, (req, res) => {
-  if (req.user.role === 'coach') return res.redirect('/coach');
-  let answers = {};
-  try {
-    const r = db.prepare('SELECT answers_json FROM intake_responses WHERE user_id = ? ORDER BY id DESC LIMIT 1').get(req.user.id);
-    if (r && r.answers_json) answers = JSON.parse(r.answers_json) || {};
-  } catch (e) { answers = {}; }
-  // Carry the account's identity into the form so validation passes.
-  if (!answers.first_name) answers.first_name = req.user.firstName || '';
-  if (!answers.last_name) answers.last_name = req.user.lastName || '';
-  if (!answers.email) answers.email = req.user.email || '';
-  res.send(views.intakeFormPage('update', null, answers, { updateMode: true }));
-});
-app.post('/questionnaire', requireLogin, (req, res) => {
-  if (req.user.role === 'coach') return res.redirect('/coach');
-  const a = parseIntakeBody(req.body);
-  // Identity comes from the account, not the form.
-  a.first_name = req.user.firstName || a.first_name;
-  a.last_name = req.user.lastName || a.last_name;
-  a.email = req.user.email || a.email;
-  if (!a.components.length) {
-    return res.send(views.intakeFormPage('update', 'Pick at least one training component.', req.body, { updateMode: true }));
-  }
-  const nowIso = new Date().toISOString();
-  // intake_responses keeps one current row per athlete (user_id UNIQUE).
-  const had = db.prepare('SELECT id FROM intake_responses WHERE user_id = ?').get(req.user.id);
-  if (had) {
-    db.prepare('UPDATE intake_responses SET answers_json = ?, created_at = ? WHERE user_id = ?').run(JSON.stringify(a), nowIso, req.user.id);
-  } else {
-    db.prepare('INSERT INTO intake_responses (user_id, answers_json, created_at) VALUES (?, ?, ?)').run(req.user.id, JSON.stringify(a), nowIso);
-  }
-  const notes = [];
-  const p = getProgram(req.user.remoteProgramId);
-  if (p) {
-    const athleteName = `${a.first_name} ${a.last_name}`.trim() || req.user.athleteName || 'Athlete';
-    // Lifting: rebuild the draft unless Bobby customized it by hand.
-    try {
-      const lrow = db.prepare('SELECT lifting_program_id FROM remote_programs WHERE id = ?').get(p.id);
-      const lid = lrow && lrow.lifting_program_id;
-      if (lid && a.components.includes('lifting')) {
-        const lrec = db.prepare('SELECT program_json FROM lifting_programs WHERE id = ?').get(Number(lid));
-        let src = '';
-        try { src = String((JSON.parse(lrec.program_json || '{}') || {}).source || ''); } catch (e) {}
-        if (src === 'custom') {
-          notes.push('Lifting left as your coach built it');
-        } else {
-          const draft = buildLiftingDraft(a);
-          db.prepare('UPDATE lifting_programs SET program_json = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(draft), nowIso, Number(lid));
-          notes.push('Lifting rebuilt from your new answers');
-        }
-      }
-    } catch (e) { /* lifting not ready */ }
-    // Hitting program: rebuild only while it's still an intake draft.
-    try {
-      const prog = p.prog || {};
-      if (prog.draft) {
-        const rebuilt = buildIntakeProgram(a, athleteName);
-        try { videoLinks.attachVideoLinks(rebuilt, videoLinks.getLibraryRows(db)); } catch (e) { /* library not ready */ }
-        db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?').run(JSON.stringify(rebuilt), nowIso, p.id);
-        notes.push('Hitting rebuilt from your new answers');
-      } else {
-        notes.push('Hitting left as your coach built it');
-      }
-    } catch (e) { /* program not ready */ }
-  }
-  const msg = 'Answers updated. ' + (notes.length ? notes.join(' · ') + '.' : '');
-  res.redirect('/settings?notice=' + encodeURIComponent(msg));
-});
-app.get('/intake/:token', (req, res) => {
-  if (req.user) return res.redirect('/');
-  // Lead-bound invite: pre-fill name, phone, and goals from the application.
-  const invite = intakeInviteFor(req.params.token);
-  if (invite) {
-    const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(invite.lead_id);
-    return res.send(views.intakeFormPage(req.params.token, null, leadPrefillValues(lead), { prefillLead: lead }));
-  }
-  if (!intakeTokenValid(req.params.token)) return res.status(404).send('Not found.');
-  res.send(views.intakeFormPage(req.params.token));
-});
-app.post('/intake/:token/submit', (req, res) => {
-  // Lead-bound invite tokens work alongside the shared standalone token.
-  const invite = intakeInviteFor(req.params.token);
-  if (!invite && !intakeTokenValid(req.params.token)) return res.status(404).send('Not found.');
-  const lead = invite ? db.prepare('SELECT * FROM leads WHERE id = ?').get(invite.lead_id) : null;
-  const prefillOpts = lead ? { prefillLead: lead } : undefined;
-  const ip = req.ip;
-  if (!attemptAllowed(ip)) {
-    return res.send(views.intakeFormPage(req.params.token, 'Too many attempts. Wait a few minutes and try again.', req.body, prefillOpts));
-  }
-  const fail = (msg) => {
-    attemptFailed(ip);
-    return res.send(views.intakeFormPage(req.params.token, msg, req.body, prefillOpts));
-  };
-  const a = parseIntakeBody(req.body);
-  // Carry the application age/level into the answers so Bobby sees it on review.
-  if (lead && lead.age_level) a.age_level_from_application = String(lead.age_level).slice(0, 60);
-  if (!a.first_name || !a.last_name) return fail('Enter your first and last name.');
-  if (!validEmail(a.email)) return fail('Enter a valid email address.');
-  if (db.prepare('SELECT id FROM users WHERE email = ?').get(a.email)) {
-    return fail('An account with that email already exists. Try logging in.');
-  }
-  if (!validDob(a.date_of_birth)) return fail('Enter your date of birth.');
-  if (!a.components.length) return fail('Pick at least one training component below.');
-  if (!(req.body.agree_terms === '1' || req.body.agree_terms === 'on')) {
-    return fail('Please agree to the Terms of Service and Privacy Policy.');
-  }
-  const age = ageOn(a.date_of_birth);
-  if (age !== null && age < 18) {
-    if (!a.parent_name) return fail('A parent or guardian\u2019s name is required for players under 18.');
-    if (!validEmail(a.parent_email)) return fail('A parent or guardian\u2019s valid email is required for players under 18.');
-  }
-  const athleteName = `${a.first_name} ${a.last_name}`;
-  const needsParentConsent = age !== null && age < 13;
-  const status = needsParentConsent ? 'pending_parent' : 'pending';
-  const nowIso = new Date().toISOString();
-  // Draft program first so the account can link straight to it.
-  const prog = buildIntakeProgram(a, athleteName);
-  try { videoLinks.attachVideoLinks(prog, videoLinks.getLibraryRows(db)); } catch (e) { /* library not ready */ }
-  const pInfo = db
-    .prepare('INSERT INTO remote_programs (athlete_name, program_json, updated_at, block_start, block_number) VALUES (?, ?, ?, ?, 1)')
-    .run(athleteName, JSON.stringify(prog), nowIso, nowIso.slice(0, 10));
-  if (a.components.includes('lifting')) {
-    const draft = buildLiftingDraft(a);
-    const lInfo = db
-      .prepare('INSERT INTO lifting_programs (name, is_template, program_json, updated_at) VALUES (?, 0, ?, ?)')
-      .run(`Lifting \u2014 ${athleteName} (DRAFT)`, JSON.stringify(draft), nowIso);
-    db.prepare('UPDATE remote_programs SET lifting_program_id = ? WHERE id = ?')
-      .run(lInfo.lastInsertRowid, pInfo.lastInsertRowid);
-  }
-  // Questionnaire athletes join Bobby's remote org directly (no signup code).
-  let orgId = null;
-  try {
-    const org = db.prepare('SELECT id FROM organizations WHERE name = ?').get(FOUNDER_ORG_NAME);
-    if (org) orgId = org.id;
-  } catch (e) { /* organizations not ready */ }
-  const hash = bcrypt.hashSync(crypto.randomBytes(32).toString('hex'), 12);
-  const uInfo = db
-    .prepare(
-      'INSERT INTO users (email, password_hash, role, athlete_name, first_name, last_name, created_at, status, organization_id, date_of_birth, player_type, accepted_terms_at, terms_version, parent_name, parent_email, remote_program_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    )
-    .run(a.email, hash, 'athlete', athleteName, a.first_name, a.last_name, nowIso, status, orgId, a.date_of_birth, 'hitter', nowIso, '1', a.parent_name || null, a.parent_email || null, pInfo.lastInsertRowid);
-  db.prepare('INSERT INTO intake_responses (user_id, answers_json, created_at) VALUES (?, ?, ?)')
-    .run(uInfo.lastInsertRowid, JSON.stringify(a), nowIso);
-  // Lead-bound submission: link the new account back to the lead, mark the
-  // invite used, and move the lead to enrolled.
-  if (invite && lead) {
-    db.prepare('UPDATE intake_responses SET lead_id = ? WHERE user_id = ?').run(lead.id, uInfo.lastInsertRowid);
-    db.prepare('UPDATE intake_invites SET used_at = ? WHERE id = ?').run(nowIso, invite.id);
-    db.prepare("UPDATE leads SET status = 'enrolled' WHERE id = ?").run(lead.id);
-  }
-  // Welcome token: sets their password without needing email (30-day expiry).
-  const token = crypto.randomBytes(32).toString('hex');
-  const expires = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-  db.prepare(
-    'INSERT INTO password_reset_tokens (user_id, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?)'
-  ).run(uInfo.lastInsertRowid, resetTokenHash(token), expires, nowIso);
-  if (needsParentConsent) {
-    const ct = crypto.randomBytes(32).toString('hex');
-    db.prepare('UPDATE users SET parent_consent_token_hash = ?, parent_consent_sent_at = ? WHERE id = ?')
-      .run(resetTokenHash(ct), nowIso, uInfo.lastInsertRowid);
-    sendParentConsentEmail(a.parent_email, athleteName, `${publicBaseUrl(req)}/parent-consent?token=${ct}`, publicBaseUrl(req))
-      .catch((e) => console.warn('intake parent consent email failed:', e.message));
-  }
-  pushToCoaches(
-    'New intake questionnaire',
-    `${athleteName} just filled out the intake \u2014 draft program ready to review.`,
-    '/coach/programs'
-  ).catch((e) => console.warn('intake push failed:', e.message));
-  res.redirect('/welcome/' + token);
-});
 // Welcome link: the prospect sets their password (no email needed), gets
 // logged in, and waits on the pending page until Bobby reviews + approves.
 app.get('/welcome/:token', (req, res) => {
@@ -6663,26 +6487,6 @@ function requireWaiver(req, res, next) {
   if (needsWaiver(req.user)) return res.redirect('/waiver');
   next();
 }
-// Bobby's intake review: clean read of a prospect's answers + their draft.
-app.get('/coach/intake/:id', requireCoachAny, (req, res) => {
-  setApprovalCount(req);
-  const row = db
-    .prepare(
-      `SELECT i.*, u.first_name, u.last_name, u.email, u.status, u.remote_program_id
-       FROM intake_responses i JOIN users u ON u.id = i.user_id WHERE i.id = ?`
-    )
-    .get(req.params.id);
-  if (!row) return res.redirect('/coach/programs');
-  let answers = {};
-  try { answers = JSON.parse(row.answers_json || '{}'); } catch (e) { answers = {}; }
-  res.send(views.intakeDetailPage(realUser(req), { ...row, answers }));
-});
-// Rotate the shareable questionnaire link.
-app.post('/coach/intake/rotate', requireCoach, (req, res) => {
-  db.prepare("UPDATE settings SET value = ? WHERE key = 'intake_token'")
-    .run(crypto.randomBytes(12).toString('hex'));
-  res.redirect('/coach/programs');
-});
 
 // ---- 4-week training blocks (Sep 2026) ----
 // Blocks run 4 weeks then switch. Bobby builds the next block a few days early
@@ -8248,18 +8052,7 @@ app.post('/coach/organizations/:id/mine', requireCoach, requireFinances, (req, r
 // Coach Programs tab: remote programs.
 app.get('/coach/programs', requireGlobalCoachAny, (req, res) => {
   setApprovalCount(req);
-  const intakes = db
-    .prepare(
-      `SELECT i.id, i.created_at, u.first_name, u.last_name, u.email, u.status,
-              u.remote_program_id, u.waiver_signed_at,
-              instr(p.program_json, '"draft":true') AS is_draft
-       FROM intake_responses i
-       JOIN users u ON u.id = i.user_id
-       LEFT JOIN remote_programs p ON p.id = u.remote_program_id
-       ORDER BY i.id DESC LIMIT 20`
-    )
-    .all();
-  res.send(views.coachProgramsPage(realUser(req), remoteProgramList(), { url: intakeLink(req), intakes }));
+  res.send(views.coachProgramsPage(realUser(req), remoteProgramList()));
 });
 
 // Sample personalized hitting program (Sep 23 2026) — Bobby wanted to see
@@ -10183,24 +9976,6 @@ app.post('/coach/leads/:id/status', requireGlobalCoachAny, requireCoach, (req, r
   res.redirect('/coach#leads');
 });
 
-// Send questionnaire to a website-application lead: generates a questionnaire
-// link bound to the lead, so the form pre-fills from their application.
-// Bobby texts the link to the athlete after the call.
-app.post('/coach/leads/:id/questionnaire', requireGlobalCoachAny, requireCoach, (req, res) => {
-  const id = Number(req.params.id);
-  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(id);
-  if (!lead) return res.status(404).send('Lead not found.');
-  const nowIso = new Date().toISOString();
-  let inv = db.prepare("SELECT * FROM intake_invites WHERE lead_id = ? AND used_at = '' ORDER BY id DESC LIMIT 1").get(id);
-  if (!inv) {
-    const token = crypto.randomBytes(32).toString('hex');
-    const info = db.prepare('INSERT INTO intake_invites (token, lead_id, created_at, created_by) VALUES (?, ?, ?, ?)')
-      .run(token, id, nowIso, (realUser(req) || {}).email || '');
-    inv = { id: info.lastInsertRowid, token };
-  }
-  if (lead.status === 'new') db.prepare("UPDATE leads SET status = 'contacted' WHERE id = ?").run(id);
-  res.send(views.leadQuestionnaireLinkPage(realUser(req), lead, `${publicBaseUrl(req)}/intake/${inv.token}`));
-});
 
 // New hitter signed up — Bobby reviews every signup through the app
 // (Bobby, Sep 18 2026: no more signup emails to him — push only).
