@@ -2079,6 +2079,9 @@ function getCheckoffs(userId, day) {
 // Today's workout picks (Oct 2026, Bobby): which program sections the
 // hitter chose for the day, via the Program tab picker. Returns the array
 // of section ids, or null when nothing was picked (Today shows everything).
+// Today view switcher (Oct 2026, Bobby): Hitting / Lifting / Movement as
+// separate views. Hitting is the first/default view (Bobby, Oct 19 2026).
+const TODAY_VIEWS = ['hitting', 'lifting', 'movement'];
 function todayViewOf(v) {
   const s = String(v || '').toLowerCase();
   return TODAY_VIEWS.includes(s) ? s : 'hitting';
