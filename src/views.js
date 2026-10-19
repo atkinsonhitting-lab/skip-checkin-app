@@ -260,7 +260,7 @@ const TABBAR_HREFS = ['/mental-game', '/checkin', '/notebook', '/chat'];
 // Oct 2026: the gated Today preview adds its own tab hrefs. Extending this
 // allowlist changes nothing for other pages — bottomTabbar only renders
 // tabs a page actually passes in.
-const REMOTE_TABBAR_HREFS = ['/program', '/program/today', '/program/hitting-plan', '/videos', '/messages', '/mental-game', '/checkin', '/notebook', '/chat'];
+const REMOTE_TABBAR_HREFS = ['/program', '/program/today', '/program/hitting-plan', '/messages', '/mental-game', '/checkin', '/notebook', '/chat'];
 // Coach tab bar (Sep 2026, Bobby: Messages in the tab bar instead of Train
 // Skip): Bobby's coaching loop — Home (attention), My Players, Approvals
 // (badge), Messages (badge). Train Skip, Programs, Videos, Finances, and
@@ -317,19 +317,20 @@ function bottomTabbar(user, tabs) {
   const isCoach = user.role === 'coach';
   if (!isCoach && user.role !== 'athlete') return '';
   // Remote athletes (Oct 2026, Bobby): the bottom bar is ALWAYS Today /
-  // Program / Check In / Videos / Messages, on every page — only the highlight moves.
+  // Program / Check In / Messages, on every page — only the highlight moves.
   // Bobby reported the buttons changing per tab; pages pass different tab
   // lists (the drawer list), so the bar now ignores the passed list for
   // remote athletes and renders the fixed set. The drawer still uses the
   // passed list. Today goes to the Today page; Program goes to the
   // program section menu — the two tabs are different screens.
+  // Google Drive library lives in the side drawer, not the bottom bar
+  // (Oct 2026, Bobby).
   if (!isCoach && user.remoteProgramId) {
     const activeHref = String(((tabs || []).find((t) => t.active) || {}).href || '');
     const activeKey =
       activeHref === '/program/today' ? 'today'
       : activeHref === '/checkin' || activeHref.startsWith('/checkin') ? 'checkin'
       : activeHref === '/messages' || activeHref.startsWith('/messages/') ? 'messages'
-      : activeHref === '/videos' || activeHref.startsWith('/videos/') ? 'videos'
       : activeHref === '/program' || activeHref.startsWith('/program/') ? 'program'
       : null;
     const unread = Number(user.unreadMessages || 0);
@@ -337,7 +338,6 @@ function bottomTabbar(user, tabs) {
       { href: '/program/today', label: 'Today', key: 'today', badge: null },
       { href: '/program', label: 'Program', key: 'program', badge: null },
       { href: '/checkin', label: 'Check In', key: 'checkin', badge: null },
-      { href: '/videos', label: 'Videos', key: 'videos', badge: null },
       { href: '/messages', label: 'Messages', key: 'messages', badge: unread > 0 ? String(unread) : null },
     ];
     return `<nav id="tabbar" aria-label="Primary">${items
@@ -453,6 +453,9 @@ function userTabs(active, user) {
   // Messages (Oct 2026, Bobby): remote athletes message their coach from
   // the bottom nav. Journaling athletes keep Talk to Skip, not Messages.
   if (isRemote) tabs.push({ href: '/messages', label: 'Messages', active: active === 'messages' });
+  // Google Drive library (Oct 2026, Bobby): remote athletes reach it from
+  // the side drawer, not the bottom tab bar.
+  if (isRemote) tabs.push({ href: '/videos', label: 'Google Drive library', active: active === 'videos' });
 
   tabs.push(
     { href: '/mental-game', label: 'Lock In', active: active === 'mental' },
@@ -3636,7 +3639,7 @@ function todayProgramPage(user, p, opts) {
   const tabs = [
     { href: '/program/today', label: 'Today', active: true },
     { href: '/program/hitting-plan', label: 'Program' },
-    { href: '/videos', label: 'Videos' },
+    { href: '/videos', label: 'Google Drive library' },
     { href: '/messages', label: 'Messages' },
   ];
 
@@ -5802,10 +5805,10 @@ function videosPage(user, cats, activeCat, videos, q) {
     )
     .join('');
   return layout({
-    title: 'Remote Library',
+    title: 'Google Drive library',
     user,
     tabs: userTabs('videos', user),
-    body: `<h1 class="page-title">Remote Library</h1>
+    body: `<h1 class="page-title">Google Drive library</h1>
     ${cats.length ? `<form method="get" action="/videos" class="form" style="margin:0 0 10px"><input type="search" name="q" class="searchbar" placeholder="Search every category\u2026" autocomplete="off" value="${esc(q || '')}"></form>` : ''}
     ${q ? `<p class="hint-inline" style="margin:0 0 8px">${videos.length} result${videos.length === 1 ? '' : 's'} for \u201C${esc(q)}\u201D · <a href="/videos">clear</a></p>` : `<div class="pill-row">${pills}</div>`}
     <div class="video-grid">${cards || '<div class="card empty">No videos yet — they\u2019ll appear here after the next sync.</div>'}</div>
