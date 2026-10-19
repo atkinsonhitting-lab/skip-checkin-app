@@ -133,7 +133,7 @@ const progIsHittingDrill = (cat) => !progIsMovement(cat) && !progIsPrep(cat) && 
 // hitters log med ball work by sets and weight. Uses the existing
 // program_checkoffs sets_json via lift_op=set/unset (kind='med').
 // checkoffs: map from getCheckoffs; sub/day: form routing; videoHtml: watch link.
-function medSetLogger(key, name, volume, checkoffs, sub, day, videoHtml, lday) {
+function medSetLogger(key, name, volume, checkoffs, sub, day, videoHtml, lday, extraHidden) {
   const row = (checkoffs || {})[key] || null;
   let loggedSets = [];
   try {
@@ -154,6 +154,7 @@ function medSetLogger(key, name, volume, checkoffs, sub, day, videoHtml, lday) {
     return `<form method="post" action="/program/check" class="med-set-form">
       <input type="hidden" name="kind" value="med">
       <input type="hidden" name="sub" value="${esc(sub)}">
+      ${extraHidden || ''}
       ${day ? `<input type="hidden" name="day" value="${esc(day)}">` : ''}
       ${lday != null && lday !== '' ? `<input type="hidden" name="lday" value="${esc(String(lday))}">` : ''}
       <input type="hidden" name="item_key" value="${esc(key)}">
@@ -3314,6 +3315,13 @@ function todayProgramPage(user, p, opts) {
   const videoLib = o.videoLib || {};
   const today = o.today || '';
   const weekday = o.weekday || '';
+  // View switcher (Oct 2026, Bobby): Hitting / Lifting / Movement as separate
+  // views on the Today page. Hitting is first/default (Bobby, Oct 19 2026).
+  // The hitter checks off work in whichever view they've chosen. viewInput
+  // keeps the active view across POSTs (check-offs, picker toggles) so the
+  // hitter lands back in the same view.
+  const view = ['hitting', 'lifting', 'movement'].includes(o.view) ? o.view : 'hitting';
+  const viewInput = `<input type="hidden" name="view" value="${view}">`;
   // Per-hitter section labels (Bobby, Oct 2026) — renamed for this athlete
   // only, stored on their program.
   const secLabels = sectionLabelsOf(prog);
@@ -3359,7 +3367,7 @@ function todayProgramPage(user, p, opts) {
       try { const _s = JSON.parse(_row && _row.sets_json ? _row.sets_json : '[]'); if (Array.isArray(_s)) _logged = _s; } catch (e) {}
       if (_logged.length && _logged.every((s) => s.done)) doneItems += 1;
       else if (!_logged.length && _row) doneItems += 1;
-      return medSetLogger(key, name, volume, checkoffs, 'today', todayLabel, watchLink(video), '');
+      return medSetLogger(key, name, volume, checkoffs, 'today', todayLabel, watchLink(video), '', viewInput);
     }
     const done = !!checkoffs[key];
     totalItems += 1;
@@ -3373,6 +3381,7 @@ function todayProgramPage(user, p, opts) {
     return `<form method="post" action="/program/check" class="td-row${done ? ' done' : ''}" data-td-row>
       <input type="hidden" name="kind" value="${kind}">
       <input type="hidden" name="sub" value="today">
+      ${viewInput}
       <input type="hidden" name="day" value="${esc(todayLabel)}">
       ${extra || ''}
       <input type="hidden" name="item_key" value="${esc(key)}">
@@ -3443,9 +3452,9 @@ function todayProgramPage(user, p, opts) {
     <p class="td-envnote">Pick the drills you're doing today.</p>
     <div class="td-pickchips">${progDrills.map((pd) => {
       const isOn = pickedSet.has(pd.name.toLowerCase());
-      return `<form method="post" action="/program/today-drills" class="td-chipform"><input type="hidden" name="op" value="toggle_drill"><input type="hidden" name="drill" value="${esc(pd.name)}"><button type="submit" class="td-pickchip${isOn ? ' on' : ''}">${esc(pd.name)}</button></form>`;
+      return `<form method="post" action="/program/today-drills" class="td-chipform"><input type="hidden" name="op" value="toggle_drill">${viewInput}<input type="hidden" name="drill" value="${esc(pd.name)}"><button type="submit" class="td-pickchip${isOn ? ' on' : ''}">${esc(pd.name)}</button></form>`;
     }).join('') || '<span class="td-hint">No drills in your program yet.</span>'}</div>
-    <form method="post" action="/program/today-drills" class="td-customadd"><input type="hidden" name="op" value="add_drill"><input type="text" name="name" placeholder="+ Add your own drill" maxlength="120" autocomplete="off"><button type="submit">Add</button></form>`;
+    <form method="post" action="/program/today-drills" class="td-customadd"><input type="hidden" name="op" value="add_drill">${viewInput}<input type="text" name="name" placeholder="+ Add your own drill" maxlength="120" autocomplete="off"><button type="submit">Add</button></form>`;
   // Picked drill rows: name + volume + video, "did it on" tag chips,
   // custom "did it on" input, check-off.
   const drillRowsHtml = drillPicks.map((d) => {
@@ -3462,19 +3471,19 @@ function todayProgramPage(user, p, opts) {
     const onChips = allOn.map((e) => {
       const en = String(e);
       const isOn = onEnvs.some((x) => String(x).toLowerCase() === en.toLowerCase());
-      return `<form method="post" action="/program/today-drills" class="td-chipform"><input type="hidden" name="op" value="toggle_on"><input type="hidden" name="drill" value="${esc(dname)}"><input type="hidden" name="env" value="${esc(en)}"><button type="submit" class="td-onchip${isOn ? ' on' : ''}">${esc(en)}</button></form>`;
+      return `<form method="post" action="/program/today-drills" class="td-chipform"><input type="hidden" name="op" value="toggle_on">${viewInput}<input type="hidden" name="drill" value="${esc(dname)}"><input type="hidden" name="env" value="${esc(en)}"><button type="submit" class="td-onchip${isOn ? ' on' : ''}">${esc(en)}</button></form>`;
     }).join('');
     const onTags = onEnvs.length ? `<span class="td-ontags">${onEnvs.map((e) => esc(String(e))).join(' · ')}</span>` : '';
     return `<div class="td-drow${done ? ' done' : ''}" data-td-row>
       <div class="td-drow-top">
-        <form method="post" action="/program/check" class="td-checkform"><input type="hidden" name="kind" value="hit"><input type="hidden" name="sub" value="today"><input type="hidden" name="day" value="${esc(todayLabel)}"><input type="hidden" name="item_key" value="${esc(key)}"><button type="submit" class="td-checkbtn" aria-label="${done ? 'Mark not done' : 'Mark done'}">${done ? '☑' : '☐'}</button></form>
+        <form method="post" action="/program/check" class="td-checkform"><input type="hidden" name="kind" value="hit"><input type="hidden" name="sub" value="today">${viewInput}<input type="hidden" name="day" value="${esc(todayLabel)}"><input type="hidden" name="item_key" value="${esc(key)}"><button type="submit" class="td-checkbtn" aria-label="${done ? 'Mark not done' : 'Mark done'}">${done ? '☑' : '☐'}</button></form>
         <span class="td-drow-main"><span class="td-rowname">${esc(dname)}${d.custom ? ' <span class="td-custombadge">custom</span>' : ''}</span>${info.volume ? `<span class="td-vol">${esc(info.volume)}</span>` : ''}${onTags}</span>
         ${info.video ? watchLink(info.video) : ''}
-        <form method="post" action="/program/today-drills" class="td-chipform"><input type="hidden" name="op" value="remove_drill"><input type="hidden" name="drill" value="${esc(dname)}"><button type="submit" class="td-rm" aria-label="Remove drill">×</button></form>
+        <form method="post" action="/program/today-drills" class="td-chipform"><input type="hidden" name="op" value="remove_drill">${viewInput}<input type="hidden" name="drill" value="${esc(dname)}"><button type="submit" class="td-rm" aria-label="Remove drill">×</button></form>
       </div>
       <span class="td-onlabel">Did it on:</span>
       <div class="td-onchips">${onChips}</div>
-      <form method="post" action="/program/today-drills" class="td-customadd td-customadd-sm"><input type="hidden" name="op" value="add_on"><input type="hidden" name="drill" value="${esc(dname)}"><input type="text" name="env" placeholder="+ Custom setup" maxlength="60" autocomplete="off"><button type="submit">Add</button></form>
+      <form method="post" action="/program/today-drills" class="td-customadd td-customadd-sm"><input type="hidden" name="op" value="add_on">${viewInput}<input type="hidden" name="drill" value="${esc(dname)}"><input type="text" name="env" placeholder="+ Custom setup" maxlength="60" autocomplete="off"><button type="submit">Add</button></form>
     </div>`;
   }).join('');
   // ---- Training Environments (Oct 2026, Bobby) ----
@@ -3485,15 +3494,15 @@ function todayProgramPage(user, p, opts) {
   const trainEnvChips = prescribedEnvs.map((e) => {
     const k = ((e.id ? 'id:' + e.id : 'nm:' + e.name) || '').toLowerCase();
     const isOn = trainEnvSelected.has(k);
-    return `<form method="post" action="/program/today-train-envs" class="td-chipform"><input type="hidden" name="op" value="toggle"><input type="hidden" name="id" value="${esc(e.id || '')}"><input type="hidden" name="name" value="${esc(e.name)}"><button type="submit" class="td-pickchip${isOn ? ' on' : ''}">${esc(e.name)}</button></form>`;
+    return `<form method="post" action="/program/today-train-envs" class="td-chipform"><input type="hidden" name="op" value="toggle">${viewInput}<input type="hidden" name="id" value="${esc(e.id || '')}"><input type="hidden" name="name" value="${esc(e.name)}"><button type="submit" class="td-pickchip${isOn ? ' on' : ''}">${esc(e.name)}</button></form>`;
   }).join('');
   const trainEnvCustomChips = trainEnvPicks.filter((e) => e.custom && !prescribedEnvs.some((p) => p.name.toLowerCase() === String(e.name).toLowerCase())).map((e) => {
-    return `<form method="post" action="/program/today-train-envs" class="td-chipform"><input type="hidden" name="op" value="toggle"><input type="hidden" name="name" value="${esc(e.name)}"><button type="submit" class="td-pickchip on">${esc(e.name)} <span class="td-custombadge">custom</span></button></form>`;
+    return `<form method="post" action="/program/today-train-envs" class="td-chipform"><input type="hidden" name="op" value="toggle">${viewInput}<input type="hidden" name="name" value="${esc(e.name)}"><button type="submit" class="td-pickchip on">${esc(e.name)} <span class="td-custombadge">custom</span></button></form>`;
   }).join('');
   const trainEnvHtml = `<div class="td-subhead">Training Environments</div>
     <p class="td-envnote">The challenge setup for today — which one(s) did you train in?</p>
     <div class="td-pickchips">${trainEnvChips}${trainEnvCustomChips || ''}</div>
-    <form method="post" action="/program/today-train-envs" class="td-customadd"><input type="hidden" name="op" value="add_custom"><input type="text" name="name" placeholder="+ Add your own environment" maxlength="120" autocomplete="off"><button type="submit">Add</button></form>`;
+    <form method="post" action="/program/today-train-envs" class="td-customadd"><input type="hidden" name="op" value="add_custom">${viewInput}<input type="text" name="name" placeholder="+ Add your own environment" maxlength="120" autocomplete="off"><button type="submit">Add</button></form>`;
   // Each Hitting sub-section renders only with content (blank = hidden).
   const hittingHtml = (prepHtml ? `<div class="td-subhead">Prep</div>${prepHtml}` : '')
     + drillPickerHtml
@@ -3556,17 +3565,49 @@ function todayProgramPage(user, p, opts) {
     // med ball work, so it follows the Lifting pick; otherwise it follows
     // the Med Ball pick. (Lifters have no standalone Med Ball tab.)
     const showMed = curDay ? showSec('lifting') : showSec('medball');
-    content = (showSec('movement') ? sectionHtml(`${esc(secLabels.movement)} · Warm-up`, movementHtml) : '')
-      + (showSec('hitting') ? sectionHtml(esc(secLabels.hitting), hittingHtml) : '')
-      + (showMed ? sectionHtml(esc(secLabels.medball), medHtml) : '')
-      // Blank sections never render: no lifting day means no Lifting
-      // section at all (Bobby, Oct 2026) — no empty header, no blank card.
-      + ((curDay && showSec('lifting')) ? sectionHtml(`${esc(secLabels.lifting)} · ${esc(liftDayLabel)}`, liftHtml) : '');
-    if (picks) {
-      content = `<p class="td-hint" style="margin:10px 0 0">Showing your picked workout — change it on the <a href="/program" style="color:#fff">Program</a> tab.</p>` + content;
+    // View switcher (Oct 2026, Bobby): Hitting / Lifting / Movement as
+    // clearly separate views — each section feels like its own part, never
+    // blended. Hitting is first/default (Bobby, Oct 19 2026). Only the active
+    // view renders; the hitter checks off work in whichever view chosen.
+    const viewTabs = [
+      { id: 'hitting', label: secLabels.hitting },
+      { id: 'lifting', label: secLabels.lifting },
+      { id: 'movement', label: secLabels.movement },
+    ];
+    const switcherHtml = `<div class="td-viewswitch" role="tablist" aria-label="Today views">${viewTabs.map((v) =>
+      `<a href="/program/today${v.id === 'hitting' ? '' : `?view=${v.id}`}" role="tab" aria-selected="${view === v.id ? 'true' : 'false'}" class="td-viewtab${view === v.id ? ' on' : ''}">${esc(v.label)}</a>`
+    ).join('')}</div>`;
+    const notPickedHtml = (label) => `<div class="td-card"><p style="margin:0"><strong>${esc(label)} isn't in today's picks.</strong></p><p class="td-hint" style="margin:6px 0 0">Add it on the <a href="/program" style="color:#fff">Program</a> tab, or pick another view above.</p></div>`;
+    const viewEmptyHtml = (label) => `<div class="td-card"><p style="margin:0"><strong>No ${esc(String(label).toLowerCase())} work scheduled today.</strong></p><p class="td-hint" style="margin:6px 0 0">Try another view above.</p></div>`;
+    // Each view gets its own clear header so the sections stay visually
+    // separate (Bobby, Oct 2026).
+    const viewHeadHtml = (label, sub) => `<div class="td-viewhead"><h2 class="td-viewtitle">${esc(label)}</h2>${sub ? `<p class="td-viewsub">${esc(sub)}</p>` : ''}</div>`;
+    let viewContent = '';
+    if (view === 'lifting') {
+      // Lifting view: med ball + speed + lifts.
+      const liftViewHtml = (showMed && medHtml ? sectionHtml(esc(secLabels.medball), medHtml) : '')
+        // Blank sections never render: no lifting day means no Lifting
+        // section at all (Bobby, Oct 2026) — no empty header, no blank card.
+        + ((curDay && showSec('lifting')) ? sectionHtml(`${esc(secLabels.lifting)} · ${esc(liftDayLabel)}`, liftHtml) : '');
+      viewContent = (!showSec('lifting') && !(showMed && medHtml)) ? notPickedHtml(secLabels.lifting)
+        : liftViewHtml ? viewHeadHtml(secLabels.lifting, liftDayLabel || 'Strength, power & speed') + liftViewHtml
+        : viewEmptyHtml(secLabels.lifting);
+    } else if (view === 'movement') {
+      viewContent = !showSec('movement') ? notPickedHtml(secLabels.movement)
+        : movementHtml ? viewHeadHtml(secLabels.movement, 'Warm-up') + sectionHtml(`${esc(secLabels.movement)} · Warm-up`, movementHtml)
+        : viewEmptyHtml(secLabels.movement);
+    } else {
+      viewContent = !showSec('hitting') ? notPickedHtml(secLabels.hitting)
+        : hittingHtml ? viewHeadHtml(secLabels.hitting, 'Drills & training environments') + sectionHtml(esc(secLabels.hitting), hittingHtml)
+        : viewEmptyHtml(secLabels.hitting);
     }
-    if (!totalItems) {
-      content = `<div class="td-card"><p style="margin:0"><strong>No program yet.</strong></p><p class="td-hint" style="margin:6px 0 0">Nothing scheduled for today. Your coach will add your program here.</p></div>`;
+    content = switcherHtml + viewContent;
+    if (picks) {
+      content += `<p class="td-hint" style="margin:10px 0 0">Showing your picked workout — change it on the <a href="/program" style="color:#fff">Program</a> tab.</p>`;
+    }
+    // Truly nothing scheduled anywhere: none of the views have content.
+    if (!movementHtml && !hittingHtml && !medHtml && !liftHtml) {
+      content = switcherHtml + `<div class="td-card"><p style="margin:0"><strong>No program yet.</strong></p><p class="td-hint" style="margin:6px 0 0">Nothing scheduled for today. Your coach will add your program here.</p></div>`;
     }
   }
   const pct = totalItems ? Math.round((doneItems / totalItems) * 100) : 0;
@@ -3638,6 +3679,12 @@ function todayProgramPage(user, p, opts) {
 .td-onchip{border:1px solid #333;border-radius:16px;padding:6px 12px;font-size:12px;font-weight:600;background:#111;color:#fff;cursor:pointer}
 .td-onchip.on{background:#fff;color:#000;border-color:#fff}
 .td-rm{background:none;border:none;color:#666;font-size:20px;line-height:1;padding:4px;cursor:pointer}
+.td-viewswitch{display:flex;gap:8px;margin:14px 0 4px}
+.td-viewtab{flex:1;text-align:center;text-decoration:none;font-size:14px;font-weight:800;letter-spacing:.5px;color:#999;background:#111;border:1px solid #2a2a2a;border-radius:12px;padding:12px 8px}
+.td-viewtab.on{color:#fff;background:#1c1c1c;border-color:#fff}
+.td-viewhead{margin:18px 0 2px;padding-bottom:10px;border-bottom:2px solid #333}
+.td-viewtitle{font-size:22px;font-weight:800;margin:0;letter-spacing:.5px}
+.td-viewsub{font-size:12px;color:#888;margin:4px 0 0}
 </style>
 ${ucTop}
 <h1 class="td-h1">Today</h1>
