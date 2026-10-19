@@ -3932,64 +3932,16 @@ function programPage(user, p, opts) {
         : '')}`;
   } else if (sub === 'lifting' && lifting) {
     const days = (Array.isArray(lifting.days) ? lifting.days : []).filter((d) => realExercises(d.exercises).length);
-    // Different Animal v4 (Sep 2026): 1. SPEED → 2. POWER (jumps + med ball) →
-    // 3. STRENGTH → 4. ROTATIONAL → 5. BRAKES. No standalone Metabolic tab —
-    // speed lives here; legacy 'Metabolic' blocks fold into Speed.
     // ldayIdx is -1 on Recovery / Mobility / OFF days (real seven-day
     // calendar, Sep 23 2026) - rest, not a lift.
     const lday = Number.isFinite(Number(o.ldayIdx)) ? Number(o.ldayIdx) : 0;
     const isRestDay = lday < 0;
     const effLday = isRestDay ? -1 : lday;
-    const ldayExtra = `<input type=\"hidden\" name=\"lday\" value=\"${effLday}\">`;
-    const curDay = effLday >= 0 ? days[effLday] || {} : {};
     const phaseBanner = (Array.isArray(lifting.notes) && lifting.notes.length)
       ? `<div class=\"card phase-banner\">${lifting.notes
           .filter((n) => !/test\/retest/i.test(String(n || '')))
           .map((n) => `<p>${esc(n)}</p>`).join('')}</div>`
       : '';
-    const daySpeedAll = Array.isArray(curDay.speed) ? curDay.speed.filter((s) => String(s && s.name || '').trim()) : [];
-    // Held items never render as work — the athlete sees a placeholder.
-    const daySpeed = daySpeedAll.filter((s) => !s.held);
-    const heldSpeed = daySpeedAll.filter((s) => s.held);
-    const heldHtml = (held) => held.length
-      ? held.map(() => `<div class="card lift-held"><p style="margin:0"><strong>Your coach is picking the right exercise for this spot.</strong></p><p class="hint-inline" style="margin:4px 0 0">Check back soon — it will appear here when it's ready.</p></div>`).join('')
-      : '';
-    // Different Animal bans metabolic circuits (Sep 23 2026, Bobby's video):
-    // the Speed section shows ONLY the lifting program's speed work. The old
-    // routine 'metabolic' blocks are never rendered here.
-    const speedHtml = (daySpeed.length || heldSpeed.length)
-      ? `<h3 class=\"prog-h3\"><span class=\"flow-num\">1</span> ⚡ Speed — sprints first</h3>\n` +
-        (daySpeed.length
-          ? `<div class=\"card routine-group\">${daySpeed.map((s) =>
-              `<div class=\"spd-row\">` +
-              checkRow('spd', `spd::::${curDay.label || ''}::${s.name}`, s.name,
-                [s.volume, s.notes].filter(Boolean).join(' — '), null, ldayExtra, intentBadgeHtml(s.intent)) +
-              liftVideoHtml(s.video, watchLink) + `</div>`
-            ).join('')}</div>`
-          : '') +
-        heldHtml(heldSpeed)
-      : '';
-    // Lifting-day power work is ONLY the program's medball work (Sep 23 2026,
-    // Bobby's video): the old routine med-ball blocks are not rendered here.
-    // The v4 template's medball array is the source of truth.
-    const dayMedballAll = Array.isArray(curDay.medball) ? curDay.medball.filter((s) => String(s && s.name || '').trim()) : [];
-    const dayMedball = dayMedballAll.filter((s) => !s.held);
-    const heldMedball = dayMedballAll.filter((s) => s.held);
-    const medHtml = (dayMedball.length || heldMedball.length)
-      ? `<h3 class=\"prog-h3\"><span class=\"flow-num\">2</span> 💥 Power — jumps & med ball</h3>\n` +
-        (dayMedball.length
-          ? `<div class=\"card routine-group\">${dayMedball.map((s) =>
-              `<div class=\"spd-row\">` +
-              medSetLogger(`med::::${curDay.label || ''}::${s.name}`, s.name,
-                [s.volume, s.notes].filter(Boolean).join(' — '), checkoffs, 'lifting', '', liftVideoHtml(s.video, watchLink), effLday) +
-              `</div>`
-            ).join('')}</div>`
-          : '') +
-        heldHtml(heldMedball)
-      : '';
-    // Section flow numbers continue after speed/power (liftSubTab renders
-    // Strength / Rotational / Brakes groups).
-    const secBase = (daySpeed.length || heldSpeed.length ? 1 : 0) + (dayMedball.length || heldMedball.length ? 1 : 0);
     const weekStripTop = liftWeekStrip(o.sched, o.weekday, days, effLday);
     if (isRestDay) {
       // Recovery / Mobility / OFF day on the real seven-day calendar:
@@ -4011,7 +3963,7 @@ function programPage(user, p, opts) {
         <span class="start-workout-text"><strong>Start Workout</strong>
         <span>Pick your day, then walk through it — video + logging as you go</span></span></a>`;
       // Bobby (Oct 19 2026): mobility lives in Movement only — never in Lifting.
-      content = `${topStartBtn}${phaseBanner}${speedHtml}${medHtml}${liftSubTab(user, lifting, days, effLday, sub, checkoffs, today, o.liftData || {}, o.subs || {}, secBase, o.todayLdayIdx, o.sched, o.weekday)}${YT_TOGGLE_SCRIPT}`;
+      content = `${topStartBtn}${phaseBanner}${liftSubTab(user, lifting, days, sub, checkoffs, o.liftData || {}, o.subs || {}, checkRow, watchLink)}${YT_TOGGLE_SCRIPT}`;
     }
   } else {
     // HITTING (default): today's plan first — prep for the day + the day's
@@ -4416,17 +4368,13 @@ function startLiftButton(ldayIdx, doneEx, totalSets) {
     <span>${sub}</span></span></a>`;
 }
 
-function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftData, subs, secBase, todayLdayIdx, sched, weekday) {
-  const day = days[ldayIdx] || { label: '', exercises: [] };
-  const dayKey = String(day.label || '');
+// Bobby (Oct 19 2026): the Lifting tab shows the WHOLE lifting program
+// broken down by day — Day 1 (all its lifts in order), Day 2, ... No
+// strength / rotational / brakes category grouping. checkRow + watchLink
+// are caller-scope closures passed in for the per-day speed rows.
+function liftSubTab(user, lifting, days, sub, checkoffs, liftData, subs, checkRow, watchLink) {
   const subsMap = subs || {};
   const readOnly = !!(user && user.viewAs);
-  // Bobby (Sep 23 2026): the tab leads with today's lift. The week strip -
-  // the athlete's real seven-day calendar - is the day picker. No more
-  // "Other lifting days" disclosure.
-  const todayIdx = Number.isFinite(Number(todayLdayIdx)) ? Number(todayLdayIdx) : ldayIdx;
-  const isToday = ldayIdx === todayIdx;
-  const weekStrip = liftWeekStrip(sched, weekday, days, ldayIdx);
   const fmtDay = (d) => {
     try {
       const dt = new Date(d + 'T12:00:00');
@@ -4446,19 +4394,11 @@ function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftDat
       return Array.isArray(s) ? s : [];
     } catch (e) { return []; }
   };
-  const warmup = normWarmup(day.warmup);
-  const warmupHtml = warmup.length
-    ? `<details class="card warmup-block" open><summary class="routine-summary"><span class="routine-station">Warm-up — do this first</span></summary>
-      <ol class="warmup-list">${warmup.map((w) => `<li>${esc(w)}</li>`).join('')}</ol></details>`
+  // Held items never render as work — the athlete sees a placeholder.
+  const heldHtml = (held) => held.length
+    ? held.map(() => `<div class="card lift-held"><p style="margin:0"><strong>Your coach is picking the right exercise for this spot.</strong></p><p class="hint-inline" style="margin:4px 0 0">Check back soon — it will appear here when it's ready.</p></div>`).join('')
     : '';
-  const realEx = realExercises(day.exercises);
-  // Different Animal v4: exercises carry section ('strength' | 'rotational' |
-  // 'brakes') and intent ('max'). Group the day into its sections.
-  const secOf = (e) => {
-    const s = String((e && e.section) || 'strength').toLowerCase();
-    return s === 'rotational' || s === 'brakes' ? s : 'strength';
-  };
-  const exRow = (ex) => {
+  const exRow = (ex, dayKey, dayIdx) => {
       // Held for coach review (Sep 2026): the questionnaire flagged this
       // spot as unsafe and no clean substitute exists. The athlete never
       // sees the original exercise — just that their coach is on it.
@@ -4517,11 +4457,11 @@ function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftDat
         const v = i + 1;
         return `<option value="${v}"${row && String(row.rpe) === String(v) ? ' selected' : ''}>${v}</option>`;
       }).join('');
-      const subUrl = `/program/substitute?name=${encodeURIComponent(name)}&key=${encodeURIComponent(key)}&sub=lifting&lday=${ldayIdx}`;
+      const subUrl = `/program/substitute?name=${encodeURIComponent(name)}&key=${encodeURIComponent(key)}&sub=lifting&lday=${dayIdx}`;
       const subBadge = swapped
         ? `<span class="sub-badge">⇄ swapped from ${esc(name)}</span>
            ${readOnly ? '' : `<form method="post" action="/program/substitute/revert" class="inline-form" style="display:inline">
-             <input type="hidden" name="key" value="${esc(key)}"><input type="hidden" name="sub" value="lifting"><input type="hidden" name="lday" value="${ldayIdx}">
+             <input type="hidden" name="key" value="${esc(key)}"><input type="hidden" name="sub" value="lifting"><input type="hidden" name="lday" value="${dayIdx}">
              <button class="btn-small btn-quiet" type="submit">Revert</button>
            </form>`}`
         : (readOnly ? '' : `<a class="sub-link" href="${subUrl}">⇄ Substitute</a>`);
@@ -4537,7 +4477,7 @@ function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftDat
             : `<form method="post" action="/program/check" class="set-check-form">
                 <input type="hidden" name="kind" value="lift">
                 <input type="hidden" name="sub" value="lifting">
-                <input type="hidden" name="lday" value="${ldayIdx}">
+                <input type="hidden" name="lday" value="${dayIdx}">
                 <input type="hidden" name="item_key" value="${esc(key)}">
                 <input type="hidden" name="lift_op" value="${isDone ? 'unset' : 'set'}">
                 <input type="hidden" name="set_idx" value="${i}">
@@ -4570,7 +4510,7 @@ function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftDat
                   <form method="post" action="/program/check" class="set-form">
                     <input type="hidden" name="kind" value="lift">
                     <input type="hidden" name="sub" value="lifting">
-                    <input type="hidden" name="lday" value="${ldayIdx}">
+                    <input type="hidden" name="lday" value="${dayIdx}">
                     <input type="hidden" name="item_key" value="${esc(key)}">
                     <input type="hidden" name="lift_op" value="${isDone ? 'unset' : 'set'}">
                     <input type="hidden" name="set_idx" value="${i}">
@@ -4590,7 +4530,7 @@ function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftDat
         : `<form method="post" action="/program/check" class="inline-form set-add">
             <input type="hidden" name="kind" value="lift">
             <input type="hidden" name="sub" value="lifting">
-            <input type="hidden" name="lday" value="${ldayIdx}">
+            <input type="hidden" name="lday" value="${dayIdx}">
             <input type="hidden" name="item_key" value="${esc(key)}">
             <input type="hidden" name="lift_op" value="addset">
             <button type="submit" class="btn-small">+ Add set</button>
@@ -4600,7 +4540,7 @@ function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftDat
         : `<form method="post" action="/program/check" class="lift-rpe">
             <input type="hidden" name="kind" value="lift">
             <input type="hidden" name="sub" value="lifting">
-            <input type="hidden" name="lday" value="${ldayIdx}">
+            <input type="hidden" name="lday" value="${dayIdx}">
             <input type="hidden" name="item_key" value="${esc(key)}">
             <input type="hidden" name="lift_op" value="rpe">
             <select name="rpe" aria-label="Actual RPE 1 to 10"><option value="">RPE</option>${rpeOpts}</select>
@@ -4638,26 +4578,59 @@ function liftSubTab(user, lifting, days, ldayIdx, sub, checkoffs, today, liftDat
         </div>
       </details>`;
     };
-  const SEC_META = [
-    ['strength', '🏋️ Strength'],
-    ['rotational', '🔄 Rotational'],
-    ['brakes', '🛑 Brakes'],
-  ];
-  let secNum = Number(secBase) || 0;
-  const exRows = SEC_META.map(([secId, secLabel]) => {
-    const rows = realEx.filter((e) => secOf(e) === secId).map(exRow).join('');
-    if (!rows) return '';
-    secNum += 1;
-    return `<h3 class="prog-h3"><span class="flow-num">${secNum}</span> ${secLabel}</h3>\n` + rows;
-  }).join('');
-  const totalSets = realEx.length;
-  const doneEx = (exRows.match(/<details class="lift-ex done"/g) || []).length;
-  return `${weekStrip}
-    ${isToday ? '' : `<p><a href="/program?sub=lifting">← Back to today's lift</a></p>`}
-    <p class="wo-kicker">${isToday ? "Today's lift" : 'Lift day'} · ${esc(dayKey)}</p>
-    ${warmupHtml}
-    ${readOnly ? '<p class="hint">Preview — logging is disabled.</p>' : ''}
-    ${exRows || '<div class="card empty">No exercises on this day yet — your coach can add them.</div>'}`;
+  // One full lifting day: speed + power + every lift in programmed
+  // order. No strength / rotational / brakes grouping (Bobby, Oct 19 2026).
+  const daySection = (d, di) => {
+    const dayKey = String(d.label || '');
+    const ldayExtra = `<input type="hidden" name="lday" value="${di}">`;
+    const warmup = normWarmup(d.warmup);
+    const warmupHtml = warmup.length
+      ? `<details class="card warmup-block" open><summary class="routine-summary"><span class="routine-station">Warm-up — do this first</span></summary>
+        <ol class="warmup-list">${warmup.map((w) => `<li>${esc(w)}</li>`).join('')}</ol></details>`
+      : '';
+    const daySpeedAll = (Array.isArray(d.speed) ? d.speed : []).filter((s) => String(s && s.name || '').trim());
+    const daySpeed = daySpeedAll.filter((s) => !s.held);
+    const heldSpeed = daySpeedAll.filter((s) => s.held);
+    const speedHtml = (daySpeed.length || heldSpeed.length)
+      ? `<h3 class="prog-h3">⚡ Speed</h3>\n` +
+        (daySpeed.length
+          ? `<div class="card routine-group">${daySpeed.map((s) =>
+              `<div class="spd-row">` +
+              checkRow('spd', `spd::::${dayKey}::${s.name}`, s.name,
+                [s.volume, s.notes].filter(Boolean).join(' — '), null, ldayExtra, intentBadgeHtml(s.intent)) +
+              liftVideoHtml(s.video, watchLink) + `</div>`
+            ).join('')}</div>`
+          : '') +
+        heldHtml(heldSpeed)
+      : '';
+    const dayMedballAll = (Array.isArray(d.medball) ? d.medball : []).filter((s) => String(s && s.name || '').trim());
+    const dayMedball = dayMedballAll.filter((s) => !s.held);
+    const heldMedball = dayMedballAll.filter((s) => s.held);
+    const medHtml = (dayMedball.length || heldMedball.length)
+      ? `<h3 class="prog-h3">💥 Power — jumps & med ball</h3>\n` +
+        (dayMedball.length
+          ? `<div class="card routine-group">${dayMedball.map((s) =>
+              `<div class="spd-row">` +
+              medSetLogger(`med::::${dayKey}::${s.name}`, s.name,
+                [s.volume, s.notes].filter(Boolean).join(' — '), checkoffs, 'lifting', '', liftVideoHtml(s.video, watchLink), di) +
+              `</div>`
+            ).join('')}</div>`
+          : '') +
+        heldHtml(heldMedball)
+      : '';
+    const realEx = realExercises(d.exercises);
+    const liftRows = realEx.map((ex) => exRow(ex, dayKey, di)).join('');
+    return `<section class="prog-lift-day">\n` +
+      `<h2 class="prog-day-head">${esc(dayKey)}</h2>\n` +
+      `${readOnly ? '<p class="hint">Preview — logging is disabled.</p>' : ''}\n` +
+      `${warmupHtml}\n${speedHtml}\n${medHtml}\n` +
+      `${liftRows || '<div class="card empty">No exercises on this day yet — your coach can add them.</div>'}\n` +
+      `</section>`;
+  };
+
+  return days.length
+    ? days.map((d, di) => daySection(d, di)).join('\n')
+    : '<div class="card empty">No lifting days in this program yet.</div>';
 }
 
 // Coach: lifting programs overview — templates + per-athlete assignments.

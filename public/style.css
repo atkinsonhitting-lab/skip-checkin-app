@@ -684,6 +684,9 @@ a.wk-pill { font-weight: 800; }
 .streak-label { font-weight: 800; font-size: 15px; }
 .push-card { border-color: var(--red); }
 .prog-day-head { font-size: 18px; font-weight: 800; margin: 2px 0 10px; }
+/* Lifting tab: whole program broken down by day (Bobby, Oct 19 2026) */
+.prog-lift-day { margin: 0 0 26px; padding-top: 6px; border-top: 2px solid var(--line); }
+.prog-lift-day:first-of-type { border-top: none; padding-top: 0; }
 
 /* Bottom tab bar — primary nav (mobile). Hitters get the daily loop
    (Home, Check In, Notebook, Talk to Skip); coaches get their loop
