@@ -5181,16 +5181,37 @@ function setBobbyAthleteHittingDrills() {
     const want = ['Open 45', 'Step on the plate drill', 'Load then launch drill'];
     const cur = Array.isArray(p.prog.hitting_plan.drills) ? p.prog.hitting_plan.drills.map((d) => d && d.name) : [];
     const same = cur.length === want.length && want.every((n, i) => cur[i] === n);
-    if (same && p.prog.hitting_plan._custom) {
+    const routineHitDrills = (Array.isArray(p.prog.routine) ? p.prog.routine : [])
+      .filter((b) => b && b.category === 'Hitting Drills')
+      .flatMap((b) => Array.isArray(b.items) ? b.items : [])
+      .map((it) => it && it.drill);
+    const routineSame = routineHitDrills.length === want.length && want.every((n, i) => routineHitDrills[i] === n);
+    if (same && routineSame && p.prog.hitting_plan._custom) {
       console.log('setBobbyAthleteHittingDrills: already set (remote_program ' + p.id + ')');
       return;
     }
     p.prog.hitting_plan.drills = want.map((n) => ({ name: n, progression: '', why: '', setsReps: '' }));
     p.prog.hitting_plan._custom = true;
     p.prog.hitting_plan._v = HITTING_PLAN_VERSION;
+    // Bobby (Oct 19 2026): the Today view's drill picker reads drills from
+    // prog.routine blocks (NOT hitting_plan.drills), so mirror the three
+    // drills into routine as a flat "Hitting Drills" block. Flat = no day
+    // prefix, so it shows every day. Replace any existing hitting-drill
+    // blocks so the picker shows exactly these three.
+    const _isHitBlock = (cat) => {
+      const c = String(cat || '');
+      return !/daily routine/i.test(c) && !/mobility/i.test(c) && !/prep/i.test(c) && !/med\s*ball/i.test(c);
+    };
+    if (!Array.isArray(p.prog.routine)) p.prog.routine = [];
+    const _rbBefore = p.prog.routine.length;
+    p.prog.routine = p.prog.routine.filter((b) => !_isHitBlock(b && b.category));
+    p.prog.routine.push({
+      category: 'Hitting Drills',
+      items: want.map((n) => ({ drill: n, volume: '', video: '' })),
+    });
     db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?')
       .run(JSON.stringify(p.prog), new Date().toISOString(), p.id);
-    console.log('setBobbyAthleteHittingDrills: set 3 drills for athlete id ' + athlete.id + ' (remote_program ' + p.id + ')');
+    console.log('setBobbyAthleteHittingDrills: set 3 drills for athlete id ' + athlete.id + ' (remote_program ' + p.id + ', replaced ' + (_rbBefore - p.prog.routine.length + 1) + ' routine hitting blocks)');
   } catch (e) {
     console.log('setBobbyAthleteHittingDrills failed:', e.message);
   }
