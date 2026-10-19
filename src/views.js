@@ -3415,14 +3415,6 @@ function todayProgramPage(user, p, opts) {
   const prepHtml = prepBlocks.map((c) =>
     realItems(c.items).map((it) => checkRow('mob', `mob::${dayPrefix(c.category)}::${c.category}::${it.drill}`, it.drill, it.volume || '', it.video || '', '', it.tags)).join('')
   ).join('');
-  // Bobby (Oct 19 2026): Hitter's Prep — when the program has no Prep
-  // blocks of its own, show Bobby's default prep items (editable via chat)
-  // so the Prep section always appears on the Hitting view. Same check-off
-  // rows as everything else.
-  const prepDefaults = Array.isArray(o.hitterPrepDefaults) ? o.hitterPrepDefaults : [];
-  const prepDefaultHtml = (!prepHtml && prepDefaults.length)
-    ? prepDefaults.map((it) => checkRow('mob', `mob::prep-default::${it.name}`, it.name, it.volume || '', '', '')).join('')
-    : '';
   // ---- Today's drill picker (Oct 2026, Bobby) ----
   // The hitter picks which program drills they're doing today (+ custom
   // typed-in drills). Each picked drill gets tagged with what they did it
@@ -3503,7 +3495,7 @@ function todayProgramPage(user, p, opts) {
     <div class="td-pickchips">${trainEnvChips}${trainEnvCustomChips || ''}</div>
     <form method="post" action="/program/today-train-envs" class="td-customadd"><input type="hidden" name="op" value="add_custom"><input type="text" name="name" placeholder="+ Add your own environment" maxlength="120" autocomplete="off"><button type="submit">Add</button></form>`;
   // Each Hitting sub-section renders only with content (blank = hidden).
-  const hittingHtml = (prepHtml || prepDefaultHtml ? `<div class="td-subhead">Prep</div>${prepHtml}${prepDefaultHtml}` : '')
+  const hittingHtml = (prepHtml ? `<div class="td-subhead">Prep</div>${prepHtml}` : '')
     + drillPickerHtml
     + (drillRowsHtml ? `<div class="td-subhead">Check Off</div>${drillRowsHtml}` : '')
     + trainEnvHtml;
@@ -7043,6 +7035,14 @@ function hittingPlanPage(user, p, opts) {
     .map((it) => ({ name: it.drill || it.name || '', detail: it.volume || '' }))
     .filter((w) => String(w.name || '').trim());
   const allPrep = [...warmupItems, ...routinePrepItems];
+  // Bobby (Oct 19 2026): Hitter's Prep — default warm-up items (Bobby
+  // customizes via chat, data/hitter_prep_defaults.json) shown at the top
+  // of the Hitting program when the program has no prep of its own.
+  if (!allPrep.length && Array.isArray(o.hitterPrepDefaults)) {
+    for (const d of o.hitterPrepDefaults) {
+      if (d && String(d.name || '').trim()) allPrep.push({ name: d.name, detail: d.volume || '' });
+    }
+  }
   const prepHtml = allPrep.length
     ? `<h2 class="doc-sec">Prep</h2>
        <ul class="std-list">${allPrep.map((w) => {

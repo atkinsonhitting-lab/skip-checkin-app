@@ -2586,7 +2586,6 @@ app.get('/program/today', requireLogin, requireWaiver, (req, res) => {
     trainEnvPicks: drillPicks.trainEnvs,
     prescribedEnvs: prescribedTrainEnvs(p.prog),
     didOnEnvs: DID_ON_ENVS,
-    hitterPrepDefaults: HITTER_PREP_DEFAULTS,
   }));
 });
 
@@ -2837,6 +2836,7 @@ app.get('/program/hitting-plan', requireLogin, requireWaiver, (req, res) => {
   res.send(views.hittingPlanPage(req.user, p, {
     tabs, sub: 'hitting',
     picks: getTodayPicks(req.user.id, today), pickBack: req.originalUrl,
+    hitterPrepDefaults: HITTER_PREP_DEFAULTS,
   }));
 });
 
@@ -2852,7 +2852,7 @@ app.get('/program/lifting', requireLogin, requireWaiver, (req, res) => {
   const tabs = programSectionTabs(p, lifting);
   if (!lifting) {
     const _t = chiToday();
-    return res.send(views.hittingPlanPage(req.user, p, { tabs, picks: getTodayPicks(req.user.id, _t), pickBack: req.originalUrl }));
+    return res.send(views.hittingPlanPage(req.user, p, { tabs, picks: getTodayPicks(req.user.id, _t), pickBack: req.originalUrl, hitterPrepDefaults: HITTER_PREP_DEFAULTS }));
   } // No lifting? Show hitting doc
   // Render the lifting section using the existing programPage view.
   // The section tab bar at the top links the sections together.
@@ -4436,6 +4436,7 @@ app.get('/coach/program/:id/doc', requireCoach, (req, res) => {
       tabs,
       layoutTabs: views.coachTabs('home', req.user.approvalCount, req.user),
       coachBar: views.coachDocBar(p, canEdit),
+      hitterPrepDefaults: HITTER_PREP_DEFAULTS,
     })
   );
 });
