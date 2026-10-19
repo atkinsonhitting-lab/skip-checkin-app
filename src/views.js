@@ -3566,16 +3566,16 @@ function todayProgramPage(user, p, opts) {
     + (drillRowsHtml ? `<div class="td-subhead">Check Off</div>${drillRowsHtml}` : '')
     + trainEnvHtml;
 
-  // Bobby (Oct 19 2026): the Today Lifting view shows ONLY the Begin Workout
+  // Bobby (Oct 19 2026): the Today Lifting view shows ONLY the Start Workout
   // button — med ball, speed, and lifts all run through the guided flow, so
   // no check-off lists render here.
 
-  // Bobby (Oct 19 2026): the Today Lifting view shows ONLY the Begin Workout
+  // Bobby (Oct 19 2026): the Today Lifting view shows ONLY the Start Workout
   // button — no exercise list. The guided flow (Speed → Med Ball → Lifts)
   // handles the whole day.
   const todayStartBtn = `<a class="start-workout" href="/program/workout">
     <span class="start-workout-play">▶</span>
-    <span class="start-workout-text"><strong>Begin Workout</strong>
+    <span class="start-workout-text"><strong>Start Workout</strong>
     <span>Pick your day, then walk through it — log as you go</span></span></a>`;
   const liftHtml = curDay ? todayStartBtn : '';
 
@@ -3613,7 +3613,7 @@ function todayProgramPage(user, p, opts) {
     const viewHeadHtml = (label, sub) => `<div class="td-viewhead"><h2 class="td-viewtitle">${esc(label)}</h2>${sub ? `<p class="td-viewsub">${esc(sub)}</p>` : ''}</div>`;
     let viewContent = '';
     if (view === 'lifting') {
-      // Bobby (Oct 19 2026): Today Lifting view shows ONLY the Begin Workout
+      // Bobby (Oct 19 2026): Today Lifting view shows ONLY the Start Workout
       // button — no exercise list, no med ball section. The guided flow
       // handles the whole day.
       viewContent = curDay
@@ -3636,7 +3636,7 @@ function todayProgramPage(user, p, opts) {
     }
     content = switcherHtml + viewContent;
     // Truly nothing scheduled anywhere: none of the views have content.
-    // (Bobby Oct 19 2026: the lifting view is just the Begin Workout button,
+    // (Bobby Oct 19 2026: the lifting view is just the Start Workout button,
     // so curDay stands in for lifting content here.)
     if (!movementHtml && !hittingHtml && !curDay) {
       content = switcherHtml + `<div class="td-card"><p style="margin:0"><strong>No program yet.</strong></p><p class="td-hint" style="margin:6px 0 0">Nothing scheduled for today. Your coach will add your program here.</p></div>`;
@@ -3964,11 +3964,11 @@ function programPage(user, p, opts) {
           : '<strong>OFF day</strong> — no lifting today. True rest.';
       content = `${weekStripTop}<div class="card"><p style="margin:0">${restCopy}</p></div>${YT_TOGGLE_SCRIPT}`;
     } else {
-      // Bobby (Oct 19 2026): Begin Workout → day picker (free choice of
+      // Bobby (Oct 19 2026): Start Workout → day picker (free choice of
       // Day 1/2/3/4, no schedule). Always show when there's a lifting day.
       const topStartBtn = `<a class="start-workout" href="/program/workout">
         <span class="start-workout-play">▶</span>
-        <span class="start-workout-text"><strong>Begin Workout</strong>
+        <span class="start-workout-text"><strong>Start Workout</strong>
         <span>Pick your day, then walk through it — video + logging as you go</span></span></a>`;
       // Bobby (Oct 19 2026): mobility lives in Movement only — never in Lifting.
       content = `${topStartBtn}${phaseBanner}${liftSubTab(user, lifting, days, sub, checkoffs, o.liftData || {}, o.subs || {}, checkRow, watchLink)}${YT_TOGGLE_SCRIPT}`;
@@ -4023,7 +4023,6 @@ function programPage(user, p, opts) {
     tabs: userTabs('program', user),
     body: `${ucHero('Train uncommon.')}
     <h1 class="page-title">Your Program</h1>
-    <p><a href="/program/hitting-plan" class="btn" style="display:inline-block;text-decoration:none">📄 Hitting Plan</a></p>
     ${meta ? `<p class="lede">${meta}</p>` : ''}
     ${tabHtml}
     ${weekStrip()}
@@ -4053,7 +4052,7 @@ function programPage(user, p, opts) {
 // /workout.js renders and runs the session.
 // ---- Bobby's personal lifting (Oct 2026) ----
 // Day view for /coach/my-lifting: the 4 Phase 1 days, today's day
-// highlighted, each with a Begin Workout button into the guided flow.
+// highlighted, each with a Start Workout button into the guided flow.
 function myLiftingPage(user, lifting, o) {
   const days = (o && Array.isArray(o.days) ? o.days : []);
   const dayIdx = o && typeof o.dayIdx === 'number' ? o.dayIdx : -1;
@@ -4189,7 +4188,7 @@ function workoutPage(user, program, wd, ldayIdx, preview, phaseNotes, opts) {
 }
 
 // ---- Workout day picker (Oct 19 2026, Bobby) ----
-// Begin Workout → the hitter picks which day of the lifting program to run.
+// Start Workout → the hitter picks which day of the lifting program to run.
 // No schedule: free choice, Day 1/2/3/4 any day. No weekday hints, no
 // "today's day" suggestion — the hitter decides.
 function workoutDayPicker(user, lifting, o) {
@@ -4204,7 +4203,7 @@ function workoutDayPicker(user, lifting, o) {
       `<span class="wo-daycard-label">${esc(label)}</span>` +
       `<span class="hint-inline">${exs.length} exercise${exs.length === 1 ? '' : 's'}</span>` +
       (preview ? `<span class="wo-daycard-exs">${esc(preview)}${exs.length > 3 ? ' · …' : ''}</span>` : '') +
-      `<span class="wo-daycard-go">Begin →</span></a>`;
+      `<span class="wo-daycard-go">Start →</span></a>`;
   }).join('');
   return layout({
     title: 'Pick your day',
@@ -4357,7 +4356,7 @@ function liftWeekStrip(sched, weekday, days, ldayIdx) {
   return `<div class="wk-strip">${pills}</div>`;
 }
 
-// Begin Workout button (Oct 19 2026, Bobby: Begin Workout → day picker,
+// Start Workout button (Oct 19 2026, Bobby: Start Workout → day picker,
 // free choice of Day 1/2/3/4). Lives at the very top of the lifting tab.
 // Visible to coaches in view-as too so Bobby can test the flow; the workout
 // page renders in preview mode for them.
@@ -4367,7 +4366,7 @@ function startLiftButton(ldayIdx, doneEx, totalSets) {
     : 'Pick your day — video + logging as you go';
   return `<a class="start-workout" href="/program/workout">
     <span class="start-workout-play">▶</span>
-    <span class="start-workout-text"><strong>Begin Workout</strong>
+    <span class="start-workout-text"><strong>Start Workout</strong>
     <span>${sub}</span></span></a>`;
 }
 
