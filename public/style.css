@@ -1310,10 +1310,14 @@ main.wrap { animation: pageIn 0.18s ease-out; }
 .wo-bigbtn:active { transform: scale(.98); }
 .wo-bigbtn.done { background: var(--ok); }
 .wo-nav {
-  position: fixed; bottom: 0; left: 0; right: 0; z-index: 20;
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 60;
   display: flex; gap: 10px; padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
   background: rgba(10,10,11,.96); backdrop-filter: blur(8px); border-top: 1px solid var(--line);
 }
+/* Workout flow: the guided Prev/Next nav sits above the app tab bar
+   (Oct 19 2026, Bobby — tab bar was covering the workout nav). */
+body:has(.wo) #tabbar { display: none; }
+body:has(.wo) .wrap { padding-bottom: 0; }
 .wo-navbtn {
   flex: 1; min-height: 52px; border-radius: 12px; border: 1px solid var(--line);
   background: #1c1c1f; color: var(--text); font-size: 16px; font-weight: 700; cursor: pointer;
