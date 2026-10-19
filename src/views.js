@@ -3415,25 +3415,90 @@ function todayProgramPage(user, p, opts) {
   const prepHtml = prepBlocks.map((c) =>
     realItems(c.items).map((it) => checkRow('mob', `mob::${dayPrefix(c.category)}::${c.category}::${it.drill}`, it.drill, it.volume || '', it.video || '', '', it.tags)).join('')
   ).join('');
-  const drillsHtml = hittingEnvBlocks.map((c) =>
-    realItems(c.items).map((it) => checkRow('hit', `hit::${dayPrefix(c.category)}::${c.category}::${it.drill}`, it.drill, it.volume || '', it.video || '', '', it.tags)).join('')
-  ).join('');
-  // Environments for the day: the environments the day's hitting blocks
-  // run in (block-category suffixes), deduped in first-seen order.
-  // Conditions, never drills — no check-offs. No environment info for
-  // the day means no Environments sub-section at all.
-  const envNames = [];
-  for (const c of hittingEnvBlocks) {
-    const env = progBlockEnvironment(c.category);
-    if (env && !envNames.some((e) => e.toLowerCase() === env.toLowerCase())) envNames.push(env);
+  // ---- Today's drill picker (Oct 2026, Bobby) ----
+  // The hitter picks which program drills they're doing today (+ custom
+  // typed-in drills). Each picked drill gets tagged with what they did it
+  // on (Tee/Side toss/Front toss/Darts/BP/Machine + custom) and checked
+  // off — logged via /program/check like every other row.
+  const drillPicks = Array.isArray(o.drillPicks) ? o.drillPicks : [];
+  const trainEnvPicks = Array.isArray(o.trainEnvPicks) ? o.trainEnvPicks : [];
+  const prescribedEnvs = Array.isArray(o.prescribedEnvs) ? o.prescribedEnvs : [];
+  const didOnEnvs = (Array.isArray(o.didOnEnvs) && o.didOnEnvs.length ? o.didOnEnvs : ['Tee', 'Side toss', 'Front toss', 'Darts', 'BP', 'Machine']);
+  // All program drills for today, deduped by name (first-seen wins).
+  const progDrills = [];
+  {
+    const seenDr = new Set();
+    for (const c of hittingEnvBlocks) {
+      for (const it of realItems(c.items)) {
+        const nm = String(it.drill || '').trim();
+        const k = nm.toLowerCase();
+        if (!nm || seenDr.has(k)) continue;
+        seenDr.add(k);
+        progDrills.push({ name: nm, volume: it.volume || '', video: it.video || '' });
+      }
+    }
   }
-  const envHtml = envNames.length
-    ? `<div class="td-subhead">Environments for the day</div><p class="td-envnote">Conditions, not drills — run your drills in these environments.</p><div class="td-envchips">${envNames.map((e) => `<span class="td-envchip">${esc(e)}</span>`).join('')}</div>`
-    : '';
+  const pickedSet = new Set(drillPicks.map((d) => String(d.name || '').toLowerCase()));
+  const drillPickerHtml = `<div class="td-subhead">Today's Drills</div>
+    <p class="td-envnote">Pick the drills you're doing today.</p>
+    <div class="td-pickchips">${progDrills.map((pd) => {
+      const isOn = pickedSet.has(pd.name.toLowerCase());
+      return `<form method="post" action="/program/today-drills" class="td-chipform"><input type="hidden" name="op" value="toggle_drill"><input type="hidden" name="drill" value="${esc(pd.name)}"><button type="submit" class="td-pickchip${isOn ? ' on' : ''}">${esc(pd.name)}</button></form>`;
+    }).join('') || '<span class="td-hint">No drills in your program yet.</span>'}</div>
+    <form method="post" action="/program/today-drills" class="td-customadd"><input type="hidden" name="op" value="add_drill"><input type="text" name="name" placeholder="+ Add your own drill" maxlength="120" autocomplete="off"><button type="submit">Add</button></form>`;
+  // Picked drill rows: name + volume + video, "did it on" tag chips,
+  // custom "did it on" input, check-off.
+  const drillRowsHtml = drillPicks.map((d) => {
+    const dname = String(d.name || '');
+    const info = progDrills.find((pd) => pd.name.toLowerCase() === dname.toLowerCase()) || {};
+    const onEnvs = Array.isArray(d.on) ? d.on : [];
+    const customOn = Array.isArray(d.customOn) ? d.customOn : [];
+    const allOn = didOnEnvs.concat(customOn.filter((c) => !didOnEnvs.some((e) => e.toLowerCase() === String(c).toLowerCase())));
+    const envKey = onEnvs.join('+');
+    const key = (d.custom ? `hit::td::c::${dname}` : `hit::td::${dname}`) + `::on::${envKey}`;
+    const done = !!checkoffs[key];
+    totalItems += 1;
+    if (done) doneItems += 1;
+    const onChips = allOn.map((e) => {
+      const en = String(e);
+      const isOn = onEnvs.some((x) => String(x).toLowerCase() === en.toLowerCase());
+      return `<form method="post" action="/program/today-drills" class="td-chipform"><input type="hidden" name="op" value="toggle_on"><input type="hidden" name="drill" value="${esc(dname)}"><input type="hidden" name="env" value="${esc(en)}"><button type="submit" class="td-onchip${isOn ? ' on' : ''}">${esc(en)}</button></form>`;
+    }).join('');
+    const onTags = onEnvs.length ? `<span class="td-ontags">${onEnvs.map((e) => esc(String(e))).join(' · ')}</span>` : '';
+    return `<div class="td-drow${done ? ' done' : ''}" data-td-row>
+      <div class="td-drow-top">
+        <form method="post" action="/program/check" class="td-checkform"><input type="hidden" name="kind" value="hit"><input type="hidden" name="sub" value="today"><input type="hidden" name="day" value="${esc(todayLabel)}"><input type="hidden" name="item_key" value="${esc(key)}"><button type="submit" class="td-checkbtn" aria-label="${done ? 'Mark not done' : 'Mark done'}">${done ? '☑' : '☐'}</button></form>
+        <span class="td-drow-main"><span class="td-rowname">${esc(dname)}${d.custom ? ' <span class="td-custombadge">custom</span>' : ''}</span>${info.volume ? `<span class="td-vol">${esc(info.volume)}</span>` : ''}${onTags}</span>
+        ${info.video ? watchLink(info.video) : ''}
+        <form method="post" action="/program/today-drills" class="td-chipform"><input type="hidden" name="op" value="remove_drill"><input type="hidden" name="drill" value="${esc(dname)}"><button type="submit" class="td-rm" aria-label="Remove drill">×</button></form>
+      </div>
+      <span class="td-onlabel">Did it on:</span>
+      <div class="td-onchips">${onChips}</div>
+      <form method="post" action="/program/today-drills" class="td-customadd td-customadd-sm"><input type="hidden" name="op" value="add_on"><input type="hidden" name="drill" value="${esc(dname)}"><input type="text" name="env" placeholder="+ Custom setup" maxlength="60" autocomplete="off"><button type="submit">Add</button></form>
+    </div>`;
+  }).join('');
+  // ---- Training Environments (Oct 2026, Bobby) ----
+  // Separate section, NOT per-drill: the hitter logs which CHALLENGE
+  // environment(s) they trained in today. Selectable from Bobby's
+  // prescribed environments for their program + custom typed-in.
+  const trainEnvSelected = new Set(trainEnvPicks.map((e) => ((e.id ? 'id:' + e.id : 'nm:' + e.name) || '').toLowerCase()));
+  const trainEnvChips = prescribedEnvs.map((e) => {
+    const k = ((e.id ? 'id:' + e.id : 'nm:' + e.name) || '').toLowerCase();
+    const isOn = trainEnvSelected.has(k);
+    return `<form method="post" action="/program/today-train-envs" class="td-chipform"><input type="hidden" name="op" value="toggle"><input type="hidden" name="id" value="${esc(e.id || '')}"><input type="hidden" name="name" value="${esc(e.name)}"><button type="submit" class="td-pickchip${isOn ? ' on' : ''}">${esc(e.name)}</button></form>`;
+  }).join('');
+  const trainEnvCustomChips = trainEnvPicks.filter((e) => e.custom && !prescribedEnvs.some((p) => p.name.toLowerCase() === String(e.name).toLowerCase())).map((e) => {
+    return `<form method="post" action="/program/today-train-envs" class="td-chipform"><input type="hidden" name="op" value="toggle"><input type="hidden" name="name" value="${esc(e.name)}"><button type="submit" class="td-pickchip on">${esc(e.name)} <span class="td-custombadge">custom</span></button></form>`;
+  }).join('');
+  const trainEnvHtml = `<div class="td-subhead">Training Environments</div>
+    <p class="td-envnote">The challenge setup for today — which one(s) did you train in?</p>
+    <div class="td-pickchips">${trainEnvChips}${trainEnvCustomChips || ''}</div>
+    <form method="post" action="/program/today-train-envs" class="td-customadd"><input type="hidden" name="op" value="add_custom"><input type="text" name="name" placeholder="+ Add your own environment" maxlength="120" autocomplete="off"><button type="submit">Add</button></form>`;
   // Each Hitting sub-section renders only with content (blank = hidden).
   const hittingHtml = (prepHtml ? `<div class="td-subhead">Prep</div>${prepHtml}` : '')
-    + (drillsHtml ? `<div class="td-subhead">Drills</div>${drillsHtml}` : '')
-    + envHtml;
+    + drillPickerHtml
+    + (drillRowsHtml ? `<div class="td-subhead">Check Off</div>${drillRowsHtml}` : '')
+    + trainEnvHtml;
 
   // Med ball: the lifting day's med ball is the source of truth when a
   // lifting day exists (same rule as the Lifting tab); otherwise the
@@ -3550,6 +3615,29 @@ function todayProgramPage(user, p, opts) {
 .td-held{background:#111;border:1px dashed #333;border-radius:12px;padding:14px;margin:10px 0}
 .td-move{width:100%;background:#111;color:#fff;border:1px solid #333;border-radius:10px;padding:12px;font-size:13px;font-weight:600;margin-top:20px;cursor:pointer}
 .td-movenote{font-size:12px;color:#888;margin:8px 0 0;text-align:center}
+.td-pickchips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 10px}
+.td-chipform{display:inline;margin:0;padding:0}
+.td-pickchip{border:1px solid #333;border-radius:20px;padding:8px 14px;font-size:13px;font-weight:600;background:#111;color:#fff;cursor:pointer}
+.td-pickchip.on{background:#fff;color:#000;border-color:#fff}
+.td-customadd{display:flex;gap:8px;margin:0 0 14px}
+.td-customadd input{flex:1;background:#111;border:1px solid #333;border-radius:10px;padding:10px;color:#fff;font-size:13px;min-width:0}
+.td-customadd button{background:#222;color:#fff;border:1px solid #333;border-radius:10px;padding:10px 14px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap}
+.td-customadd-sm{margin:8px 0 0}
+.td-customadd-sm input{padding:8px}
+.td-customadd-sm button{padding:8px 12px}
+.td-drow{border:1px solid #222;border-radius:12px;padding:12px;margin:0 0 10px;background:#0d0d0d}
+.td-drow.done{opacity:.45}
+.td-drow-top{display:flex;align-items:center;gap:10px}
+.td-checkform{margin:0}
+.td-drow-main{flex:1;min-width:0}
+.td-drow.done .td-rowname{text-decoration:line-through}
+.td-custombadge{font-size:10px;font-weight:700;color:#999;border:1px solid #333;border-radius:10px;padding:2px 6px;white-space:nowrap}
+.td-ontags{display:block;font-size:12px;color:#0f0;margin-top:2px}
+.td-onlabel{font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#888;margin:10px 0 4px;display:block}
+.td-onchips{display:flex;flex-wrap:wrap;gap:6px}
+.td-onchip{border:1px solid #333;border-radius:16px;padding:6px 12px;font-size:12px;font-weight:600;background:#111;color:#fff;cursor:pointer}
+.td-onchip.on{background:#fff;color:#000;border-color:#fff}
+.td-rm{background:none;border:none;color:#666;font-size:20px;line-height:1;padding:4px;cursor:pointer}
 </style>
 ${ucTop}
 <h1 class="td-h1">Today</h1>

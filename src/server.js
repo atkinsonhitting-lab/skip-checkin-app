@@ -2098,6 +2098,76 @@ function setTodayPicks(userId, day, sections) {
   return clean;
 }
 
+// Today's drill picks (Oct 2026, Bobby): the hitter picks which program
+// drills they're doing today (+ custom typed-in drills), and tags each drill
+// with what they did it on (Tee/Side toss/Front toss/Darts/BP/Machine).
+// Separately they log the challenge training environment(s) for the day.
+// drills: [{name, custom, on:[envName], customOn:[envName]}]
+// trainEnvs: [{id, name, custom}]
+const DID_ON_ENVS = ['Tee', 'Side toss', 'Front toss', 'Darts', 'BP', 'Machine'];
+function getTodayDrills(userId, day) {
+  try {
+    const r = db.prepare('SELECT drills_json, train_envs_json FROM today_drill_picks WHERE user_id = ? AND day = ?').get(userId, day);
+    if (!r) return { drills: [], trainEnvs: [] };
+    const drills = JSON.parse(r.drills_json || '[]');
+    const trainEnvs = JSON.parse(r.train_envs_json || '[]');
+    return {
+      drills: (Array.isArray(drills) ? drills : []).map((d) => ({
+        name: String(d.name || '').slice(0, 120),
+        custom: !!d.custom,
+        on: (Array.isArray(d.on) ? d.on : []).map((s) => String(s).slice(0, 60)).filter(Boolean),
+        customOn: (Array.isArray(d.customOn) ? d.customOn : []).map((s) => String(s).slice(0, 60)).filter(Boolean),
+      })).filter((d) => d.name),
+      trainEnvs: (Array.isArray(trainEnvs) ? trainEnvs : []).map((e) => ({
+        id: e.id ? String(e.id).slice(0, 80) : null,
+        name: String(e.name || '').slice(0, 120),
+        custom: !!e.custom,
+      })).filter((e) => e.name),
+    };
+  } catch (e) { return { drills: [], trainEnvs: [] }; }
+}
+function saveTodayDrills(userId, day, data) {
+  const d = data || {};
+  db.prepare(`INSERT OR REPLACE INTO today_drill_picks (user_id, day, drills_json, train_envs_json, updated_at)
+    VALUES (?, ?, ?, ?, ?)`)
+    .run(userId, day, JSON.stringify(d.drills || []), JSON.stringify(d.trainEnvs || []), new Date().toISOString());
+}
+// Prescribed challenge training environments for a hitter, from their
+// program's hitting plan (Bobby picks these per-athlete from the library).
+// Returns [{id, name, custom}].
+function prescribedTrainEnvs(prog) {
+  const plan = (prog && prog.hitting_plan) || {};
+  const out = [];
+  const seen = new Set();
+  const push = (id, name, custom) => {
+    const nm = String(name || '').trim();
+    if (!nm) return;
+    const k = (id ? 'id:' + id : 'nm:' + nm).toLowerCase();
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push({ id: id || null, name: nm, custom: !!custom });
+  };
+  for (const id of (Array.isArray(plan.environments_custom) ? plan.environments_custom : [])) {
+    const e = envLib.envById(String(id));
+    if (e) push(e.id, e.name, false);
+  }
+  for (const nm of (Array.isArray(plan.environments) ? plan.environments : [])) {
+    const n = typeof nm === 'string' ? nm : (nm && nm.name);
+    if (!n) continue;
+    const e = envLib.findEnvEntry(n);
+    if (e) push(e.id, e.name, false);
+    else push(null, n, true);
+  }
+  for (const nm of (Array.isArray(plan._auto_env_names) ? plan._auto_env_names : [])) {
+    const e = envLib.findEnvEntry(nm);
+    if (e) push(e.id, e.name, false);
+  }
+  for (const nm of (Array.isArray(plan.environments_other) ? plan.environments_other : [])) {
+    if (nm && String(nm).trim()) push(null, String(nm).trim(), true);
+  }
+  return out;
+}
+
 // Most recent logged lift for an exercise (per-set log or legacy weight/RPE).
 // Prefers an earlier day ("what you did last time"); falls back to any
 // earlier log today.
@@ -2494,11 +2564,16 @@ app.get('/program/today', requireLogin, requireWaiver, (req, res) => {
     (Array.isArray(d.exercises) ? d.exercises : []).some((ex) => String((ex && ex.name) || '').trim())
   ) : [];
   const ldayIdx = pickLiftingDayIdx(req, p, liftDays.length);
+  const drillPicks = getTodayDrills(req.user.id, today);
   res.send(views.todayProgramPage(req.user, p, {
     lifting, ldayIdx, checkoffs, today, picks,
     videoLib: videoLibMap(),
     subs: todaySubs(req.user.id),
     weekday: chiWeekdayFmt.format(new Date()),
+    drillPicks: drillPicks.drills,
+    trainEnvPicks: drillPicks.trainEnvs,
+    prescribedEnvs: prescribedTrainEnvs(p.prog),
+    didOnEnvs: DID_ON_ENVS,
   }));
 });
 
@@ -2519,6 +2594,79 @@ app.post('/program/today-pick', requireLogin, requireWaiver, (req, res) => {
   const next = cur.includes(section) ? cur.filter((s) => s !== section) : [...cur, section];
   setTodayPicks(req.user.id, day, next);
   res.redirect(safeBack);
+});
+
+// Today's drill picker (Oct 2026, Bobby): the hitter picks which program
+// drills they're doing today (+ custom typed-in drills), and tags each drill
+// with what they did it on (Tee/Side toss/Front toss/Darts/BP/Machine).
+// Ops: toggle_drill, add_drill, remove_drill, toggle_on, add_on.
+app.post('/program/today-drills', requireLogin, requireWaiver, (req, res) => {
+  if (req.user.role === 'coach') return res.status(403).send('Coaches cannot pick drills.');
+  if (!req.user.remoteProgramId) return res.status(403).send('No program assigned.');
+  if (req.user.viewAs) return res.status(403).send('View-as is read-only.');
+  const day = chiToday();
+  const cur = getTodayDrills(req.user.id, day);
+  const drills = cur.drills;
+  const op = String(req.body.op || '');
+  const drillName = String(req.body.drill || '').trim().slice(0, 120);
+  const find = (nm) => drills.find((d) => d.name.toLowerCase() === nm.toLowerCase());
+  if (op === 'toggle_drill' && drillName) {
+    const ex = find(drillName);
+    if (ex) drills.splice(drills.indexOf(ex), 1);
+    else drills.push({ name: drillName, custom: false, on: [], customOn: [] });
+  } else if (op === 'add_drill') {
+    const nm = String(req.body.name || '').trim().slice(0, 120);
+    if (nm && !find(nm)) drills.push({ name: nm, custom: true, on: [], customOn: [] });
+  } else if (op === 'remove_drill' && drillName) {
+    const ex = find(drillName);
+    if (ex) drills.splice(drills.indexOf(ex), 1);
+  } else if ((op === 'toggle_on' || op === 'add_on') && drillName) {
+    const ex = find(drillName);
+    const env = String(req.body.env || '').trim().slice(0, 60);
+    if (ex && env) {
+      const idx = ex.on.findIndex((e) => e.toLowerCase() === env.toLowerCase());
+      if (idx >= 0) {
+        ex.on.splice(idx, 1);
+        const ci = ex.customOn.findIndex((e) => e.toLowerCase() === env.toLowerCase());
+        if (ci >= 0) ex.customOn.splice(ci, 1);
+      } else {
+        ex.on.push(env);
+        if (op === 'add_on' && !ex.customOn.some((e) => e.toLowerCase() === env.toLowerCase())) ex.customOn.push(env);
+      }
+    }
+  }
+  saveTodayDrills(req.user.id, day, { drills, trainEnvs: cur.trainEnvs });
+  res.redirect('/program/today');
+});
+
+// Today's training environments (Oct 2026, Bobby): the hitter logs which
+// CHALLENGE environment(s) they trained in today — picked from Bobby's
+// prescribed environments for their program, or typed in custom.
+// Ops: toggle (id or name), add_custom (name).
+app.post('/program/today-train-envs', requireLogin, requireWaiver, (req, res) => {
+  if (req.user.role === 'coach') return res.status(403).send('Coaches cannot log environments.');
+  if (!req.user.remoteProgramId) return res.status(403).send('No program assigned.');
+  if (req.user.viewAs) return res.status(403).send('View-as is read-only.');
+  const day = chiToday();
+  const cur = getTodayDrills(req.user.id, day);
+  const trainEnvs = cur.trainEnvs;
+  const op = String(req.body.op || '');
+  const key = (e) => (e.id ? 'id:' + e.id : 'nm:' + e.name).toLowerCase();
+  if (op === 'toggle') {
+    const id = String(req.body.id || '').trim().slice(0, 80);
+    const name = String(req.body.name || '').trim().slice(0, 120);
+    const k = (id ? 'id:' + id : 'nm:' + name).toLowerCase();
+    const idx = trainEnvs.findIndex((e) => key(e) === k);
+    if (idx >= 0) trainEnvs.splice(idx, 1);
+    else if (name) trainEnvs.push({ id: id || null, name, custom: !id });
+  } else if (op === 'add_custom') {
+    const name = String(req.body.name || '').trim().slice(0, 120);
+    if (name && !trainEnvs.some((e) => e.name.toLowerCase() === name.toLowerCase())) {
+      trainEnvs.push({ id: null, name, custom: true });
+    }
+  }
+  saveTodayDrills(req.user.id, day, { drills: cur.drills, trainEnvs });
+  res.redirect('/program/today');
 });
 
 // Mobility page (Sep 23 2026) — now the Movement tab. The Warm-up doc

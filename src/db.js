@@ -730,6 +730,20 @@ db.exec(`CREATE TABLE IF NOT EXISTS today_workout_picks (
   updated_at TEXT NOT NULL DEFAULT '',
   UNIQUE(user_id, day)
 );`);
+// Today drill picks (Oct 2026, Bobby): the hitter picks which program drills
+// they're doing today (+ custom drills), tags each drill with what they did
+// it on (Tee/Side toss/Front toss/Darts/BP/Machine + custom), and logs which
+// challenge training environment(s) they trained in. One row per athlete per
+// Chicago day.
+db.exec(`CREATE TABLE IF NOT EXISTS today_drill_picks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  day TEXT NOT NULL,
+  drills_json TEXT NOT NULL DEFAULT '[]',
+  train_envs_json TEXT NOT NULL DEFAULT '[]',
+  updated_at TEXT NOT NULL DEFAULT '',
+  UNIQUE(user_id, day)
+);`);
 // Hevy-style per-set logging (Sep 2026): sets_json holds
 // [{w: lbs, r: reps, done: 0/1}, ...] for kind='lift' rows.
 {
