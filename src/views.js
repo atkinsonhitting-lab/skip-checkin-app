@@ -1675,57 +1675,84 @@ function messageAttachmentHtml(m) {
   const url = `/msg-attachments/${encodeURIComponent(f)}`;
   if (isVideo) {
     const poster = `/msg-posters/${encodeURIComponent(f.replace(/\.[^.]+$/, ''))}.jpg`;
-    return `<div class="msg-attach"><a class="msg-review-link" href="/review/${m.id}" title="Open video review"><video preload="none" playsinline muted disablepictureinpicture src="${url}" poster="${poster}" onloadedmetadata="try{this.currentTime=Math.min(0.1,this.duration/2||0.1)}catch(e){}"></video><span class="msg-review-hint">Tap to review</span></a></div>`;
+    return `<div class="msg-attach"><video controls playsinline preload="metadata" src="${url}" poster="${poster}"></video></div>`;
   }
   return `<div class="msg-attach"><img src="${url}" alt="Attachment"></div>`;
 }
 
-function messageThreadHtml(msgs, meId) {
+// iMessage-style thread bubbles (Oct 2026, Bobby): blue right for mine,
+// gray left for theirs, day dividers, small gray timestamps at group ends.
+function imsgThreadHtml(msgs, meId) {
+  const list = msgs || [];
+  if (!list.length) return '<div class="imsg-empty">No messages yet — say hey.</div>';
+  const toDate = (s) => { const d = new Date(String(s || '').replace(' ', 'T') + 'Z'); return isNaN(d.getTime()) ? null : d; };
   let out = '';
   let lastDay = '';
-  for (const m of msgs || []) {
+  for (let i = 0; i < list.length; i++) {
+    const m = list[i];
     const day = String(m.created_at || '').slice(0, 10);
     if (day && day !== lastDay) {
-      out += `<div class="msg-day">${esc(day)}</div>`;
+      out += `<div class="imsg-day"><span data-dayts="${esc(day)}">${esc(day)}</span></div>`;
       lastDay = day;
     }
     const mine = m.sender_id === meId;
-    const bubble = `${m.body ? linkify(String(m.body)) : ''}${messageAttachmentHtml(m)}`;
-    out += `<div class="msg ${mine ? 'msg-user' : 'msg-skip'}"><div class="msg-bubble">${bubble || '<span class="hint-inline">Attachment</span>'}</div></div>`;
+    const body = m.body ? linkify(String(m.body)) : '';
+    const att = messageAttachmentHtml(m);
+    const inner = (body ? `<span class="imsg-text">${body}</span>` : '') + att;
+    out += `<div class="imsg-row${mine ? ' mine' : ''}"><div class="imsg-bubble">${inner || '<span class="hint-inline">Attachment</span>'}</div></div>`;
+    const ts = String(m.created_at || '');
+    const next = list[i + 1] || null;
+    let showTs = !next;
+    if (next) {
+      if (next.sender_id !== m.sender_id) showTs = true;
+      else {
+        const a = toDate(ts), b = toDate(next.created_at);
+        showTs = !(a && b) || (b - a) > 5 * 60 * 1000;
+      }
+    }
+    if (showTs && ts) out += `<div class="imsg-ts${mine ? ' mine' : ''}"><span data-msgts="${esc(ts)}"></span></div>`;
   }
-  return out || '<div class="card empty">No messages yet — say hey.</div>';
+  return out;
 }
 
 function peerName(peer) {
   return [peer && peer.first_name, peer && peer.last_name].filter(Boolean).join(' ') || (peer && peer.email) || 'Coach';
 }
 
-// Shared 1:1 thread — athlete view and coach view. canSend=false renders
-// the view-only notice instead of the reply box (Cam).
+// Shared 1:1 thread — athlete view and coach view (Oct 2026, Bobby).
+// iMessage style: slim head, bubbles, rounded input bar. canSend=false
+// renders the view-only notice instead of the reply box (Cam).
 function messageThreadPage(user, peer, msgs, opts) {
   const o = opts || {};
   const canSend = o.canSend !== false;
   const name = peerName(peer);
+  const initial = ((name || '').trim()[0] || '?').toUpperCase();
   return layout({
     title: `Messages — ${name}`,
     user,
     tabs: o.tabs || [],
-    body: `<p><a href="${esc(o.backHref || '/messages')}">\u2190 ${esc(o.backLabel || 'Back to Messages')}</a></p>
-    <h1 class="page-title">Messages — ${esc(name)}</h1>
-    ${o.error ? `<div class="error">${esc(o.error)}</div>` : ''}
-    <div class="chat-log">${messageThreadHtml(msgs, user.id)}</div>
+    body: `<div class="imsg">
+    <div class="imsg-head">
+      <a class="imsg-back" href="${esc(o.backHref || '/messages')}" aria-label="Back">&#8249;</a>
+      <span class="imsg-avatar">${esc(initial)}</span>
+      <strong>${esc(name)}</strong>
+    </div>
+    ${o.error ? `<div class="error" style="margin:10px 14px 0">${esc(o.error)}</div>` : ''}
+    <div class="imsg-list">${imsgThreadHtml(msgs, user.id)}</div>
     ${canSend
-      ? `<form method="post" action="${esc(o.action || `/messages/${peer.id}`)}" enctype="multipart/form-data" class="chat-form msg-form" autocomplete="off">
-      <div class="msg-preview" hidden></div>
-      <input type="text" name="body" placeholder="Message\u2026" maxlength="5000">
-      <label class="msg-attach-btn" title="Attach a video or photo">\uD83D\uDCCE<input type="file" name="attachment" accept="video/*,image/*" onchange="msgAttachPreview(this)"></label>
-      <button type="submit" class="btn-primary">Send</button>
-    </form>
+      ? `<form method="post" action="${esc(o.action || `/messages/${peer.id}`)}" enctype="multipart/form-data" class="imsg-bar" autocomplete="off">
+      <div class="imsg-preview" hidden></div>
+      <label class="imsg-clip" title="Attach a video or photo">&#128206;<input type="file" name="attachment" accept="video/*,image/*" hidden onchange="imsgAttachPreview(this)"></label>
+      <input type="text" name="body" placeholder="iMessage" maxlength="5000" class="imsg-input">
+      <button type="submit" class="imsg-send" aria-label="Send">&#8593;</button>
+    </form>`
+      : `<div class="imsg-viewonly"><span class="hint-inline">View-only — you can read this thread but can&rsquo;t reply.</span></div>`}
+    </div>
     <script>
-    function msgAttachPreview(input) {
+    function imsgAttachPreview(input) {
       var form = input.closest('form');
       if (!form) return;
-      var prev = form.querySelector('.msg-preview');
+      var prev = form.querySelector('.imsg-preview');
       var f = input.files && input.files[0];
       if (!f) { prev.hidden = true; prev.innerHTML = ''; return; }
       var url = URL.createObjectURL(f);
@@ -1735,53 +1762,83 @@ function messageThreadPage(user, peer, msgs, opts) {
       media.src = url;
       if (isVideo) { media.muted = true; media.playsInline = true; media.preload = 'metadata'; }
       var nm = document.createElement('span');
-      nm.className = 'msg-preview-name';
+      nm.className = 'imsg-preview-name';
       nm.textContent = f.name;
       var clear = document.createElement('button');
       clear.type = 'button';
-      clear.className = 'msg-preview-clear';
+      clear.className = 'imsg-preview-clear';
       clear.setAttribute('aria-label', 'Remove attachment');
-      clear.textContent = '\u00d7';
+      clear.innerHTML = '&times;';
       clear.onclick = function() { try { URL.revokeObjectURL(url); } catch (e) {} input.value = ''; prev.hidden = true; prev.innerHTML = ''; };
       prev.appendChild(media); prev.appendChild(nm); prev.appendChild(clear);
       prev.hidden = false;
     }
-    </script>`
-      : `<div class="card"><p class="hint" style="margin:0">View-only — you can read this thread but can\u2019t reply.</p></div>`}`,
+    (function () {
+      function fmtTime(d) {
+        var h = d.getHours(), ap = h >= 12 ? 'PM' : 'AM';
+        h = h % 12; if (h === 0) h = 12;
+        return h + ':' + String(d.getMinutes()).padStart(2, '0') + ' ' + ap;
+      }
+      function fmtDay(d) {
+        var now = new Date();
+        if (d.toDateString() === now.toDateString()) return 'Today';
+        var y = new Date(now); y.setDate(y.getDate() - 1);
+        if (d.toDateString() === y.toDateString()) return 'Yesterday';
+        if ((now - d) < 6 * 864e5) return d.toLocaleDateString(undefined, { weekday: 'long' });
+        return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+      }
+      function parseTs(s) {
+        var d = new Date(String(s).replace(' ', 'T') + 'Z');
+        return isNaN(d.getTime()) ? null : d;
+      }
+      var days = document.querySelectorAll('[data-dayts]');
+      for (var i = 0; i < days.length; i++) (function (el) {
+        var d = parseTs(el.getAttribute('data-dayts') + ' 12:00:00');
+        if (d) el.textContent = fmtDay(d);
+      })(days[i]);
+      var tss = document.querySelectorAll('[data-msgts]');
+      for (var j = 0; j < tss.length; j++) (function (el) {
+        var d = parseTs(el.getAttribute('data-msgts'));
+        if (!d) return;
+        var now = new Date(), txt = fmtTime(d);
+        if (d.toDateString() !== now.toDateString()) {
+          var y = new Date(now); y.setDate(y.getDate() - 1);
+          txt = (d.toDateString() === y.toDateString() ? 'Yesterday' : d.toLocaleDateString(undefined, { month: 'numeric', day: 'numeric', year: '2-digit' })) + ' ' + txt;
+        }
+        el.textContent = txt;
+      })(tss[j]);
+      window.scrollTo(0, document.body.scrollHeight);
+    })();
+    </script>`,
   });
 }
 
-// Video review (Oct 2026, Bobby): OnForm-style review of a message video —
-// slow motion, frame-by-frame, scrub slider, and telestration. Annotations
-// are one shared JSON layer per message, visible to both coach and athlete.
-function reviewPage(user, msg, peer, annotations, opts) {
+// Video review (stripped down Oct 19 2026, Bobby): save the video, slow it
+// down, scrub through it. Detailed analysis happens in his Onform -- no
+// drawing, voiceover, compare, or favorites here.
+function reviewPage(user, msg, peer, opts) {
   const o = opts || {};
-  const canSave = o.canSave !== false;
-  const messageId = Number(o.messageId || msg.id);
   const name = peerName(peer);
   const f = String(msg.attachment_path || '');
   const url = `/msg-attachments/${encodeURIComponent(f)}`;
   const posterUrl = `/msg-posters/${encodeURIComponent(f.replace(/\.[^.]+$/, ''))}.jpg`;
-  const initial = JSON.stringify(annotations && typeof annotations === 'object' ? annotations : { strokes: [] }).replace(/</g, '\\u003c');
   const senderName = msg.sender_id === user.id ? 'You' : name;
   const writeupDate = msg.created_at ? esc(fmtDate(msg.created_at)) : '';
-  const writeup = msg.body ? `<div class="card review-writeup"><p class="hint" style="margin:0 0 6px">${esc(senderName)}${writeupDate ? ' · ' + writeupDate : ''}</p><p style="margin:0;white-space:pre-wrap">${esc(msg.body)}</p></div>` : '';
+  const writeup = msg.body ? `<div class="card review-writeup"><p class="hint" style="margin:0 0 6px">${esc(senderName)}${writeupDate ? ' &middot; ' + writeupDate : ''}</p><p style="margin:0;white-space:pre-wrap">${esc(msg.body)}</p></div>` : '';
   return layout({
-    title: `Video review — ${name}`,
+    title: `Video review - ${name}`,
     user,
     tabs: o.tabs || [],
-    body: `<p><a href="${esc(o.backHref || '/messages')}">\u2190 ${esc(o.backLabel || 'Back')}</a></p>
+    body: `<p><a href="${esc(o.backHref || '/messages')}">&larr; ${esc(o.backLabel || 'Back')}</a></p>
     <h1 class="page-title">Video review</h1>
     ${writeup}
     <div class="review-stage">
       <video id="rv-video" src="${url}" poster="${posterUrl}" playsinline preload="metadata"></video>
-      <canvas id="rv-canvas"></canvas>
-      <video id="rv-cam-pip" playsinline muted hidden></video>
     </div>
     <div class="review-controls">
       <button type="button" class="rv-btn" id="rv-play">Play</button>
-      <button type="button" class="rv-btn rv-step" id="rv-back" title="Back one frame">\u25c0 1</button>
-      <button type="button" class="rv-btn rv-step" id="rv-fwd" title="Forward one frame">1 \u25b6</button>
+      <button type="button" class="rv-btn rv-step" id="rv-back" title="Back one frame">&#9664; 1</button>
+      <button type="button" class="rv-btn rv-step" id="rv-fwd" title="Forward one frame">1 &#9654;</button>
       <div class="rv-speeds">
         <button type="button" class="rv-btn rv-speed" data-rate="0.25">0.25x</button>
         <button type="button" class="rv-btn rv-speed" data-rate="0.5">0.5x</button>
@@ -1790,558 +1847,103 @@ function reviewPage(user, msg, peer, annotations, opts) {
     </div>
     <input type="range" id="rv-scrub" class="rv-scrub" min="0" max="1000" value="0" step="1" aria-label="Scrub video">
     <div class="review-tools">
-      <div class="rv-toolrow" role="group" aria-label="Drawing tools">
-        <button type="button" class="rv-btn rv-tool active" data-tool="watch">Watch</button>
-        <button type="button" class="rv-btn rv-tool" data-tool="line">Line</button>
-        <button type="button" class="rv-btn rv-tool" data-tool="arrow">Arrow</button>
-        <button type="button" class="rv-btn rv-tool" data-tool="circle">Circle</button>
-        <button type="button" class="rv-btn rv-tool" data-tool="freehand">Draw</button>
-      </div>
-      <div class="rv-toolrow" role="group" aria-label="Colors">
-        <button type="button" class="rv-swatch active" data-color="#ff3b30" style="background:#ff3b30" aria-label="Red"></button>
-        <button type="button" class="rv-swatch" data-color="#ffd60a" style="background:#ffd60a" aria-label="Yellow"></button>
-        <button type="button" class="rv-swatch" data-color="#ffffff" style="background:#ffffff" aria-label="White"></button>
-      </div>
       <div class="rv-toolrow">
-        <button type="button" class="rv-btn" id="rv-undo">Undo</button>
-        <button type="button" class="rv-btn" id="rv-clear">Clear all</button>
-        ${canSave
-          ? `<button type="button" class="btn-primary" id="rv-save">Save</button><span class="rv-saved" id="rv-saved" hidden>Saved \u2713</span>`
-          : `<span class="hint-inline">View-only — your drawings stay on your screen only.</span>`}
-        <button type="button" class="rv-btn" id="rv-save-video">Save video</button>
-      </div>
-      <div class="rv-toolrow" role="group" aria-label="Review actions">
-        <button type="button" class="rv-btn" id="rv-vo-btn">Voiceover</button>
-        <button type="button" class="rv-btn" id="rv-compare-btn">Compare</button>
-        ${user.role === 'coach' ? `<button type="button" class="rv-btn" id="rv-fav-btn" aria-label="Favorite this video"></button>` : ''}
-        ${canSave ? `<button type="button" class="rv-btn" id="rv-send-hitter">Send to hitter</button>` : ''}
-      </div>
-    </div>
-    <div class="card" id="rv-vo-panel" hidden style="margin-top:12px">
-      <div class="rv-toolrow">
-        <button type="button" class="rv-btn" id="rv-vo-record">\u25cf Record</button>
-        <button type="button" class="rv-btn" id="rv-vo-cam" aria-pressed="false">Camera: off</button>
-        <button type="button" class="rv-btn" id="rv-vo-stop" hidden>\u25a0 Stop</button>
-        <span class="hint-inline" id="rv-vo-status"></span>
-      </div>
-      <div class="rv-toolrow" id="rv-vo-existing" hidden style="margin-top:8px">
-        <button type="button" class="rv-btn" id="rv-vo-toggle">Voiceover: off</button>
-        ${canSave ? `<button type="button" class="rv-btn" id="rv-vo-rerecord">Re-record</button>
-        <button type="button" class="rv-btn" id="rv-vo-delete">Delete</button>` : ''}
-      </div>
-      <audio id="rv-vo-audio" preload="auto" hidden></audio>
-    </div>
-    <div class="card" id="rv-compare-panel" hidden style="margin-top:12px">
-      <div class="rv-toolrow" id="rv-compare-list" style="margin-bottom:8px"></div>
-      <div class="rv-compare-stage" id="rv-compare-stage" hidden>
-        <div class="rv-compare-col"><video id="rv-cmp-a" playsinline preload="auto"></video><div class="hint-inline" id="rv-cmp-a-label"></div></div>
-        <div class="rv-compare-col"><video id="rv-cmp-b" playsinline preload="auto"></video><div class="hint-inline" id="rv-cmp-b-label"></div></div>
-      </div>
-      <div class="rv-toolrow" id="rv-compare-controls" hidden style="margin-top:8px">
-        <button type="button" class="rv-btn" id="rv-cmp-play">Play both</button>
-        <button type="button" class="rv-btn" id="rv-cmp-exit">Exit compare</button>
-        <span class="hint-inline">One set of controls drives both videos.</span>
+        <button type="button" class="btn-primary" id="rv-save-video">Save video</button>
+        <span class="hint-inline">Save it, slow it down, scrub through it.</span>
       </div>
     </div>
     <script>
     (function () {
       var video = document.getElementById('rv-video');
-      var canvas = document.getElementById('rv-canvas');
-      var ctx = canvas.getContext('2d');
-      var CAN_SAVE = ${canSave ? 'true' : 'false'};
-      var MSG_ID = ${messageId};
-      var PEER_NAME = ${JSON.stringify(name).replace(/</g, '\\u003c')};
-      var HAS_VOICEOVER = ${o.hasVoiceover ? 'true' : 'false'};
-      var IS_FAVORITE = ${o.isFavorite ? 'true' : 'false'};
-      var COMPARE_OPTIONS = ${JSON.stringify(o.compareOptions || []).replace(/</g, '\\u003c')};
-      var strokes = [];
-      try {
-        var init = ${initial};
-        if (init && Array.isArray(init.strokes)) strokes = init.strokes;
-      } catch (e) {}
-      var tool = 'watch', color = '#ff3b30';
-      var drawing = false, startPt = null, curPt = null, freePts = null;
-
-      function fitCanvas() {
-        var w = video.clientWidth, h = video.clientHeight;
-        if (!w || !h) return;
-        canvas.width = w; canvas.height = h;
-        render();
-      }
-      window.addEventListener('resize', fitCanvas);
-      video.addEventListener('loadedmetadata', fitCanvas);
-
-      function pt(e) {
-        var r = canvas.getBoundingClientRect();
-        return [Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
-                Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))];
-      }
-      function drawStroke(s, c, W, H) {
-        c = c || ctx; W = W || canvas.width; H = H || canvas.height;
-        c.strokeStyle = s.color; c.fillStyle = s.color;
-        c.lineWidth = Math.max(2, W / 160); c.lineCap = 'round'; c.lineJoin = 'round';
-        var P = s.points.map(function (p) { return [p[0] * W, p[1] * H]; });
-        c.beginPath();
-        if (s.tool === 'freehand') {
-          P.forEach(function (p, i) { i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1]); });
-          c.stroke(); return;
-        }
-        if (P.length < 2) return;
-        var a = P[0], b = P[P.length - 1];
-        if (s.tool === 'circle') {
-          var cx = (a[0] + b[0]) / 2, cy = (a[1] + b[1]) / 2;
-          c.beginPath();
-          c.ellipse(cx, cy, Math.abs(b[0] - a[0]) / 2, Math.abs(b[1] - a[1]) / 2, 0, 0, Math.PI * 2);
-          c.stroke();
-          return;
-        }
-        c.moveTo(a[0], a[1]); c.lineTo(b[0], b[1]); c.stroke();
-        if (s.tool === 'arrow') {
-          var ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
-          var hs = Math.max(10, W / 40);
-          [[ang - 2.6], [ang + 2.6]].forEach(function (o) {
-            c.beginPath();
-            c.moveTo(b[0], b[1]);
-            c.lineTo(b[0] - hs * Math.cos(o[0]), b[1] - hs * Math.sin(o[0]));
-            c.stroke();
-          });
-        }
-      }
-      function render() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        strokes.forEach(drawStroke);
-        if (drawing && startPt && curPt) {
-          var pts = tool === 'freehand' ? freePts.concat([curPt]) : [startPt, curPt];
-          drawStroke({ tool: tool, color: color, points: pts });
-        }
-      }
-      canvas.addEventListener('pointerdown', function (e) {
-        e.preventDefault();
-        if (tool === 'watch') {
-          video.paused ? video.play() : video.pause();
-          syncPlayBtn();
-          return;
-        }
-        video.pause(); syncPlayBtn();
-        drawing = true; startPt = pt(e); curPt = startPt; freePts = [startPt];
-        canvas.setPointerCapture(e.pointerId);
-        render();
-      });
-      canvas.addEventListener('pointermove', function (e) {
-        if (!drawing) return;
-        curPt = pt(e);
-        if (tool === 'freehand') freePts.push(curPt);
-        render();
-      });
-      function endStroke() {
-        if (!drawing) return;
-        drawing = false;
-        var pts = tool === 'freehand' ? freePts : [startPt, curPt];
-        if (pts.length >= 2) strokes.push({ tool: tool, color: color, points: pts });
-        startPt = curPt = freePts = null;
-        render();
-      }
-      canvas.addEventListener('pointerup', endStroke);
-      canvas.addEventListener('pointercancel', endStroke);
-
-      // Playback controls
       var playBtn = document.getElementById('rv-play');
-      function syncPlayBtn() { playBtn.textContent = video.paused ? 'Play' : 'Pause'; }
-      playBtn.addEventListener('click', function () { video.paused ? video.play() : video.pause(); });
-      video.addEventListener('play', syncPlayBtn);
-      video.addEventListener('pause', syncPlayBtn);
-      document.querySelectorAll('.rv-speed').forEach(function (b) {
-        b.addEventListener('click', function () {
-          video.playbackRate = parseFloat(b.dataset.rate);
-          document.querySelectorAll('.rv-speed').forEach(function (x) { x.classList.toggle('active', x === b); });
-        });
-      });
       var scrub = document.getElementById('rv-scrub');
       var scrubbing = false;
-      scrub.addEventListener('pointerdown', function () { scrubbing = true; });
-      window.addEventListener('pointerup', function () { scrubbing = false; });
-      window.addEventListener('pointercancel', function () { scrubbing = false; });
-      scrub.addEventListener('touchstart', function () { scrubbing = true; }, { passive: true });
-      scrub.addEventListener('touchend', function () { scrubbing = false; });
-      scrub.addEventListener('touchcancel', function () { scrubbing = false; });
-      video.addEventListener('timeupdate', function () {
-        if (video.duration && !scrubbing) scrub.value = Math.round((video.currentTime / video.duration) * 1000);
+      playBtn.addEventListener('click', function () {
+        if (video.paused) { video.play(); } else { video.pause(); }
       });
-      scrub.addEventListener('input', function () {
-        if (video.duration) video.currentTime = (scrub.value / 1000) * video.duration;
-      });
-      scrub.addEventListener('change', function () {
-        if (video.duration) video.currentTime = (scrub.value / 1000) * video.duration;
-      });
+      video.addEventListener('play', function () { playBtn.textContent = 'Pause'; });
+      video.addEventListener('pause', function () { playBtn.textContent = 'Play'; });
       document.getElementById('rv-back').addEventListener('click', function () {
-        video.pause(); syncPlayBtn();
-        video.currentTime = Math.max(0, video.currentTime - 1 / 30);
+        video.pause(); video.currentTime = Math.max(0, video.currentTime - 1 / 30);
       });
       document.getElementById('rv-fwd').addEventListener('click', function () {
-        video.pause(); syncPlayBtn();
+        video.pause();
         if (video.duration) video.currentTime = Math.min(video.duration, video.currentTime + 1 / 30);
       });
-
-      // Tool + color pickers
-      document.querySelectorAll('.rv-tool').forEach(function (b) {
+      var speedBtns = document.querySelectorAll('.rv-speed');
+      speedBtns.forEach(function (b) {
         b.addEventListener('click', function () {
-          tool = b.dataset.tool;
-          document.querySelectorAll('.rv-tool').forEach(function (x) { x.classList.toggle('active', x === b); });
+          video.playbackRate = parseFloat(b.getAttribute('data-rate')) || 1;
+          speedBtns.forEach(function (x) { x.classList.remove('active'); });
+          b.classList.add('active');
         });
       });
-      document.querySelectorAll('.rv-swatch').forEach(function (b) {
-        b.addEventListener('click', function () {
-          color = b.dataset.color;
-          document.querySelectorAll('.rv-swatch').forEach(function (x) { x.classList.toggle('active', x === b); });
-        });
-      });
-      document.getElementById('rv-undo').addEventListener('click', function () { strokes.pop(); render(); });
-      document.getElementById('rv-clear').addEventListener('click', function () {
-        if (!strokes.length) return;
-        if (confirm('Remove all drawings from this video?')) { strokes = []; render(); }
-      });
-
-      // Save (full coaches + athletes; view-only coaches get no save button)
-      var saveBtn = document.getElementById('rv-save');
-      if (saveBtn) {
-        saveBtn.addEventListener('click', function () {
-          saveBtn.disabled = true;
-          fetch('/review/' + MSG_ID, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ strokes: strokes })
-          }).then(function (r) { return r.json(); }).then(function (j) {
-            saveBtn.disabled = false;
-            if (j && j.ok) {
-              var s = document.getElementById('rv-saved');
-              s.hidden = false;
-              setTimeout(function () { s.hidden = true; }, 2000);
-            }
-          }).catch(function () { saveBtn.disabled = false; });
-        });
-      }
-      // Save video to camera roll (Oct 2026, Bobby): Web Share with the file
-      // opens the iOS share sheet -> "Save to Photos". Fallback opens the
-      // raw file URL for a manual share-sheet save.
-      var saveVidBtn = document.getElementById('rv-save-video');
-      if (saveVidBtn) {
-        saveVidBtn.addEventListener('click', function () {
-          var done = function () { saveVidBtn.disabled = false; };
-          saveVidBtn.disabled = true;
-          var finish = function () {
-            try {
-              var src = video.currentSrc || video.src;
-              window.open(src, '_blank');
-            } catch (e) {}
-            done();
-          };
-          try {
-            fetch(video.currentSrc || video.src, { credentials: 'same-origin' }).then(function (r) {
-              if (!r.ok) throw new Error('fetch failed');
-              return r.blob();
-            }).then(function (blob) {
-              var ext = 'mp4';
-              try { ext = (video.currentSrc || video.src).split('.').pop().split('?')[0] || 'mp4'; } catch (e) {}
-              var file = new File([blob], 'swing-video.' + ext, { type: blob.type || 'video/mp4' });
-              if (navigator.canShare && navigator.canShare({ files: [file] })) {
-                navigator.share({ files: [file], title: 'Swing video' }).then(done).catch(function () { done(); });
-              } else {
-                finish();
-              }
-            }).catch(finish);
-          } catch (e) { finish(); }
-        });
-      }
-      // ---- Voiceover (Oct 2026, Bobby) ----
-      var voPanel = document.getElementById('rv-vo-panel');
-      var voBtn = document.getElementById('rv-vo-btn');
-      var voRecord = document.getElementById('rv-vo-record');
-      var voCamBtn = document.getElementById('rv-vo-cam');
-      var voStop = document.getElementById('rv-vo-stop');
-      var voStatus = document.getElementById('rv-vo-status');
-      var voExisting = document.getElementById('rv-vo-existing');
-      var voToggle = document.getElementById('rv-vo-toggle');
-      var voAudio = document.getElementById('rv-vo-audio');
-      var camPip = document.getElementById('rv-cam-pip');
-      var voWithAudio = false, voCamOn = false, voStream = null, voRec = null, voChunks = [];
-      function voShowExisting() {
-        voExisting.hidden = !HAS_VOICEOVER;
-        if (HAS_VOICEOVER && !voAudio.src) voAudio.src = '/review/' + MSG_ID + '/voiceover/audio';
-      }
-      voShowExisting();
-      if (voBtn) voBtn.addEventListener('click', function () {
-        voPanel.hidden = !voPanel.hidden;
-        voBtn.classList.toggle('active', !voPanel.hidden);
-      });
-      if (voCamBtn) voCamBtn.addEventListener('click', function () {
-        voCamOn = !voCamOn;
-        voCamBtn.textContent = 'Camera: ' + (voCamOn ? 'on' : 'off');
-        voCamBtn.setAttribute('aria-pressed', voCamOn ? 'true' : 'false');
-      });
-      function voStopTracks() {
-        if (voStream) { try { voStream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {} voStream = null; }
-        camPip.hidden = true; camPip.srcObject = null;
-      }
-      if (voRecord) voRecord.addEventListener('click', function () {
-        if (!window.MediaRecorder || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-          voStatus.textContent = 'Recording is not supported on this device.';
-          return;
-        }
-        var constraints = { audio: true, video: voCamOn ? { facingMode: 'user', width: 480 } : false };
-        navigator.mediaDevices.getUserMedia(constraints).then(function (stream) {
-          voStream = stream;
-          if (voCamOn) {
-            var vtracks = stream.getVideoTracks();
-            if (vtracks.length) { camPip.srcObject = stream; camPip.hidden = false; camPip.play().catch(function () {}); }
-          }
-          var mime = '';
-          if (MediaRecorder.isTypeSupported) {
-            if (MediaRecorder.isTypeSupported('audio/mp4')) mime = 'audio/mp4';
-            else if (MediaRecorder.isTypeSupported('audio/webm')) mime = 'audio/webm';
-          }
-          voChunks = [];
-          // Record audio only (camera is a live preview, not burned in).
-          var audioOnly = new MediaStream(stream.getAudioTracks());
-          voRec = mime ? new MediaRecorder(audioOnly, { mimeType: mime }) : new MediaRecorder(audioOnly);
-          voRec.ondataavailable = function (e) { if (e.data && e.data.size) voChunks.push(e.data); };
-          voRec.onstop = function () {
-            var blob = new Blob(voChunks, { type: mime || 'audio/mp4' });
-            voStopTracks();
-            voStatus.textContent = 'Uploading…';
-            var fd = new FormData();
-            fd.append('audio', blob, 'voiceover.m4a');
-            fetch('/review/' + MSG_ID + '/voiceover', { method: 'POST', body: fd, credentials: 'same-origin' })
-              .then(function (r) { return r.json(); })
-              .then(function (j) {
-                if (j && j.ok) {
-                  HAS_VOICEOVER = true; voAudio.src = '/review/' + MSG_ID + '/voiceover/audio?ts=' + Date.now();
-                  voShowExisting(); voStatus.textContent = 'Saved.';
-                } else { voStatus.textContent = 'Upload failed — try again.'; }
-                voRecord.hidden = false; voStop.hidden = true;
-              })
-              .catch(function () { voStatus.textContent = 'Upload failed — try again.'; voRecord.hidden = false; voStop.hidden = true; });
-          };
-          // Play the video from the top while recording.
-          try { video.pause(); } catch (e) {}
-          video.currentTime = 0;
-          video.muted = true;
-          video.play().then(function () {
-            voRec.start();
-            voRecord.hidden = true; voStop.hidden = false;
-            voStatus.textContent = 'Recording… talk through the swing.';
-          }).catch(function () {
-            voStopTracks();
-            voStatus.textContent = 'Could not play the video.';
-          });
-        }).catch(function () { voStatus.textContent = 'Mic access denied.'; });
-      });
-      if (voStop) voStop.addEventListener('click', function () {
-        try { video.pause(); } catch (e) {}
-        try { if (voRec && voRec.state !== 'inactive') voRec.stop(); } catch (e) {}
-      });
-      if (voToggle) voToggle.addEventListener('click', function () {
-        voWithAudio = !voWithAudio;
-        voToggle.textContent = 'Voiceover: ' + (voWithAudio ? 'on' : 'off');
-        voToggle.classList.toggle('active', voWithAudio);
-        if (!voWithAudio) { try { voAudio.pause(); } catch (e) {} }
-      });
-      // Keep narration in sync with the video.
-      video.addEventListener('play', function () {
-        if (voWithAudio && HAS_VOICEOVER) {
-          try { voAudio.currentTime = video.currentTime || 0; voAudio.play().catch(function () {}); } catch (e) {}
-        }
-      });
-      video.addEventListener('pause', function () { try { voAudio.pause(); } catch (e) {} });
-      video.addEventListener('seeked', function () {
-        if (voWithAudio && HAS_VOICEOVER && !video.paused) {
-          try { voAudio.currentTime = video.currentTime || 0; } catch (e) {}
-        }
-      });
-      var voRerecord = document.getElementById('rv-vo-rerecord');
-      if (voRerecord) voRerecord.addEventListener('click', function () {
-        voWithAudio = false; voToggle.textContent = 'Voiceover: off'; voToggle.classList.remove('active');
-        try { voAudio.pause(); } catch (e) {}
-        voRecord.click();
-      });
-      var voDelete = document.getElementById('rv-vo-delete');
-      if (voDelete) voDelete.addEventListener('click', function () {
-        if (!confirm('Delete this voiceover?')) return;
-        fetch('/review/' + MSG_ID + '/voiceover', { method: 'DELETE', credentials: 'same-origin' })
-          .then(function (r) { return r.json(); })
-          .then(function (j) {
-            if (j && j.ok) {
-              HAS_VOICEOVER = false; voWithAudio = false; voAudio.removeAttribute('src');
-              voShowExisting(); voToggle.textContent = 'Voiceover: off'; voToggle.classList.remove('active');
-            }
-          });
-      });
-
-      // ---- Favorite (Oct 2026, Bobby) ----
-      var favBtn = document.getElementById('rv-fav-btn');
-      function syncFavBtn() { if (favBtn) favBtn.textContent = IS_FAVORITE ? '\u2605 Fave' : '\u2606 Fave'; }
-      syncFavBtn();
-      if (favBtn) favBtn.addEventListener('click', function () {
-        fetch('/review/' + MSG_ID + '/favorite', { method: 'POST', credentials: 'same-origin' })
-          .then(function (r) { return r.json(); })
-          .then(function (j) { if (j && j.ok) { IS_FAVORITE = !!j.favorite; syncFavBtn(); } });
-      });
-
-      // ---- Compare side-by-side (Oct 2026, Bobby) ----
-      var cmpBtn = document.getElementById('rv-compare-btn');
-      var cmpPanel = document.getElementById('rv-compare-panel');
-      var cmpList = document.getElementById('rv-compare-list');
-      var cmpStage = document.getElementById('rv-compare-stage');
-      var cmpControls = document.getElementById('rv-compare-controls');
-      var cmpA = document.getElementById('rv-cmp-a');
-      var cmpB = document.getElementById('rv-cmp-b');
-      var cmpALabel = document.getElementById('rv-cmp-a-label');
-      var cmpBLabel = document.getElementById('rv-cmp-b-label');
-      var cmpPlay = document.getElementById('rv-cmp-play');
-      function cmpBuildList() {
-        cmpList.innerHTML = '';
-        if (!COMPARE_OPTIONS.length) {
-          cmpList.innerHTML = '<span class="hint-inline">No other videos in this thread yet.</span>';
-          return;
-        }
-        COMPARE_OPTIONS.forEach(function (opt) {
-          var b = document.createElement('button');
-          b.type = 'button'; b.className = 'rv-btn rv-compare-opt';
-          var img = opt.poster ? '<img src="' + opt.poster + '" alt="" onerror="this.style.display=\'none\'">' : '';
-          b.innerHTML = img + '<span>' + (opt.favorite ? '\u2605 ' : '') + opt.label.replace(/</g, '&lt;') + '</span>';
-          b.addEventListener('click', function () { cmpStart(opt); });
-          cmpList.appendChild(b);
-        });
-      }
-      function cmpSyncPlayBtn() { cmpPlay.textContent = (cmpA.paused || cmpB.paused) ? 'Play both' : 'Pause both'; }
-      function cmpStart(opt) {
-        cmpA.src = video.currentSrc || video.src;
-        cmpB.src = opt.url;
-        cmpALabel.textContent = 'This video';
-        cmpBLabel.textContent = (opt.favorite ? '\u2605 ' : '') + opt.label;
-        cmpStage.hidden = false; cmpControls.hidden = false;
-        [cmpA, cmpB].forEach(function (v) {
-          v.playbackRate = video.playbackRate || 1;
-          v.addEventListener('play', cmpSyncPlayBtn);
-          v.addEventListener('pause', cmpSyncPlayBtn);
-        });
-        cmpA.currentTime = 0; cmpB.currentTime = 0;
-        cmpSyncPlayBtn();
-      }
-      function cmpStop() {
-        [cmpA, cmpB].forEach(function (v) { try { v.pause(); } catch (e) {} v.removeAttribute('src'); v.load(); });
-        cmpStage.hidden = true; cmpControls.hidden = true;
-      }
-      if (cmpBtn) cmpBtn.addEventListener('click', function () {
-        var opening = cmpPanel.hidden;
-        cmpPanel.hidden = !opening;
-        cmpBtn.classList.toggle('active', opening);
-        if (opening) { cmpBuildList(); }
-        else { cmpStop(); }
-      });
-      if (cmpPlay) cmpPlay.addEventListener('click', function () {
-        if (cmpA.paused || cmpB.paused) {
-          try { cmpA.currentTime = Math.min(cmpA.currentTime, cmpB.currentTime || 0); } catch (e) {}
-          cmpA.play().catch(function () {}); cmpB.play().catch(function () {});
-        } else { cmpA.pause(); cmpB.pause(); }
-      });
-      var cmpExit = document.getElementById('rv-cmp-exit');
-      if (cmpExit) cmpExit.addEventListener('click', function () {
-        cmpStop(); cmpPanel.hidden = true; cmpBtn.classList.remove('active');
-      });
-      // Scrub drives both in compare mode.
+      scrub.addEventListener('pointerdown', function () { scrubbing = true; });
+      window.addEventListener('pointerup', function () { scrubbing = false; });
       scrub.addEventListener('input', function () {
-        if (!cmpStage.hidden && cmpA.duration && cmpB.duration) {
-          var t = (scrub.value / 1000) * Math.min(cmpA.duration, cmpB.duration);
-          try { cmpA.currentTime = t; } catch (e) {}
-          try { cmpB.currentTime = t; } catch (e) {}
-        }
+        if (video.duration) video.currentTime = (scrub.value / 1000) * video.duration;
       });
-
-      // ---- Send to hitter (Oct 2026, Bobby): burn strokes into the video ----
-      var sendBtn = document.getElementById('rv-send-hitter');
-      if (sendBtn) sendBtn.addEventListener('click', function () {
-        if (!strokes.length && !confirm('No drawings on this video. Send it as-is?')) return;
-        if (!window.MediaRecorder || !HTMLCanvasElement.prototype.captureStream) {
-          alert('This device can\'t export video.');
-          return;
-        }
-        sendBtn.disabled = true;
-        sendBtn.textContent = 'Working…';
-        var origTime = video.currentTime, origMuted = video.muted, origRate = video.playbackRate;
-        function restore() {
-          video.muted = origMuted; video.playbackRate = origRate;
-          try { video.currentTime = origTime; } catch (e) {}
-          sendBtn.disabled = false; sendBtn.textContent = 'Send to hitter';
-        }
-        var expCanvas = document.createElement('canvas');
-        expCanvas.width = video.videoWidth || 720;
-        expCanvas.height = video.videoHeight || 1280;
-        var ectx = expCanvas.getContext('2d');
-        var stream, rec, chunks = [], drawTimer = null;
+      video.addEventListener('timeupdate', function () {
+        if (!scrubbing && video.duration) scrub.value = Math.round((video.currentTime / video.duration) * 1000);
+      });
+      var saveBtn = document.getElementById('rv-save-video');
+      saveBtn.addEventListener('click', function () {
+        saveBtn.disabled = true;
+        var done = function () { saveBtn.disabled = false; };
+        var fallback = function () {
+          try { window.open(video.currentSrc || video.src, '_blank'); } catch (e) {}
+          done();
+        };
         try {
-          stream = expCanvas.captureStream(30);
-          var mime = '';
-          if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('video/mp4')) mime = 'video/mp4';
-          rec = mime ? new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8000000 }) : new MediaRecorder(stream);
-        } catch (e) { restore(); alert('Could not start export.'); return; }
-        rec.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
-        rec.onstop = function () {
-          cancelAnimationFrame(drawTimer);
-          try { stream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
-          var blob = new Blob(chunks, { type: 'video/mp4' });
-          var fd = new FormData();
-          fd.append('video', blob, 'marked-up.mp4');
-          fetch('/review/' + MSG_ID + '/send-to-hitter', { method: 'POST', body: fd, credentials: 'same-origin' })
-            .then(function (r) { return r.json(); })
-            .then(function (j) { restore(); alert(j && j.ok ? 'Sent to ' + PEER_NAME + '.' : 'Send failed — try again.'); })
-            .catch(function () { restore(); alert('Send failed — try again.'); });
-        };
-        function drawFrame() {
-          try { ectx.drawImage(video, 0, 0, expCanvas.width, expCanvas.height); } catch (e) {}
-          for (var i = 0; i < strokes.length; i++) drawStroke(strokes[i], ectx, expCanvas.width, expCanvas.height);
-        }
-        video.muted = true; video.playbackRate = 1; video.currentTime = 0;
-        var onEnded = function () {
-          video.removeEventListener('ended', onEnded);
-          try { if (rec.state !== 'inactive') rec.stop(); } catch (e) {}
-        };
-        video.addEventListener('ended', onEnded);
-        var onPlaying = function () {
-          video.removeEventListener('playing', onPlaying);
-          try { rec.start(); } catch (e) { restore(); return; }
-          (function loop() { drawFrame(); drawTimer = requestAnimationFrame(loop); })();
-        };
-        video.addEventListener('playing', onPlaying);
-        video.play().catch(function () { video.removeEventListener('playing', onPlaying); restore(); alert('Could not play video.'); });
+          fetch(video.currentSrc || video.src, { credentials: 'same-origin' }).then(function (r) {
+            if (!r.ok) throw new Error('fetch failed');
+            return r.blob();
+          }).then(function (blob) {
+            var ext = 'mp4';
+            try { ext = (video.currentSrc || video.src).split('.').pop().split('?')[0] || 'mp4'; } catch (e) {}
+            var file = new File([blob], 'swing-video.' + ext, { type: blob.type || 'video/mp4' });
+            if (navigator.canShare && navigator.canShare({ files: [file] })) {
+              navigator.share({ files: [file], title: 'Swing video' }).then(done).catch(done);
+            } else {
+              fallback();
+            }
+          }).catch(fallback);
+        } catch (e) { fallback(); }
       });
-
-      fitCanvas();
     })();
     </script>`
   });
 }
 
-// Athlete inbox: one row per coach conversation.
+// Athlete inbox: iMessage-style conversation list (Oct 2026, Bobby) —
+// matches the coach inbox: avatar, name + relative time, preview, unread.
 function messagesInboxPage(user, conversations, coach) {
   const rows = (conversations || [])
     .map((c) => {
       const name = peerName(c.peer);
+      const initial = ((name || '').trim()[0] || '?').toUpperCase();
       const preview = c.lastBody ? String(c.lastBody).slice(0, 80) : 'No messages yet';
-      return `<a class="msg-row" href="/messages/${c.peer.id}">
-        <div style="min-width:0"><strong>${esc(name)}</strong><div class="hint-inline" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(preview)}</div></div>
-        ${c.unread > 0 ? `<span class="tab-badge">${c.unread}</span>` : ''}
+      return `<a class="imsg-thread-row" href="/messages/${c.peer.id}">
+        <span class="imsg-avatar">${esc(initial)}</span>
+        <span class="imsg-thread-main">
+          <span class="imsg-thread-top"><strong>${esc(name)}</strong>${c.lastAt ? `<span class="imsg-time" data-ts="${esc(c.lastAt)}"></span>` : ''}</span>
+          <span class="imsg-thread-sub"><span>${esc(preview)}</span>${c.unread > 0 ? `<span class="imsg-unread">${c.unread}</span>` : ''}</span>
+        </span>
       </a>`;
     })
     .join('');
   const empty = !rows.length && coach
-    ? `<div class="card"><p style="margin:0">No messages yet.</p><p class="hint" style="margin:8px 0 0"><a href="/messages/${coach.id}">Message Coach \u2192</a></p></div>`
-    : `<div class="card empty">No messages yet.</div>`;
+    ? `<div class="imsg-empty">No messages yet. <a href="/messages/${coach.id}">Message Coach &#8594;</a></div>`
+    : `<div class="imsg-empty">No messages yet.</div>`;
   return layout({
     title: 'Messages',
     user,
     tabs: userTabs('messages', user),
-    body: `<h1 class="page-title">Messages</h1>
-    <div style="margin:0 0 12px"><button type="button" class="rv-btn" id="fix-thumbs" style="font-size:13px">Fix video thumbnails</button> <span id="fix-thumbs-msg" class="hint-inline"></span></div>
+    body: `<div class="imsg-inbox-head">
+      <h1 class="page-title" style="margin:0">Messages</h1>
+    </div>
+    ${rows ? `<div class="imsg-thread-list">${rows}</div>` : empty}
+    <div class="imsg-inbox-foot"><button type="button" class="rv-btn" id="fix-thumbs" style="font-size:12px">Fix video thumbnails</button> <span id="fix-thumbs-msg" class="hint-inline"></span></div>
     <script>
     document.getElementById('fix-thumbs').addEventListener('click', function () {
       var btn = this, msg = document.getElementById('fix-thumbs-msg');
@@ -2351,7 +1953,27 @@ function messagesInboxPage(user, conversations, coach) {
         .then(function (j) { msg.textContent = j.ok ? 'Done — reload in a minute to see thumbnails.' : ('Error: ' + (j.error || 'unknown')); })
         .catch(function () { msg.textContent = 'Error — try again.'; btn.disabled = false; });
     });
-    </script>${rows ? `<div class="card">${rows}</div>` : empty}`,
+    (function () {
+      var els = document.querySelectorAll('.imsg-time[data-ts]');
+      for (var j = 0; j < els.length; j++) (function (el) {
+        var d = new Date(String(el.getAttribute('data-ts')).replace(' ', 'T') + 'Z');
+        if (isNaN(d.getTime())) return;
+        var now = new Date();
+        var txt;
+        if (d.toDateString() === now.toDateString()) {
+          var h = d.getHours(), ap = h >= 12 ? 'PM' : 'AM';
+          h = h % 12; if (h === 0) h = 12;
+          txt = h + ':' + String(d.getMinutes()).padStart(2, '0') + ' ' + ap;
+        } else {
+          var y = new Date(now); y.setDate(y.getDate() - 1);
+          if (d.toDateString() === y.toDateString()) txt = 'Yesterday';
+          else if ((now - d) < 6 * 864e5) txt = d.toLocaleDateString(undefined, { weekday: 'long' });
+          else txt = d.toLocaleDateString(undefined, { month: 'numeric', day: 'numeric', year: '2-digit' });
+        }
+        el.textContent = txt;
+      })(els[j]);
+    })();
+    </script>`,
   });
 }
 
