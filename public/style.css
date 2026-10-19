@@ -1261,10 +1261,21 @@ main.wrap { animation: pageIn 0.18s ease-out; }
 }
 .wo-sets { display: grid; gap: 8px; margin-bottom: 10px; }
 .wo-setrow {
-  display: grid; grid-template-columns: 30px 1fr 1fr 64px; gap: 8px; align-items: center;
+  display: grid; grid-template-columns: 56px 1fr 1fr 64px; gap: 8px; align-items: center;
   background: #101012; border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px;
 }
 .wo-setrow.current { border-color: var(--red); }
+.wo-setnum { font-weight: 800; color: var(--muted); text-align: center; display: grid; gap: 2px; align-content: center; }
+/* Per-set last-time reference (Oct 19 2026, Bobby): what they lifted last
+   session, right under the set number. */
+.wo-lastset { display: block; font-size: 10px; font-weight: 700; color: var(--red); white-space: nowrap; }
+/* Workout day picker (Oct 19 2026, Bobby): free choice of Day 1/2/3/4. */
+.wo-picker { max-width: 560px; margin: 0 auto; padding: 18px 14px 40px; }
+.wo-daycard { display: grid; gap: 4px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin: 0 0 12px; text-decoration: none; color: var(--text); }
+.wo-daycard:active { border-color: var(--red); }
+.wo-daycard-label { font-size: 20px; font-weight: 800; }
+.wo-daycard-exs { font-size: 13px; color: var(--muted); }
+.wo-daycard-go { margin-top: 8px; font-weight: 800; color: var(--red); }
 .wo-setrow.done { opacity: .65; }
 .wo-setnum { font-weight: 800; color: var(--muted); text-align: center; }
 .wo-setrow label { display: grid; gap: 2px; font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }

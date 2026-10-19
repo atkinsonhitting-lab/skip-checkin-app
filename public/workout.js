@@ -240,8 +240,13 @@
     }
     var rows = it.dispSets.map(function (s, k) {
       var cur = !s.done && it.dispSets.slice(0, k).every(function (x) { return x.done; });
+      // Bobby (Oct 19 2026): each set shows what they did last time, right
+      // next to the set number — the lifter's reference for today's load.
+      var ls = it.lastSets && it.lastSets[k];
+      var lastChip = (ls && (ls.w != null || ls.r != null))
+        ? '<span class="wo-lastset">' + esc((ls.w != null ? ls.w : '–') + '×' + (ls.r != null ? ls.r : '–')) + '</span>' : '';
       return '<div class="wo-setrow' + (s.done ? ' done' : '') + (cur ? ' current' : '') + '" data-k="' + k + '">' +
-        '<div class="wo-setnum">' + (k + 1) + '</div>' +
+        '<div class="wo-setnum">' + (k + 1) + lastChip + '</div>' +
         '<label>lbs<input type="number" inputmode="decimal" min="0" step="2.5" class="wo-w" value="' +
           (s.w != null ? esc(s.w) : '') + '" placeholder="—" ' + (s.done ? 'disabled' : '') + '></label>' +
         '<label>reps<input type="number" inputmode="numeric" min="0" class="wo-r" value="' +
