@@ -1806,3 +1806,21 @@ body.uc-theme .td-barfill { background: #c41e33; }
 body.uc-theme .routine-station { color: #c41e33; }
 body.uc-theme a { color: #c41e33; }
 body.uc-theme .td-checkbtn { color: #c41e33; }
+
+/* UNCOMMON wordmark (standalone — works on coach views too) */
+.uc-wordmark {
+  display: inline-block;
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: .18em;
+  color: #fff;
+  border-bottom: 3px solid #a3162a;
+  padding-bottom: 4px;
+  margin: 0;
+}
+.uc-tagline {
+  margin: 10px 0 0;
+  font-size: 14px;
+  color: #b8b8b8;
+  font-style: italic;
+}

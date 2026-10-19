@@ -6986,7 +6986,7 @@ function hittingPlanPage(user, p, opts) {
     tabs: o.layoutTabs || userTabs('program', user),
     body: `${o.coachBar || ''}${sectionTabHtml}${todayPickerHtml(user, tabs, o.picks, o.pickBack)}<div class="doc-page">
       <div class="doc-header">
-        <img src="/atkinson-hitting-logo.jpg" class="doc-logo-img" alt="Atkinson Hitting">
+        <p class="uc-wordmark" style="font-size:26px">UNCOMMON</p>
         <div class="doc-title-wrap">
           <h1 class="doc-title">Hitting Program</h1>
           <p class="doc-athlete">${esc(athleteName)}</p>
