@@ -1859,6 +1859,33 @@ body.uc-theme .streak-num { color: var(--uc-baby); }
 body.uc-theme .td-sec-head,
 body.uc-theme .prog-sec-head { border-bottom-color: rgba(125, 211, 252, .25); }
 
+/* More baby blue presence (Bobby: more baby blue) — secondary accent, red stays
+   primary. Baby blue text only on the dark theme background. */
+/* Outlined secondary buttons in baby blue (website pill style) */
+body.uc-theme .btn-ghost { border-color: var(--uc-baby); color: var(--uc-baby); }
+body.uc-theme .btn-ghost:active { border-color: var(--uc-baby); color: #fff; background: rgba(125, 211, 252, .12); }
+/* Section headers — baby blue accent */
+body.uc-theme .section-head { color: var(--uc-baby); }
+/* Lead-text emphasis (website .lede-pop) */
+body.uc-theme .lede strong, body.uc-theme .lede b { color: var(--uc-baby); }
+/* Expandable toggle links in baby blue (website .all-results-toggle) */
+body.uc-theme .works-details summary { color: var(--uc-baby); }
+body.uc-theme .works-details summary:hover { color: #fff; }
+/* Day picker cards — baby blue left accent and Start link (website step feel) */
+body.uc-theme .wo-daycard { border-left: 3px solid var(--uc-baby); }
+body.uc-theme .wo-daycard-go { color: var(--uc-baby); }
+/* Stat cards — baby blue top accent and labels */
+body.uc-theme .stat-card { border-top: 2px solid var(--uc-baby); }
+body.uc-theme .stat-label { color: var(--uc-baby); }
+/* Inactive tab badges tinted baby blue */
+body.uc-theme .tab .tab-badge { background: rgba(125, 211, 252, .16); color: var(--uc-baby); }
+/* Last-week set chips and summary in baby blue (website colors results baby blue) */
+body.uc-theme .wo-lastset { color: var(--uc-baby); }
+body.uc-theme .wo-last { border-color: rgba(125, 211, 252, .35); }
+body.uc-theme .wo-last strong { color: var(--uc-baby); }
+/* Progress percentage in baby blue */
+body.uc-theme .td-progress span:last-child { color: var(--uc-baby); font-weight: 800; }
+
 /* UNCOMMON wordmark (standalone — works on coach views too) */
 .uc-wordmark {
   display: inline-block;
