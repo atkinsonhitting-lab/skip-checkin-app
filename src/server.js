@@ -2079,10 +2079,6 @@ function getCheckoffs(userId, day) {
 // Today's workout picks (Oct 2026, Bobby): which program sections the
 // hitter chose for the day, via the Program tab picker. Returns the array
 // of section ids, or null when nothing was picked (Today shows everything).
-const TODAY_SECTIONS = ['movement', 'hitting', 'medball', 'lifting'];
-// Today view switcher (Oct 2026, Bobby): Hitting / Lifting / Movement as
-// separate views. Hitting is the first/default view (Bobby, Oct 19 2026).
-const TODAY_VIEWS = ['hitting', 'lifting', 'movement'];
 function todayViewOf(v) {
   const s = String(v || '').toLowerCase();
   return TODAY_VIEWS.includes(s) ? s : 'hitting';
@@ -2091,24 +2087,6 @@ function todayViewRedirect(v) {
   const view = todayViewOf(v);
   return view === 'hitting' ? '/program/today' : `/program/today?view=${view}`;
 }
-function getTodayPicks(userId, day) {
-  try {
-    const r = db.prepare('SELECT sections FROM today_workout_picks WHERE user_id = ? AND day = ?').get(userId, day);
-    if (!r) return null;
-    const arr = JSON.parse(r.sections || '[]');
-    if (!Array.isArray(arr)) return null;
-    const clean = arr.map((s) => String(s)).filter((s) => TODAY_SECTIONS.includes(s));
-    return clean;
-  } catch (e) { return null; }
-}
-function setTodayPicks(userId, day, sections) {
-  const clean = [...new Set((Array.isArray(sections) ? sections : []).map((s) => String(s)).filter((s) => TODAY_SECTIONS.includes(s)))];
-  db.prepare(`INSERT OR REPLACE INTO today_workout_picks (user_id, day, sections, updated_at)
-    VALUES (?, ?, ?, ?)`)
-    .run(userId, day, JSON.stringify(clean), new Date().toISOString());
-  return clean;
-}
-
 // Today's drill picks (Oct 2026, Bobby): the hitter picks which program
 // drills they're doing today (+ custom typed-in drills), and tags each drill
 // with what they did it on (Tee/Side toss/Front toss/Darts/BP/Machine).
@@ -2583,14 +2561,13 @@ app.get('/program/today', requireLogin, requireWaiver, (req, res) => {
   const lifting = getLifting(liftingId && liftingId.lifting_program_id);
   const today = chiToday();
   const checkoffs = getCheckoffs(req.user.id, today);
-  const picks = getTodayPicks(req.user.id, today);
   const liftDays = Array.isArray(lifting && lifting.days) ? lifting.days.filter((d) =>
     (Array.isArray(d.exercises) ? d.exercises : []).some((ex) => String((ex && ex.name) || '').trim())
   ) : [];
   const ldayIdx = pickLiftingDayIdx(req, p, liftDays.length);
   const drillPicks = getTodayDrills(req.user.id, today);
   res.send(views.todayProgramPage(req.user, p, {
-    lifting, ldayIdx, checkoffs, today, picks,
+    lifting, ldayIdx, checkoffs, today,
     view: todayViewOf(req.query.view),
     videoLib: videoLibMap(),
     subs: todaySubs(req.user.id),
@@ -2600,25 +2577,6 @@ app.get('/program/today', requireLogin, requireWaiver, (req, res) => {
     prescribedEnvs: prescribedTrainEnvs(p.prog),
     didOnEnvs: DID_ON_ENVS,
   }));
-});
-
-// Today's workout picker (Oct 2026, Bobby): toggle one program section
-// in/out of today's workout. First toggle starts from all sections, so
-// tapping reads as "take this one out / put it back". Guarded: an unknown
-// or missing section never wipes existing picks — it just redirects back.
-app.post('/program/today-pick', requireLogin, requireWaiver, (req, res) => {
-  if (req.user.role === 'coach') return res.status(403).send('Coaches cannot pick workouts.');
-  if (!req.user.remoteProgramId) return res.status(403).send('No program assigned.');
-  if (req.user.viewAs) return res.status(403).send('View-as is read-only.');
-  const back = String(req.body.back || '/program/hitting-plan').slice(0, 160);
-  const safeBack = back.startsWith('/program/') ? back : '/program/hitting-plan';
-  const section = String(req.body.section || '').trim().toLowerCase();
-  if (!TODAY_SECTIONS.includes(section)) return res.redirect(safeBack);
-  const day = chiToday();
-  const cur = getTodayPicks(req.user.id, day) || [...TODAY_SECTIONS];
-  const next = cur.includes(section) ? cur.filter((s) => s !== section) : [...cur, section];
-  setTodayPicks(req.user.id, day, next);
-  res.redirect(safeBack);
 });
 
 // Today's drill picker (Oct 2026, Bobby): the hitter picks which program
@@ -2721,7 +2679,6 @@ app.get('/program/movement', requireLogin, requireWaiver, (req, res) => {
     sched: [], weekday: chiWeekdayFmt.format(new Date()), isToday: true,
     videoLib: videoLibMap(), subs: todaySubs(req.user.id),
     sessionOrder: 'hitting_first',
-    picks: getTodayPicks(req.user.id, today), pickBack: req.originalUrl,
   }));
 });
 
@@ -2744,7 +2701,6 @@ app.get('/program/medball', requireLogin, requireWaiver, (req, res) => {
     sched: [], weekday: chiWeekdayFmt.format(new Date()), isToday: true,
     videoLib: videoLibMap(), subs: todaySubs(req.user.id),
     sessionOrder: 'hitting_first',
-    picks: getTodayPicks(req.user.id, today), pickBack: req.originalUrl,
   }));
 });
 
@@ -2848,7 +2804,6 @@ app.get('/program/hitting-plan', requireLogin, requireWaiver, (req, res) => {
   const today = chiToday();
   res.send(views.hittingPlanPage(req.user, p, {
     tabs, sub: 'hitting',
-    picks: getTodayPicks(req.user.id, today), pickBack: req.originalUrl,
     hitterPrepDefaults: HITTER_PREP_DEFAULTS,
   }));
 });
@@ -2865,7 +2820,7 @@ app.get('/program/lifting', requireLogin, requireWaiver, (req, res) => {
   const tabs = programSectionTabs(p, lifting);
   if (!lifting) {
     const _t = chiToday();
-    return res.send(views.hittingPlanPage(req.user, p, { tabs, picks: getTodayPicks(req.user.id, _t), pickBack: req.originalUrl, hitterPrepDefaults: HITTER_PREP_DEFAULTS }));
+    return res.send(views.hittingPlanPage(req.user, p, { tabs, hitterPrepDefaults: HITTER_PREP_DEFAULTS }));
   } // No lifting? Show hitting doc
   // Render the lifting section using the existing programPage view.
   // The section tab bar at the top links the sections together.
@@ -2890,7 +2845,6 @@ app.get('/program/lifting', requireLogin, requireWaiver, (req, res) => {
     subs: todaySubs(req.user.id),
     sessionOrder: 'hitting_first',
     programTab: 'lifting', // Flag for the view to show Hitting/Lifting switcher
-    picks: getTodayPicks(req.user.id, today), pickBack: req.originalUrl,
   }));
 });
 

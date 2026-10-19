@@ -288,30 +288,6 @@ const TABBAR_ICONS = {
   '/program/hitting-plan': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',
   '/videos': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"/><polygon points="10 9 15 12 10 15 10 9" fill="currentColor" stroke="none"/></svg>',
 };
-// Today's workout picker (Oct 2026, Bobby): on each Program section page
-// the hitter taps which sections they're doing today. One form, one submit
-// button per section — tapping toggles it via /program/today-pick and lands
-// back on the same page. Only the athlete's non-blank sections render, so
-// a hitter without lifting never sees a lifting chip. Coaches in view-as
-// never see the picker (their taps can't save).
-function todayPickerHtml(user, tabs, picks, backHref) {
-  if (!user || user.role !== 'athlete' || !user.remoteProgramId || user.viewAs) return '';
-  const order = ['movement', 'hitting', 'medball', 'lifting'];
-  const list = (Array.isArray(tabs) ? tabs : [])
-    .filter((t) => order.includes(t.id))
-    .sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
-  if (!list.length) return '';
-  const picked = Array.isArray(picks) && picks.length ? picks : list.map((t) => t.id);
-  const chips = list.map((t) => {
-    const on = picked.includes(t.id);
-    return `<button type="submit" name="section" value="${esc(t.id)}" class="tp-chip${on ? ' on' : ''}" aria-pressed="${on ? 'true' : 'false'}">${esc(t.label)}${on ? ' ✓' : ''}</button>`;
-  }).join('');
-  return `<div class="today-pick"><span class="today-pick-label">Today's workout — tap what you're doing:</span>
-    <form method="post" action="/program/today-pick" class="today-pick-form">
-      <input type="hidden" name="back" value="${esc(String(backHref || '/program/hitting-plan')).slice(0, 160)}">
-      ${chips}
-    </form></div>`;
-}
 function bottomTabbar(user, tabs) {
   if (!user) return '';
   const isCoach = user.role === 'coach';
@@ -3572,15 +3548,8 @@ function todayProgramPage(user, p, opts) {
   if (isRestDay) {
     content = `<div class="td-card"><p style="margin:0"><strong>Rest day — recover.</strong></p><p class="td-hint" style="margin:6px 0 0">No work scheduled today. Walk, stretch, sleep — the rest is the work.</p></div>`;
   } else {
-    // Workout picks (Oct 2026, Bobby): the hitter chose today's sections on
-    // the Program tab. No picks (or empty picks) = show all non-blank
-    // sections — Today is never empty because of the picker.
-    const picks = Array.isArray(o.picks) && o.picks.length ? o.picks : null;
-    const showSec = (id) => !picks || picks.includes(id);
-    // Med ball: when a lifting day exists the section renders that day's
-    // med ball work, so it follows the Lifting pick; otherwise it follows
-    // the Med Ball pick. (Lifters have no standalone Med Ball tab.)
-    const showMed = curDay ? showSec('lifting') : showSec('medball');
+    // Bobby (Oct 19 2026): no section picking — the Today tab always shows
+    // all categories and the hitter fills out whatever they want.
     // View switcher (Oct 2026, Bobby): Hitting / Lifting / Movement as
     // clearly separate views — each section feels like its own part, never
     // blended. Hitting is first/default (Bobby, Oct 19 2026). Only the active
@@ -3593,7 +3562,6 @@ function todayProgramPage(user, p, opts) {
     const switcherHtml = `<div class="td-viewswitch" role="tablist" aria-label="Today views">${viewTabs.map((v) =>
       `<a href="/program/today${v.id === 'hitting' ? '' : `?view=${v.id}`}" role="tab" aria-selected="${view === v.id ? 'true' : 'false'}" class="td-viewtab${view === v.id ? ' on' : ''}">${esc(v.label)}</a>`
     ).join('')}</div>`;
-    const notPickedHtml = (label) => `<div class="td-card"><p style="margin:0"><strong>${esc(label)} isn't in today's picks.</strong></p><p class="td-hint" style="margin:6px 0 0">Add it on the <a href="/program" style="color:#fff">Program</a> tab, or pick another view above.</p></div>`;
     const viewEmptyHtml = (label) => `<div class="td-card"><p style="margin:0"><strong>No ${esc(String(label).toLowerCase())} work scheduled today.</strong></p><p class="td-hint" style="margin:6px 0 0">Try another view above.</p></div>`;
     // Each view gets its own clear header so the sections stay visually
     // separate (Bobby, Oct 2026).
@@ -3601,16 +3569,14 @@ function todayProgramPage(user, p, opts) {
     let viewContent = '';
     if (view === 'lifting') {
       // Lifting view: med ball + speed + lifts.
-      const liftViewHtml = (showMed && medHtml ? sectionHtml(esc(secLabels.medball), medHtml) : '')
+      const liftViewHtml = (medHtml ? sectionHtml(esc(secLabels.medball), medHtml) : '')
         // Blank sections never render: no lifting day means no Lifting
         // section at all (Bobby, Oct 2026) — no empty header, no blank card.
-        + ((curDay && showSec('lifting')) ? sectionHtml(`${esc(secLabels.lifting)} · ${esc(liftDayLabel)}`, liftHtml) : '');
-      viewContent = (!showSec('lifting') && !(showMed && medHtml)) ? notPickedHtml(secLabels.lifting)
-        : liftViewHtml ? viewHeadHtml(secLabels.lifting, liftDayLabel || 'Strength, power & speed') + liftViewHtml
+        + (curDay ? sectionHtml(`${esc(secLabels.lifting)} · ${esc(liftDayLabel)}`, liftHtml) : '');
+      viewContent = liftViewHtml ? viewHeadHtml(secLabels.lifting, liftDayLabel || 'Strength, power & speed') + liftViewHtml
         : viewEmptyHtml(secLabels.lifting);
     } else if (view === 'movement') {
-      viewContent = !showSec('movement') ? notPickedHtml(secLabels.movement)
-        : movementHtml ? viewHeadHtml(secLabels.movement, 'Warm-up') + sectionHtml(`${esc(secLabels.movement)} · Warm-up`, movementHtml)
+      viewContent = movementHtml ? viewHeadHtml(secLabels.movement, 'Warm-up') + sectionHtml(`${esc(secLabels.movement)} · Warm-up`, movementHtml)
         : viewEmptyHtml(secLabels.movement);
     } else {
       // Bobby (Oct 19 2026): Finish button at the bottom of the day's hitting
@@ -3621,14 +3587,10 @@ function todayProgramPage(user, p, opts) {
       const finishHtml = hittingHtml ? (finishDone
         ? `<div class="td-card" style="text-align:center"><p style="margin:0;font-size:16px;font-weight:800">🔒 Hitting complete for today</p><p class="td-hint" style="margin:6px 0 0">Nice work. See you tomorrow.</p></div>`
         : `<form method="post" action="/program/check" style="margin-top:18px"><input type="hidden" name="kind" value="hit"><input type="hidden" name="sub" value="today">${viewInput}<input type="hidden" name="day" value="${esc(todayLabel)}"><input type="hidden" name="item_key" value="${esc(finishKey)}"><button type="submit" class="wo-bigbtn" style="width:100%">✓ Finish Hitting</button></form>`) : '';
-      viewContent = !showSec('hitting') ? notPickedHtml(secLabels.hitting)
-        : hittingHtml ? viewHeadHtml(secLabels.hitting, 'Drills & training environments') + sectionHtml(esc(secLabels.hitting), hittingHtml) + finishHtml
+      viewContent = hittingHtml ? viewHeadHtml(secLabels.hitting, 'Drills & training environments') + sectionHtml(esc(secLabels.hitting), hittingHtml) + finishHtml
         : viewEmptyHtml(secLabels.hitting);
     }
     content = switcherHtml + viewContent;
-    if (picks) {
-      content += `<p class="td-hint" style="margin:10px 0 0">Showing your picked workout — change it on the <a href="/program" style="color:#fff">Program</a> tab.</p>`;
-    }
     // Truly nothing scheduled anywhere: none of the views have content.
     if (!movementHtml && !hittingHtml && !medHtml && !liftHtml) {
       content = switcherHtml + `<div class="td-card"><p style="margin:0"><strong>No program yet.</strong></p><p class="td-hint" style="margin:6px 0 0">Nothing scheduled for today. Your coach will add your program here.</p></div>`;
@@ -4018,7 +3980,6 @@ function programPage(user, p, opts) {
     <p><a href="/program/hitting-plan" class="btn" style="display:inline-block;text-decoration:none">📄 Hitting Plan</a></p>
     ${meta ? `<p class="lede">${meta}</p>` : ''}
     ${tabHtml}
-    ${todayPickerHtml(user, tabs, o.picks, o.pickBack)}
     ${weekStrip()}
     ${(() => {
       // Guided Today session: one tap runs the whole day in the athlete's
@@ -7133,7 +7094,7 @@ function hittingPlanPage(user, p, opts) {
     title: 'Hitting Program',
     user,
     tabs: o.layoutTabs || userTabs('program', user),
-    body: `${o.coachBar || ''}${sectionTabHtml}${todayPickerHtml(user, tabs, o.picks, o.pickBack)}<div class="doc-page">
+    body: `${o.coachBar || ''}${sectionTabHtml}<div class="doc-page">
       <div class="doc-header">
         <p class="uc-wordmark" style="font-size:26px">UNCOMMON</p>
         <div class="doc-title-wrap">
