@@ -5163,6 +5163,38 @@ function assignBobbyAthleteLifting() {
     console.log('assignBobbyAthleteLifting failed:', e.message);
   }
 }
+// Bobby's hitting drills for his test REMOTE ATHLETE entry (Oct 19 2026, via chat).
+// Replaces the hitting drills with his three: Open 45, Step on the plate drill,
+// Load then launch drill. Everything else in the program is untouched.
+// _custom is set so the lazy-backfill sheet regen never overwrites his chat edit.
+// Runs on boot; idempotent.
+function setBobbyAthleteHittingDrills() {
+  try {
+    const athlete = db.prepare(
+      "SELECT id, remote_program_id FROM users WHERE role = 'athlete' AND (lower(athlete_name) LIKE '%bobby atkinson%' OR lower(coalesce(first_name,'') || ' ' || coalesce(last_name,'')) LIKE '%bobby atkinson%') LIMIT 1"
+    ).get();
+    if (!athlete) { console.log('setBobbyAthleteHittingDrills: no Bobby Atkinson athlete found'); return; }
+    if (!athlete.remote_program_id) { console.log('setBobbyAthleteHittingDrills: athlete has no remote_program_id'); return; }
+    const p = getProgram(athlete.remote_program_id);
+    if (!p) { console.log('setBobbyAthleteHittingDrills: program not found'); return; }
+    if (!p.prog.hitting_plan || typeof p.prog.hitting_plan !== 'object') p.prog.hitting_plan = {};
+    const want = ['Open 45', 'Step on the plate drill', 'Load then launch drill'];
+    const cur = Array.isArray(p.prog.hitting_plan.drills) ? p.prog.hitting_plan.drills.map((d) => d && d.name) : [];
+    const same = cur.length === want.length && want.every((n, i) => cur[i] === n);
+    if (same && p.prog.hitting_plan._custom) {
+      console.log('setBobbyAthleteHittingDrills: already set (remote_program ' + p.id + ')');
+      return;
+    }
+    p.prog.hitting_plan.drills = want.map((n) => ({ name: n, progression: '', why: '', setsReps: '' }));
+    p.prog.hitting_plan._custom = true;
+    p.prog.hitting_plan._v = HITTING_PLAN_VERSION;
+    db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?')
+      .run(JSON.stringify(p.prog), new Date().toISOString(), p.id);
+    console.log('setBobbyAthleteHittingDrills: set 3 drills for athlete id ' + athlete.id + ' (remote_program ' + p.id + ')');
+  } catch (e) {
+    console.log('setBobbyAthleteHittingDrills failed:', e.message);
+  }
+}
 // Bobby's training week (Chicago time): Mon=Day 1, Tue=Day 2, Thu=Day 3,
 // Fri=Day 4. Wed/Sat/Sun = rest (no lifting). ?lday=N overrides.
 function bobbyDayIdx(req) {
@@ -10738,6 +10770,7 @@ app.listen(PORT, () => {
   console.log(`Skip listening on port ${PORT}`);
   seedBobbyLifting();
   assignBobbyAthleteLifting();
+  setBobbyAthleteHittingDrills();
   const n = db.prepare("SELECT COUNT(*) AS n FROM users WHERE role != 'coach'").get().n;
   console.log(`Players signed up: ${n}`);
   if (!process.env.SESSION_SECRET && isProd) {
