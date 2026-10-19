@@ -3302,8 +3302,9 @@ const realExercises = (exs) =>
 // (see isTodayLayoutUser in server.js). One day, sections in
 // order: Movement, Hitting, Med Ball, Lifting. Check-offs POST to the
 // existing /program/check endpoint with sub=today. Substitute links use
-// the existing /program/substitute flow. Reorder + move-day are
-// client-side-only in this preview (nothing persists).
+// the existing /program/substitute flow. Reorder is client-side-only in
+// this preview (nothing persists). (move-day was removed Oct 2026 — no set
+// schedule, hitters pick their lifting day freely.)
 // UNCOMMON branding (Oct 2026, Bobby): wordmark hero banner for the
 // remote (UNCOMMON) surfaces, matching the uncommon-site sales page.
 function ucHero(tagline) {
@@ -3674,8 +3675,6 @@ function todayProgramPage(user, p, opts) {
 .td-card{background:#111;border:1px solid #222;border-radius:12px;padding:16px;margin-top:16px}
 .td-hint{font-size:12px;color:#888}
 .td-held{background:#111;border:1px dashed #333;border-radius:12px;padding:14px;margin:10px 0}
-.td-move{width:100%;background:#111;color:#fff;border:1px solid #333;border-radius:10px;padding:12px;font-size:13px;font-weight:600;margin-top:20px;cursor:pointer}
-.td-movenote{font-size:12px;color:#888;margin:8px 0 0;text-align:center}
 .td-pickchips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 10px}
 .td-chipform{display:inline;margin:0;padding:0}
 .td-pickchip{border:1px solid #333;border-radius:20px;padding:8px 14px;font-size:13px;font-weight:600;background:#111;color:#fff;cursor:pointer}
@@ -3712,13 +3711,8 @@ ${ucTop}
 <div class="td-progress"><span>${doneItems} of ${totalItems} complete</span><span>${pct}%</span></div>
 <div class="td-bar"><div class="td-barfill" style="width:${pct}%"></div></div>
 ${content}
-<button type="button" class="td-move" id="td-move-day">Move day to tomorrow</button>
-<p class="td-movenote" id="td-move-note" hidden>Moving days doesn't save yet in this preview.</p>
 <script>
 (function () {
-  var moveBtn = document.getElementById('td-move-day');
-  var moveNote = document.getElementById('td-move-note');
-  if (moveBtn && moveNote) moveBtn.addEventListener('click', function () { moveNote.hidden = false; moveBtn.textContent = 'Day move noted — not saved yet'; });
   // Drag handles reorder rows within a section (preview only — order does
   // not save). Rows are forms, so dragging starts from the handle only.
   var dragged = null;
