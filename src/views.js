@@ -3833,10 +3833,9 @@ function programPage(user, p, opts) {
       const lab = s ? s.label : '';
       const isToday = wd.toLowerCase() === String(weekday).toLowerCase();
       const isOff = /^(off|rest)/i.test(lab) || !lab;
-      // Bobby (Sep 23 2026): Mobility Day opens the Movement tab;
-      // lifters get mobility inside the Lifting tab, so it opens lifting.
-      const hasMovementTab = tabs.some((t) => t.id === 'movement');
-      const tab = /mobility day/i.test(lab) ? (hasMovementTab ? 'movement' : 'lifting') : sub;
+      // Bobby (Oct 19 2026): mobility lives in Movement only — Mobility
+      // Day always opens the Movement tab.
+      const tab = /mobility day/i.test(lab) ? 'movement' : sub;
       const inner = `<span class="ws-dow">${wd.slice(0, 3)}</span><span class="ws-lab">${esc(lab || '—')}</span>`;
       const cls = `ws-cell${isToday ? ' ws-today' : ''}${isOff ? ' ws-off' : ''}`;
       return isOff
@@ -4005,14 +4004,8 @@ function programPage(user, p, opts) {
         <span class="start-workout-play">▶</span>
         <span class="start-workout-text"><strong>Start Workout</strong>
         <span>Pick your day, then walk through it — video + logging as you go</span></span></a>`;
-      // Bobby (Sep 23 2026): mobility pairs WITH the lifting — no standalone
-      // Mobility tab for lifters. Mobility blocks render first, as the warm-up.
-      const mobBlocks = routine.filter((c) => kindOf(c.category) === 'mobility' && realItems(c.items).length);
-      const mobHtml = mobBlocks.length
-        ? `<h3 class=\"prog-h3\"><span class=\"flow-num\">0</span> 🧘 Mobility — move first, then work</h3>` +
-          mobBlocks.map((c) => blockCard(c.category, c.items, 'mob')).join('')
-        : '';
-      content = `${topStartBtn}${phaseBanner}${mobHtml}${speedHtml}${medHtml}${liftSubTab(user, lifting, days, effLday, sub, checkoffs, today, o.liftData || {}, o.subs || {}, secBase, o.todayLdayIdx, o.sched, o.weekday)}${YT_TOGGLE_SCRIPT}`;
+      // Bobby (Oct 19 2026): mobility lives in Movement only — never in Lifting.
+      content = `${topStartBtn}${phaseBanner}${speedHtml}${medHtml}${liftSubTab(user, lifting, days, effLday, sub, checkoffs, today, o.liftData || {}, o.subs || {}, secBase, o.todayLdayIdx, o.sched, o.weekday)}${YT_TOGGLE_SCRIPT}`;
     }
   } else {
     // HITTING (default): today's plan first — prep for the day + the day's
@@ -4162,19 +4155,9 @@ function myLiftingPage(user, lifting, o) {
 }
 
 function workoutPage(user, program, wd, ldayIdx, preview, phaseNotes, opts) {
-  // Bobby (Sep 23 2026): mobility pairs WITH the lifting — the guided workout
-  // opens with the athlete's mobility blocks, then Speed → Med Ball → Lifts.
-  const progRoutine = (program && program.prog && Array.isArray(program.prog.routine)) ? program.prog.routine : [];
-  const mobItems = [];
-  for (const c of progRoutine) {
-    if (!/mobility/i.test(String((c && c.category) || ''))) continue;
-    for (const it of (Array.isArray(c.items) ? c.items : [])) {
-      const nm = String((it && it.drill) || '').trim();
-      if (nm) mobItems.push({ name: nm, volume: String((it && it.sets) || ''), video: String((it && it.video) || ''), type: 'mobility' });
-    }
-  }
-  const wdMob = wd && wd.day ? { ...wd, day: { ...wd.day, mobility: mobItems } } : wd;
-  const dayJson = JSON.stringify(wdMob).replace(/</g, '\\u003c');
+  // Bobby (Oct 19 2026): mobility lives in Movement only — the guided workout
+  // is Speed → Med Ball → Lifts, no mobility items.
+  const dayJson = JSON.stringify(wd).replace(/</g, '\\u003c');
   const lday = Number(ldayIdx) || 0;
   const o2 = opts || {};
   const woBackUrl = o2.backUrl || ('/program?sub=lifting&lday=' + lday);
@@ -4190,8 +4173,8 @@ function workoutPage(user, program, wd, ldayIdx, preview, phaseNotes, opts) {
     : '';
   // Server-rendered fallback: if the client JS fails, the athlete still sees
   // the workout. The JS guided mode enhances this when it loads.
-  const d = (wdMob && wdMob.day) || {};
-  const allItems = [...(d.mobility || []), ...(d.speed || []), ...(d.medball || []), ...(d.lifts || [])];
+  const d = (wd && wd.day) || {};
+  const allItems = [...(d.speed || []), ...(d.medball || []), ...(d.lifts || [])];
   const fallbackHtml = allItems.length
     ? `<div class="card"><h3 style="margin-top:0">Today's exercises (${allItems.length})</h3>` +
       allItems.map((it, i) => {

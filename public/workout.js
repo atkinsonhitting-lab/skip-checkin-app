@@ -19,9 +19,8 @@
   }
 
   var items = [];
-  // Bobby (Sep 23 2026): mobility pairs with the lifting — guided workout
-  // opens with mobility, then Speed → Med Ball → Lifts.
-  (DAY.mobility || []).forEach(function (s) { s.type = s.type || 'mobility'; items.push(s); });
+  // Bobby (Oct 19 2026): mobility lives in Movement only — guided workout
+  // is Speed → Med Ball → Lifts.
   (DAY.speed || []).forEach(function (s) { items.push(s); });
   (DAY.medball || []).forEach(function (s) { items.push(s); });
   (DAY.lifts || []).forEach(function (s) { items.push(s); });
