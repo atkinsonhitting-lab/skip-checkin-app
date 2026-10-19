@@ -2080,17 +2080,6 @@ function getCheckoffs(userId, day) {
 // hitter chose for the day, via the Program tab picker. Returns the array
 // of section ids, or null when nothing was picked (Today shows everything).
 const TODAY_SECTIONS = ['movement', 'hitting', 'medball', 'lifting'];
-// Today view switcher (Oct 2026, Bobby): Movement / Hitting / Lifting.
-// Movement is the default view.
-const TODAY_VIEWS = ['movement', 'hitting', 'lifting'];
-function todayViewOf(v) {
-  const s = String(v || '').toLowerCase();
-  return TODAY_VIEWS.includes(s) ? s : 'movement';
-}
-function todayViewRedirect(v) {
-  const view = todayViewOf(v);
-  return view === 'movement' ? '/program/today' : `/program/today?view=${view}`;
-}
 function getTodayPicks(userId, day) {
   try {
     const r = db.prepare('SELECT sections FROM today_workout_picks WHERE user_id = ? AND day = ?').get(userId, day);
@@ -2555,7 +2544,7 @@ app.get('/program', requireLogin, requireWaiver, (req, res) => {
   // substitute flow's back link (see /program/substitute).
   // (Oct 2026: the Today tab points straight at /program/today, so this
   // route no longer bounces there — Today and Program are different tabs.)
-  if (sub === 'today') return res.redirect(todayViewRedirect(req.body.view));
+  if (sub === 'today') return res.redirect('/program/today');
   if (sub === 'movement' || sub === 'mobility') return res.redirect('/program/movement' + dayQ);
   if (sub === 'medball') return res.redirect('/program/medball' + dayQ);
   if (sub === 'lifting') {
@@ -2590,7 +2579,6 @@ app.get('/program/today', requireLogin, requireWaiver, (req, res) => {
   const drillPicks = getTodayDrills(req.user.id, today);
   res.send(views.todayProgramPage(req.user, p, {
     lifting, ldayIdx, checkoffs, today, picks,
-    view: todayViewOf(req.query.view),
     videoLib: videoLibMap(),
     subs: todaySubs(req.user.id),
     weekday: chiWeekdayFmt.format(new Date()),
@@ -2661,7 +2649,7 @@ app.post('/program/today-drills', requireLogin, requireWaiver, (req, res) => {
     }
   }
   saveTodayDrills(req.user.id, day, { drills, trainEnvs: cur.trainEnvs });
-  res.redirect(todayViewRedirect(req.body.view));
+  res.redirect('/program/today');
 });
 
 // Today's training environments (Oct 2026, Bobby): the hitter logs which
@@ -2691,7 +2679,7 @@ app.post('/program/today-train-envs', requireLogin, requireWaiver, (req, res) =>
     }
   }
   saveTodayDrills(req.user.id, day, { drills: cur.drills, trainEnvs });
-  res.redirect(todayViewRedirect(req.body.view));
+  res.redirect('/program/today');
 });
 
 // Mobility page (Sep 23 2026) — now the Movement tab. The Warm-up doc
@@ -2910,13 +2898,6 @@ app.get('/program/workout', requireLogin, requireWaiver, (req, res) => {
   const today = chiToday();
   const days = (Array.isArray(lifting.days) ? lifting.days : [])
     .filter((d) => (Array.isArray(d.exercises) ? d.exercises : []).some((ex) => String((ex && ex.name) || '').trim()));
-  // Bobby (Oct 19 2026): Start Workout → day picker. No lday param means
-  // the hitter picks Day 1/2/3/4 freely — no schedule, no weekday mapping.
-  const qDay = parseInt(req.query.lday, 10);
-  const hasLday = req.query.lday != null && String(req.query.lday).trim() !== '' && Number.isFinite(qDay);
-  if (!hasLday) {
-    return res.send(views.workoutDayPicker(req.user, lifting, { backUrl: '/program?sub=lifting' }));
-  }
   const ldayIdx = pickLiftingDayIdx(req, p, days.length);
   const wd = buildWorkoutDay(req.user.id, lifting, ldayIdx, today);
   if (!wd.day) return res.redirect('/program?sub=lifting');
@@ -3243,7 +3224,7 @@ app.post('/program/check', requireLogin, requireWaiver, (req, res) => {
   if (!r.ok) return res.redirect('/program');
   // Check-offs route back to the section page they came from (Bobby, Oct
   // 2026). Every remote athlete uses the section pages now.
-  if (sub === 'today') return res.redirect(todayViewRedirect(req.body.view));
+  if (sub === 'today') return res.redirect('/program/today');
   if (sub === 'movement') return res.redirect('/program/movement' + (day ? '?day=' + encodeURIComponent(day) : ''));
   if (sub === 'medball') return res.redirect('/program/medball' + (day ? '?day=' + encodeURIComponent(day) : ''));
   if (sub === 'lifting') {

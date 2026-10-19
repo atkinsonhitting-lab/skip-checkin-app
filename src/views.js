@@ -133,7 +133,7 @@ const progIsHittingDrill = (cat) => !progIsMovement(cat) && !progIsPrep(cat) && 
 // hitters log med ball work by sets and weight. Uses the existing
 // program_checkoffs sets_json via lift_op=set/unset (kind='med').
 // checkoffs: map from getCheckoffs; sub/day: form routing; videoHtml: watch link.
-function medSetLogger(key, name, volume, checkoffs, sub, day, videoHtml, lday, extraHidden) {
+function medSetLogger(key, name, volume, checkoffs, sub, day, videoHtml, lday) {
   const row = (checkoffs || {})[key] || null;
   let loggedSets = [];
   try {
@@ -154,7 +154,6 @@ function medSetLogger(key, name, volume, checkoffs, sub, day, videoHtml, lday, e
     return `<form method="post" action="/program/check" class="med-set-form">
       <input type="hidden" name="kind" value="med">
       <input type="hidden" name="sub" value="${esc(sub)}">
-      ${extraHidden || ''}
       ${day ? `<input type="hidden" name="day" value="${esc(day)}">` : ''}
       ${lday != null && lday !== '' ? `<input type="hidden" name="lday" value="${esc(String(lday))}">` : ''}
       <input type="hidden" name="item_key" value="${esc(key)}">
@@ -371,12 +370,7 @@ function layout({ title, user, tabs, body }) {
   const brandCss = brand
     ? `<style>:root{--red:${brand.primary};--red-dark:${brand.primaryDark};}.topbar{border-bottom-color:${brand.accent};}.brand-powered{font-size:9px;opacity:.55;letter-spacing:1px;margin-left:6px;font-weight:700;}.brand-logo-org{object-fit:contain;background:transparent;border:none;border-radius:0;}</style>`
     : '';
-  // Bobby (Oct 2026): UNCOMMON/remote views never show the Atkinson Hitting
-  // picture logo — they get the UNCOMMON wordmark instead.
-  const isUc = !!(user && user.remoteProgramId);
-  const brandBlock = isUc
-    ? `<div class="brand"><span class="uc-wordmark uc-wordmark-top">UNCOMMON</span></div>`
-    : brand
+  const brandBlock = brand
     ? `<div class="brand"><img src="${esc(brand.logoUrl || '/diamond-daily-logo.jpg')}" class="brand-logo-icon${brand.logoUrl ? ' brand-logo-org' : ''}" alt=""> ${esc(brand.orgName)} <span class="brand-powered">POWERED BY DIAMOND DAILY</span></div>`
     : `<div class="brand"><img src="/diamond-daily-logo.jpg" class="brand-logo-icon" alt=""> DIAMOND DAILY</div>`;
   const drawer = tabHtml
@@ -3320,12 +3314,6 @@ function todayProgramPage(user, p, opts) {
   const videoLib = o.videoLib || {};
   const today = o.today || '';
   const weekday = o.weekday || '';
-  // View switcher (Oct 2026, Bobby): Movement / Hitting / Lifting views on
-  // the Today page. Movement is first/default. The hitter checks off work in
-  // whichever view they've chosen. viewInput keeps the active view across
-  // POSTs (check-offs, picker toggles) so the hitter lands back in it.
-  const view = ['movement', 'hitting', 'lifting'].includes(o.view) ? o.view : 'movement';
-  const viewInput = `<input type="hidden" name="view" value="${view}">`;
   // Per-hitter section labels (Bobby, Oct 2026) — renamed for this athlete
   // only, stored on their program.
   const secLabels = sectionLabelsOf(prog);
@@ -3371,7 +3359,7 @@ function todayProgramPage(user, p, opts) {
       try { const _s = JSON.parse(_row && _row.sets_json ? _row.sets_json : '[]'); if (Array.isArray(_s)) _logged = _s; } catch (e) {}
       if (_logged.length && _logged.every((s) => s.done)) doneItems += 1;
       else if (!_logged.length && _row) doneItems += 1;
-      return medSetLogger(key, name, volume, checkoffs, 'today', todayLabel, watchLink(video), '', viewInput);
+      return medSetLogger(key, name, volume, checkoffs, 'today', todayLabel, watchLink(video), '');
     }
     const done = !!checkoffs[key];
     totalItems += 1;
@@ -3385,7 +3373,6 @@ function todayProgramPage(user, p, opts) {
     return `<form method="post" action="/program/check" class="td-row${done ? ' done' : ''}" data-td-row>
       <input type="hidden" name="kind" value="${kind}">
       <input type="hidden" name="sub" value="today">
-      ${viewInput}
       <input type="hidden" name="day" value="${esc(todayLabel)}">
       ${extra || ''}
       <input type="hidden" name="item_key" value="${esc(key)}">
@@ -3464,9 +3451,9 @@ function todayProgramPage(user, p, opts) {
     <p class="td-envnote">Pick the drills you're doing today.</p>
     <div class="td-pickchips">${progDrills.map((pd) => {
       const isOn = pickedSet.has(pd.name.toLowerCase());
-      return `<form method="post" action="/program/today-drills" class="td-chipform"><input type="hidden" name="op" value="toggle_drill">${viewInput}<input type="hidden" name="drill" value="${esc(pd.name)}"><button type="submit" class="td-pickchip${isOn ? ' on' : ''}">${esc(pd.name)}</button></form>`;
+      return `<form method="post" action="/program/today-drills" class="td-chipform"><input type="hidden" name="op" value="toggle_drill"><input type="hidden" name="drill" value="${esc(pd.name)}"><button type="submit" class="td-pickchip${isOn ? ' on' : ''}">${esc(pd.name)}</button></form>`;
     }).join('') || '<span class="td-hint">No drills in your program yet.</span>'}</div>
-    <form method="post" action="/program/today-drills" class="td-customadd"><input type="hidden" name="op" value="add_drill">${viewInput}<input type="text" name="name" placeholder="+ Add your own drill" maxlength="120" autocomplete="off"><button type="submit">Add</button></form>`;
+    <form method="post" action="/program/today-drills" class="td-customadd"><input type="hidden" name="op" value="add_drill"><input type="text" name="name" placeholder="+ Add your own drill" maxlength="120" autocomplete="off"><button type="submit">Add</button></form>`;
   // Picked drill rows: name + volume + video, "did it on" tag chips,
   // custom "did it on" input, check-off.
   const drillRowsHtml = drillPicks.map((d) => {
@@ -3483,19 +3470,19 @@ function todayProgramPage(user, p, opts) {
     const onChips = allOn.map((e) => {
       const en = String(e);
       const isOn = onEnvs.some((x) => String(x).toLowerCase() === en.toLowerCase());
-      return `<form method="post" action="/program/today-drills" class="td-chipform"><input type="hidden" name="op" value="toggle_on">${viewInput}<input type="hidden" name="drill" value="${esc(dname)}"><input type="hidden" name="env" value="${esc(en)}"><button type="submit" class="td-onchip${isOn ? ' on' : ''}">${esc(en)}</button></form>`;
+      return `<form method="post" action="/program/today-drills" class="td-chipform"><input type="hidden" name="op" value="toggle_on"><input type="hidden" name="drill" value="${esc(dname)}"><input type="hidden" name="env" value="${esc(en)}"><button type="submit" class="td-onchip${isOn ? ' on' : ''}">${esc(en)}</button></form>`;
     }).join('');
     const onTags = onEnvs.length ? `<span class="td-ontags">${onEnvs.map((e) => esc(String(e))).join(' · ')}</span>` : '';
     return `<div class="td-drow${done ? ' done' : ''}" data-td-row>
       <div class="td-drow-top">
-        <form method="post" action="/program/check" class="td-checkform"><input type="hidden" name="kind" value="hit"><input type="hidden" name="sub" value="today">${viewInput}<input type="hidden" name="day" value="${esc(todayLabel)}"><input type="hidden" name="item_key" value="${esc(key)}"><button type="submit" class="td-checkbtn" aria-label="${done ? 'Mark not done' : 'Mark done'}">${done ? '☑' : '☐'}</button></form>
+        <form method="post" action="/program/check" class="td-checkform"><input type="hidden" name="kind" value="hit"><input type="hidden" name="sub" value="today"><input type="hidden" name="day" value="${esc(todayLabel)}"><input type="hidden" name="item_key" value="${esc(key)}"><button type="submit" class="td-checkbtn" aria-label="${done ? 'Mark not done' : 'Mark done'}">${done ? '☑' : '☐'}</button></form>
         <span class="td-drow-main"><span class="td-rowname">${esc(dname)}${d.custom ? ' <span class="td-custombadge">custom</span>' : ''}</span>${info.volume ? `<span class="td-vol">${esc(info.volume)}</span>` : ''}${onTags}</span>
         ${info.video ? watchLink(info.video) : ''}
-        <form method="post" action="/program/today-drills" class="td-chipform"><input type="hidden" name="op" value="remove_drill">${viewInput}<input type="hidden" name="drill" value="${esc(dname)}"><button type="submit" class="td-rm" aria-label="Remove drill">×</button></form>
+        <form method="post" action="/program/today-drills" class="td-chipform"><input type="hidden" name="op" value="remove_drill"><input type="hidden" name="drill" value="${esc(dname)}"><button type="submit" class="td-rm" aria-label="Remove drill">×</button></form>
       </div>
       <span class="td-onlabel">Did it on:</span>
       <div class="td-onchips">${onChips}</div>
-      <form method="post" action="/program/today-drills" class="td-customadd td-customadd-sm"><input type="hidden" name="op" value="add_on">${viewInput}<input type="hidden" name="drill" value="${esc(dname)}"><input type="text" name="env" placeholder="+ Custom setup" maxlength="60" autocomplete="off"><button type="submit">Add</button></form>
+      <form method="post" action="/program/today-drills" class="td-customadd td-customadd-sm"><input type="hidden" name="op" value="add_on"><input type="hidden" name="drill" value="${esc(dname)}"><input type="text" name="env" placeholder="+ Custom setup" maxlength="60" autocomplete="off"><button type="submit">Add</button></form>
     </div>`;
   }).join('');
   // ---- Training Environments (Oct 2026, Bobby) ----
@@ -3506,15 +3493,15 @@ function todayProgramPage(user, p, opts) {
   const trainEnvChips = prescribedEnvs.map((e) => {
     const k = ((e.id ? 'id:' + e.id : 'nm:' + e.name) || '').toLowerCase();
     const isOn = trainEnvSelected.has(k);
-    return `<form method="post" action="/program/today-train-envs" class="td-chipform"><input type="hidden" name="op" value="toggle">${viewInput}<input type="hidden" name="id" value="${esc(e.id || '')}"><input type="hidden" name="name" value="${esc(e.name)}"><button type="submit" class="td-pickchip${isOn ? ' on' : ''}">${esc(e.name)}</button></form>`;
+    return `<form method="post" action="/program/today-train-envs" class="td-chipform"><input type="hidden" name="op" value="toggle"><input type="hidden" name="id" value="${esc(e.id || '')}"><input type="hidden" name="name" value="${esc(e.name)}"><button type="submit" class="td-pickchip${isOn ? ' on' : ''}">${esc(e.name)}</button></form>`;
   }).join('');
   const trainEnvCustomChips = trainEnvPicks.filter((e) => e.custom && !prescribedEnvs.some((p) => p.name.toLowerCase() === String(e.name).toLowerCase())).map((e) => {
-    return `<form method="post" action="/program/today-train-envs" class="td-chipform"><input type="hidden" name="op" value="toggle">${viewInput}<input type="hidden" name="name" value="${esc(e.name)}"><button type="submit" class="td-pickchip on">${esc(e.name)} <span class="td-custombadge">custom</span></button></form>`;
+    return `<form method="post" action="/program/today-train-envs" class="td-chipform"><input type="hidden" name="op" value="toggle"><input type="hidden" name="name" value="${esc(e.name)}"><button type="submit" class="td-pickchip on">${esc(e.name)} <span class="td-custombadge">custom</span></button></form>`;
   }).join('');
   const trainEnvHtml = `<div class="td-subhead">Training Environments</div>
     <p class="td-envnote">The challenge setup for today — which one(s) did you train in?</p>
     <div class="td-pickchips">${trainEnvChips}${trainEnvCustomChips || ''}</div>
-    <form method="post" action="/program/today-train-envs" class="td-customadd"><input type="hidden" name="op" value="add_custom">${viewInput}<input type="text" name="name" placeholder="+ Add your own environment" maxlength="120" autocomplete="off"><button type="submit">Add</button></form>`;
+    <form method="post" action="/program/today-train-envs" class="td-customadd"><input type="hidden" name="op" value="add_custom"><input type="text" name="name" placeholder="+ Add your own environment" maxlength="120" autocomplete="off"><button type="submit">Add</button></form>`;
   // Each Hitting sub-section renders only with content (blank = hidden).
   const hittingHtml = (prepHtml || prepDefaultHtml ? `<div class="td-subhead">Prep</div>${prepHtml}${prepDefaultHtml}` : '')
     + drillPickerHtml
@@ -3538,8 +3525,6 @@ function todayProgramPage(user, p, opts) {
   }
 
   // Lifting: Speed -> Power is inside Med Ball; here are the lifts.
-  // Bobby (Oct 19 2026): Start Workout button at the top of the lifting
-  // section — launches the guided tap-through workout flow (/program/workout).
   let liftHtml = '';
   if (curDay) {
     const daySpeedAll = (Array.isArray(curDay.speed) ? curDay.speed : []).filter((s) => String((s && s.name) || '').trim());
@@ -3553,11 +3538,7 @@ function todayProgramPage(user, p, opts) {
       const vol = [ex.sets && ex.reps ? `${ex.sets} × ${ex.reps}` : '', ex.notes].filter(Boolean).join(' — ');
       return checkRow('lift', `lift::${liftDayLabel}::${ex.name}`, ex.name, vol, ex.video || '', liftExtra);
     }).join('') + heldHtml(heldEx);
-    const startBtn = `<a class="start-workout" href="/program/workout">
-      <span class="start-workout-play">▶</span>
-      <span class="start-workout-text"><strong>Start Workout</strong>
-      <span>Pick your day, then guided flow — log as you go</span></span></a>`;
-    liftHtml = startBtn + speedHtml + exHtml;
+    liftHtml = speedHtml + exHtml;
   }
 
   const sectionHtml = (title, rowsHtml) => rowsHtml
@@ -3583,44 +3564,17 @@ function todayProgramPage(user, p, opts) {
     // med ball work, so it follows the Lifting pick; otherwise it follows
     // the Med Ball pick. (Lifters have no standalone Med Ball tab.)
     const showMed = curDay ? showSec('lifting') : showSec('medball');
-    // View switcher (Oct 2026, Bobby): Movement / Hitting / Lifting views.
-    // Movement is first/default. Only the active view renders — the hitter
-    // checks off work in whichever view they've chosen.
-    const viewTabs = [
-      { id: 'movement', label: secLabels.movement },
-      { id: 'hitting', label: secLabels.hitting },
-      { id: 'lifting', label: secLabels.lifting },
-    ];
-    const switcherHtml = `<div class="td-viewswitch" role="tablist" aria-label="Today views">${viewTabs.map((v) =>
-      `<a href="/program/today${v.id === 'movement' ? '' : `?view=${v.id}`}" role="tab" aria-selected="${view === v.id ? 'true' : 'false'}" class="td-viewtab${view === v.id ? ' on' : ''}">${esc(v.label)}</a>`
-    ).join('')}</div>`;
-    const notPickedHtml = (label) => `<div class="td-card"><p style="margin:0"><strong>${esc(label)} isn't in today's picks.</strong></p><p class="td-hint" style="margin:6px 0 0">Add it on the <a href="/program" style="color:#fff">Program</a> tab, or pick another view above.</p></div>`;
-    const viewEmptyHtml = (label) => `<div class="td-card"><p style="margin:0"><strong>No ${esc(String(label).toLowerCase())} work scheduled today.</strong></p><p class="td-hint" style="margin:6px 0 0">Try another view above.</p></div>`;
-    let viewContent = '';
-    if (view === 'movement') {
-      viewContent = !showSec('movement') ? notPickedHtml(secLabels.movement)
-        : movementHtml ? sectionHtml(`${esc(secLabels.movement)} · Warm-up`, movementHtml)
-        : viewEmptyHtml(secLabels.movement);
-    } else if (view === 'hitting') {
-      viewContent = !showSec('hitting') ? notPickedHtml(secLabels.hitting)
-        : hittingHtml ? sectionHtml(esc(secLabels.hitting), hittingHtml)
-        : viewEmptyHtml(secLabels.hitting);
-    } else {
-      // Lifting view: med ball + speed + lifts.
-      const liftViewHtml = (showMed && medHtml ? sectionHtml(esc(secLabels.medball), medHtml) : '')
-        // Blank sections never render: no lifting day means no Lifting
-        // section at all (Bobby, Oct 2026) — no empty header, no blank card.
-        + ((curDay && showSec('lifting')) ? sectionHtml(`${esc(secLabels.lifting)} · ${esc(liftDayLabel)}`, liftHtml) : '');
-      viewContent = (!showSec('lifting') && !(showMed && medHtml)) ? notPickedHtml(secLabels.lifting)
-        : liftViewHtml || viewEmptyHtml(secLabels.lifting);
-    }
-    content = switcherHtml + viewContent;
+    content = (showSec('movement') ? sectionHtml(`${esc(secLabels.movement)} · Warm-up`, movementHtml) : '')
+      + (showSec('hitting') ? sectionHtml(esc(secLabels.hitting), hittingHtml) : '')
+      + (showMed ? sectionHtml(esc(secLabels.medball), medHtml) : '')
+      // Blank sections never render: no lifting day means no Lifting
+      // section at all (Bobby, Oct 2026) — no empty header, no blank card.
+      + ((curDay && showSec('lifting')) ? sectionHtml(`${esc(secLabels.lifting)} · ${esc(liftDayLabel)}`, liftHtml) : '');
     if (picks) {
-      content += `<p class="td-hint" style="margin:10px 0 0">Showing your picked workout — change it on the <a href="/program" style="color:#fff">Program</a> tab.</p>`;
+      content = `<p class="td-hint" style="margin:10px 0 0">Showing your picked workout — change it on the <a href="/program" style="color:#fff">Program</a> tab.</p>` + content;
     }
-    // Truly nothing scheduled anywhere: none of the views have content.
-    if (!movementHtml && !hittingHtml && !medHtml && !liftHtml) {
-      content = switcherHtml + `<div class="td-card"><p style="margin:0"><strong>No program yet.</strong></p><p class="td-hint" style="margin:6px 0 0">Nothing scheduled for today. Your coach will add your program here.</p></div>`;
+    if (!totalItems) {
+      content = `<div class="td-card"><p style="margin:0"><strong>No program yet.</strong></p><p class="td-hint" style="margin:6px 0 0">Nothing scheduled for today. Your coach will add your program here.</p></div>`;
     }
   }
   const pct = totalItems ? Math.round((doneItems / totalItems) * 100) : 0;
@@ -3692,9 +3646,6 @@ function todayProgramPage(user, p, opts) {
 .td-onchip{border:1px solid #333;border-radius:16px;padding:6px 12px;font-size:12px;font-weight:600;background:#111;color:#fff;cursor:pointer}
 .td-onchip.on{background:#fff;color:#000;border-color:#fff}
 .td-rm{background:none;border:none;color:#666;font-size:20px;line-height:1;padding:4px;cursor:pointer}
-.td-viewswitch{display:flex;gap:8px;margin:14px 0 4px}
-.td-viewtab{flex:1;text-align:center;text-decoration:none;font-size:14px;font-weight:800;letter-spacing:.5px;color:#999;background:#111;border:1px solid #2a2a2a;border-radius:12px;padding:12px 8px}
-.td-viewtab.on{color:#fff;background:#1c1c1c;border-color:#fff}
 </style>
 ${ucTop}
 <h1 class="td-h1">Today</h1>
@@ -3998,12 +3949,12 @@ function programPage(user, p, opts) {
           : '<strong>OFF day</strong> — no lifting today. True rest.';
       content = `${weekStripTop}<div class="card"><p style="margin:0">${restCopy}</p></div>${YT_TOGGLE_SCRIPT}`;
     } else {
-      // Bobby (Oct 19 2026): Start Workout → day picker (free choice of
-      // Day 1/2/3/4, no schedule). Always show when there's a lifting day.
-      const topStartBtn = `<a class="start-workout" href="/program/workout">
+      // Bobby (Sep 23 2026): Start Lift goes at the very top of the lifting tab.
+      // Always show when there's a lifting day (not rest day).
+      const topStartBtn = `<a class="start-workout" href="/program/workout?lday=${effLday}">
         <span class="start-workout-play">▶</span>
-        <span class="start-workout-text"><strong>Start Workout</strong>
-        <span>Pick your day, then walk through it — video + logging as you go</span></span></a>`;
+        <span class="start-workout-text"><strong>Start Lift</strong>
+        <span>Walk through it — video + logging as you go</span></span></a>`;
       // Bobby (Sep 23 2026): mobility pairs WITH the lifting — no standalone
       // Mobility tab for lifters. Mobility blocks render first, as the warm-up.
       const mobBlocks = routine.filter((c) => kindOf(c.category) === 'mobility' && realItems(c.items).length);
@@ -4243,38 +4194,6 @@ function workoutPage(user, program, wd, ldayIdx, preview, phaseNotes, opts) {
   });
 }
 
-// ---- Workout day picker (Oct 19 2026, Bobby) ----
-// Start Workout → the hitter picks which day of the lifting program to run.
-// No schedule: free choice, Day 1/2/3/4 any day. No weekday hints, no
-// "today's day" suggestion — the hitter decides.
-function workoutDayPicker(user, lifting, o) {
-  const oo = o || {};
-  const days = (lifting && Array.isArray(lifting.days) ? lifting.days : [])
-    .filter((d) => (Array.isArray(d.exercises) ? d.exercises : []).some((ex) => String((ex && ex.name) || '').trim()));
-  const cards = days.map((d, i) => {
-    const label = String(d.label || ('Day ' + (i + 1)));
-    const exs = d.exercises.filter((ex) => String((ex && ex.name) || '').trim());
-    const preview = exs.slice(0, 3).map((ex) => String(ex.name)).join(' · ');
-    return `<a class="wo-daycard" href="/program/workout?lday=${i}">` +
-      `<span class="wo-daycard-label">${esc(label)}</span>` +
-      `<span class="hint-inline">${exs.length} exercise${exs.length === 1 ? '' : 's'}</span>` +
-      (preview ? `<span class="wo-daycard-exs">${esc(preview)}${exs.length > 3 ? ' · …' : ''}</span>` : '') +
-      `<span class="wo-daycard-go">Start →</span></a>`;
-  }).join('');
-  return layout({
-    title: 'Pick your day',
-    user,
-    tabs: [],
-    body: `<div class="wo-picker">` +
-      `<p class="wo-kicker">${esc((lifting && lifting.name) || 'Lifting')}</p>` +
-      `<h1 class="sess-title">Which day are you running?</h1>` +
-      `<p class="lede">Pick any day — your call.</p>` +
-      (cards || '<div class="card empty">No lifting days programmed.</div>') +
-      `<p style="margin-top:14px"><a href="${esc(oo.backUrl || '/program?sub=lifting')}" class="hint-inline">← Back to program</a></p>` +
-      `</div>`,
-  });
-}
-
 // ---- Guided Today session (Sep 2026) ----
 // Today → pick your order → tap through every exercise → done. One guided
 // flow for Mobility, Med Ball, Hitting, and Lifting, in the order the athlete
@@ -4412,16 +4331,16 @@ function liftWeekStrip(sched, weekday, days, ldayIdx) {
   return `<div class="wk-strip">${pills}</div>`;
 }
 
-// Start Workout button (Oct 19 2026, Bobby: Start Workout → day picker,
-// free choice of Day 1/2/3/4). Visible to coaches in view-as too so Bobby
-// can test the flow; the workout page renders in preview mode for them.
+// Start Lift button — lives at the very top of the lifting tab (Sep 23 2026,
+// Bobby: "that needs to be at the top"). Visible to coaches in view-as too so
+// Bobby can test the flow; the workout page renders in preview mode for them.
 function startLiftButton(ldayIdx, doneEx, totalSets) {
   const sub = totalSets > 0
-    ? `${doneEx}/${totalSets} exercises done — pick your day, walk through it, video + logging as you go`
-    : 'Pick your day — video + logging as you go';
-  return `<a class="start-workout" href="/program/workout">
+    ? `${doneEx}/${totalSets} exercises done — walk through it, video + logging as you go`
+    : 'Walk through it — video + logging as you go';
+  return `<a class="start-workout" href="/program/workout?lday=${ldayIdx}">
     <span class="start-workout-play">▶</span>
-    <span class="start-workout-text"><strong>Start Workout</strong>
+    <span class="start-workout-text"><strong>Start Lift</strong>
     <span>${sub}</span></span></a>`;
 }
 
@@ -6964,7 +6883,7 @@ function mobilityPage(user, p, opts) {
     user,
     tabs: userTabs('program', user),
     body: `<div class="doc-page">
-      <div class="doc-header">${(user && user.remoteProgramId) ? '<p class="uc-wordmark" style="color:#111;border-bottom-color:#a3162a">UNCOMMON</p>' : '<div class="doc-logo">ATKINSON<br>HITTING</div>'}</div>
+      <div class="doc-header"><div class="doc-logo">ATKINSON<br>HITTING</div></div>
       <h1 class="doc-sec-title">Warm-up & Med Ball - ${esc(athleteName)}</h1>
       <p style="text-align:center;margin:-8px 0 16px"><a href="/program/hitting-plan" style="color:#666;font-size:14px">‹ Hitting Program</a></p>
       <p style="text-align:center;margin-bottom:20px"><a href="/program/mobility-workout" class="btn" style="display:inline-block;text-decoration:none;padding:12px 24px;background:#111;color:#fff;border-radius:8px;font-weight:700">▶ Start Workout</a></p>
@@ -7781,7 +7700,6 @@ module.exports = {
   programPage,
   todayProgramPage,
   workoutPage,
-  workoutDayPicker,
   sessionPage,
   programRoutinePage,
   mentalGamePage,
