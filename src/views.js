@@ -5329,6 +5329,7 @@ function videosPage(user, cats, activeCat, videos, q) {
     user,
     tabs: userTabs('videos', user),
     body: `<h1 class="page-title">Google Drive library</h1>
+    <p class="hint" style="margin:0 0 12px">Questions on anything in your program? Every exercise video lives here and in the Drive docs linked from here. If you can't find it, reach out to Bobby directly.</p>
     ${cats.length ? `<form method="get" action="/videos" class="form" style="margin:0 0 10px"><input type="search" name="q" class="searchbar" placeholder="Search every category\u2026" autocomplete="off" value="${esc(q || '')}"></form>` : ''}
     ${q ? `<p class="hint-inline" style="margin:0 0 8px">${videos.length} result${videos.length === 1 ? '' : 's'} for \u201C${esc(q)}\u201D · <a href="/videos">clear</a></p>` : `<div class="pill-row">${pills}</div>`}
     <div class="video-grid">${cards || '<div class="card empty">No videos yet — they\u2019ll appear here after the next sync.</div>'}</div>
@@ -6321,7 +6322,7 @@ function hittingPlanPage(user, p, opts) {
       <hr class="doc-rule">
       <h1 class="doc-sec-title">Hitting Program - ${esc(athleteName)}</h1>
       ${whyHtml}
-      <p class="doc-note">Video library &mdash; drill demos, approach, field work &amp; more: <a href="https://drive.google.com/drive/folders/1exkky5BSQjiXoMF2J25sgW87OeYtwG8i" target="_blank">Google Drive Video Library</a></p>
+      <p class="doc-note">Video library &mdash; drill demos, approach, field work &amp; more: <a href="https://drive.google.com/drive/folders/1exkky5BSQjiXoMF2J25sgW87OeYtwG8i" target="_blank">Google Drive Video Library</a> Mobility, med ball, lifting, and speed/plyo demos are in the Docs there. Can't find one? Reach out to Bobby directly.</p>
       ${prepHtml}
       ${drillTableHtml}
       ${freqLine}

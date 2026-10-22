@@ -10298,6 +10298,232 @@ setInterval(async () => {
   }
 }, 15 * 60 * 1000);
 
+// Sam Chapman program rewrite (Oct 22 2026, Bobby via chat): new phase
+// "Posture and the Forward Move" through 11/28 — grades in Bobby's 11-grade
+// names (his exact words), new mobility + med ball blocks, heavy Open Angle
+// front toss + Short Bat swings. Guarded by the settings flag
+// 'sam_chapman_program_oct22' so it runs ONCE; Bobby's later in-app edits
+// always win. data/sheets/sam_chapman.json carries the same content, so the
+// boot sheet sync regenerates this program instead of the old one, and this
+// migration fixes the parts the sync can't carry (top-level mobility — the
+// sync only fills it when empty — notes, and the hitting plan rebuild).
+// No video links are added to any new item (Bobby, Oct 22: exercise-video
+// Docs live in Google Drive only).
+function applySamChapmanProgramOct22() {
+  try {
+    if (getSetting('sam_chapman_program_oct22')) {
+      console.log('applySamChapmanProgramOct22: already applied, skipping');
+      return;
+    }
+    const row = db.prepare("SELECT id FROM remote_programs WHERE lower(athlete_name) = 'sam chapman'").get();
+    if (!row) {
+      console.log('applySamChapmanProgramOct22: no Sam Chapman program found, skipping (flag not set)');
+      return;
+    }
+    const p = getProgram(row.id);
+    if (!p) return;
+    const prog = p.prog;
+    const PHASE = 'Posture and the Forward Move';
+    const RANGE = '10/28\u201311/28';
+    // Idempotency check (spec): program already matches -> stamp only.
+    if (prog.phase_emphasis === PHASE && prog.date_range === RANGE &&
+        Array.isArray(prog.mobility) && prog.mobility.length === 9 &&
+        Array.isArray(prog.routine) && prog.routine.some((b) => /daily routine/i.test(String((b && b.category) || ''))) &&
+        prog.grades && prog.grades['Mental grade'] === 'A') {
+      setSetting('sam_chapman_program_oct22', '1');
+      console.log('applySamChapmanProgramOct22: program already matches spec, flag stamped');
+      return;
+    }
+    const oldPlan = (prog.hitting_plan && typeof prog.hitting_plan === 'object') ? prog.hitting_plan : {};
+    // Preserve The Setup / Path from Sam's current program (prog grades or
+    // the stored hitting plan) — Bobby did not re-give them on Oct 22.
+    // Never invent: if neither exists anywhere, the grade stays blank.
+    const findGrade = (re) => {
+      for (const src of [prog.grades, oldPlan.grades]) {
+        if (!src || typeof src !== 'object') continue;
+        for (const k of Object.keys(src)) {
+          if (re.test(k) && String(src[k] || '').trim()) return String(src[k]).trim();
+        }
+      }
+      return '';
+    };
+    const setupGrade = findGrade(/setup/i);
+    const pathGrade = findGrade(/path/i);
+    const grades = {};
+    grades['Mental grade'] = 'A';
+    grades['Will to work and get better'] = 'A-';
+    grades['Bat to ball'] = 'A';
+    grades['Power ability'] = 'B';
+    grades['The Load'] = 'B';
+    if (setupGrade) grades['The Setup'] = setupGrade;
+    grades['Launch Position'] = 'B';
+    grades['Zone Entry'] = 'B+';
+    if (pathGrade) grades['Path'] = pathGrade;
+    grades['Post-Contact Direction'] = 'B-';
+    grades['The Finish'] = 'B+';
+    prog.grades = grades;
+    prog.grade_whys = { 'Post-Contact Direction': 'Posture coming up slightly' };
+    // Top line
+    prog.athlete = 'Sam Chapman';
+    prog.date_range = RANGE;
+    prog.phase_emphasis = PHASE;
+    prog.adjustment = 'Chest over the plate. Hit through contact, not just to it. Head finishing low and over the plate \u2014 hold your posture, don\u2019t come up and spin off it.';
+    prog.strengths = [
+      'Bat to ball skills \u2014 contact was his biggest strength this fall',
+      'Swing decisions \u2014 could count on one hand the bad swings all fall',
+      'Athletic and explosive',
+      'Drive to get better and make adjustments',
+    ];
+    const oldCues = (prog.cues && typeof prog.cues === 'object') ? prog.cues : {};
+    prog.cues = {
+      movement: 'Chest over the plate.',
+      timing: String(oldCues.timing || '').trim() || 'Wait for it.',
+      game: 'Hit through contact, not just to it.',
+    };
+    if (!prog.mental_framework) prog.mental_framework = 'PREPARED \u2192 PRESENT \u2192 COMPETE';
+    if (!Array.isArray(prog.schedule) || !prog.schedule.length) {
+      prog.schedule = [['Monday', 'Day 1'], ['Tuesday', 'Day 2'], ['Wednesday', 'Day 3'], ['Thursday', 'Choice Day (still do routine)'], ['Friday', 'Day 1'], ['Saturday', 'Day 2'], ['Sunday', 'OFF']];
+    }
+    // Notes: keep what's there, make sure the 5 program staples + 2 new ones are in.
+    const noteList = Array.isArray(prog.notes) ? [...prog.notes] : [];
+    for (const n of [
+      'Warm up properly before med ball and prep work.',
+      'Med ball work is max intent. Both sides. Every rep.',
+      'Take a small break after every set.',
+      'Every swing has a purpose.',
+      'Use seated dart throws for front toss if possible.',
+      'Open angle: start away, then work the inner half. Head finishes low and over the plate.',
+      'Short bat: inside and outside \u2014 stay over the plate and hold your posture. Hit through contact, not just to it.',
+    ]) if (!noteList.includes(n)) noteList.push(n);
+    prog.notes = noteList;
+    // Mobility — REPLACE (new plan, Oct 22). Canonical home is the top-level
+    // mobility array; a routine Mobility block, if one exists, gets the same.
+    const MOBILITY = [
+      { drill: 'Pigeon Stretch', volume: '60 sec each side' },
+      { drill: 'Half-Kneeling Hip Flexor Stretch', volume: '60 sec each side' },
+      { drill: 'Deep Squat Hold w/ Elbow Press', volume: '5 each side, 5-sec hold' },
+      { drill: 'Knee-to-Wall', volume: '8 each side' },
+      { drill: 'Cat-Cow', volume: '8 total' },
+      { drill: 'Thread the Needle', volume: '8 each side' },
+      { drill: 'Quadruped Thoracic Rotations', volume: '8 each side' },
+      { drill: 'Wall Slides', volume: '10 total' },
+      { drill: 'Band Pull-Aparts', volume: '10 total' },
+    ];
+    prog.mobility = MOBILITY.map((it) => ({ ...it }));
+    if (!Array.isArray(prog.routine)) prog.routine = [];
+    const routine = prog.routine;
+    const catOf = (b) => String((b && b.category) || '');
+    const titleOf = (b) => String((b && b.title) || '');
+    const isPregame = (b) => /pregame/i.test(titleOf(b)) || /pregame/i.test(catOf(b));
+    for (const b of routine) {
+      if (/mobility/i.test(catOf(b))) b.items = MOBILITY.map((it) => ({ ...it }));
+    }
+    // Daily Routine — keep exactly; restore the block only if it's gone.
+    const drBlock = routine.find((b) => /daily routine/i.test(catOf(b)));
+    const drItems = [{ drill: 'Med Ball Drill' }, { drill: 'Kick Through Drill' }, { drill: 'Ball Drop Drill', note: 'Heel up, all one move' }];
+    if (drBlock) {
+      if (!(Array.isArray(drBlock.items) && drBlock.items.some((it) => String((it && it.drill) || '').trim()))) drBlock.items = drItems;
+    } else {
+      routine.unshift({ category: 'Daily Routine', items: drItems });
+    }
+    // Med Ball — REPLACE per day (blocks carry the day in title, or in the
+    // category on seed-shaped programs e.g. "Day 1 \u2014 Med Ball").
+    const MED = {
+      'Day 1': [
+        { drill: 'Med Ball Overhead Slam', volume: '3 sets \u00D7 5 reps' },
+        { drill: 'Med Ball Split Stance Rotational Throw', volume: '3 sets \u00D7 4 reps each side' },
+        { drill: 'Med Ball Rotational Throw', volume: '2 sets \u00D7 4 reps each side' },
+      ],
+      'Day 2': [
+        { drill: 'Med Ball Step Back Scoop Toss', volume: '3 sets \u00D7 4 reps each side' },
+        { drill: 'Med Ball Shotput Throw', volume: '3 sets \u00D7 4 reps each side' },
+        { drill: 'Med Ball Scoop Toss', volume: '2 sets \u00D7 5 reps each side' },
+      ],
+      'Day 3': [
+        { drill: 'Med Ball Rotational Throw', volume: '3 sets \u00D7 4 reps each side' },
+        { drill: 'Med Ball Hip Toss', volume: '3 sets \u00D7 4 reps each side' },
+        { drill: 'Med Ball Rotational Slam', volume: '2 sets \u00D7 5 reps each side' },
+      ],
+      'Pregame': [
+        { drill: 'Med Ball Overhead Slam', volume: '1 set \u00D7 3 reps' },
+        { drill: 'Med Ball Rotational Throw', volume: '1 set \u00D7 3 reps each side' },
+      ],
+    };
+    const seenMed = new Set();
+    for (const b of routine) {
+      if (!/med\s*ball/i.test(catOf(b))) continue;
+      const t = titleOf(b) + ' ' + catOf(b);
+      const m = /day\s*(\d)/i.exec(t);
+      const key = /pregame/i.test(t) ? 'Pregame' : (m ? 'Day ' + m[1] : null);
+      if (!key || !MED[key] || seenMed.has(key)) continue;
+      b.items = MED[key].map((it) => ({ ...it }));
+      seenMed.add(key);
+    }
+    for (const key of Object.keys(MED)) {
+      if (!seenMed.has(key)) routine.push({ category: 'Med Ball', title: key, items: MED[key].map((it) => ({ ...it })) });
+    }
+    // Hitting blocks. Prep Work / Seated Darts / Pregame hitting: untouched.
+    const SHORT_BAT = { drill: 'Short Bat Swings', volume: '2 sets \u00D7 4 swings', note: 'Inside and outside pitches \u2014 stay over the plate, hold your posture' };
+    const FRONT_TOSS = [
+      { drill: 'Med Ball Drill', volume: '2 sets \u00D7 4 swings' },
+      { drill: 'Kick Through Drill', volume: '2 sets \u00D7 4 swings' },
+      { drill: 'Open Angle', volume: '2 sets \u00D7 4 swings', note: 'Start away' },
+      { drill: 'Open Angle', volume: '2 sets \u00D7 4 swings', note: 'Work inner half \u2014 head finishing low and over the plate' },
+      { ...SHORT_BAT },
+      { drill: 'Normal Swings', volume: '2 sets \u00D7 4 swings' },
+    ];
+    for (const b of routine) {
+      const cat = catOf(b);
+      if (isPregame(b)) continue;
+      if (/side flips/i.test(cat)) {
+        if (!Array.isArray(b.items)) b.items = [];
+        if (!b.items.some((it) => /short bat/i.test(String((it && it.drill) || '')))) b.items.push({ ...SHORT_BAT });
+      } else if (/front toss/i.test(cat)) {
+        b.items = FRONT_TOSS.map((it) => ({ ...it }));
+      } else if (/bp\s*\/\s*machine/i.test(cat)) {
+        const items = Array.isArray(b.items) ? b.items : [];
+        const noteTxt = 'Open angle emphasized \u2014 start away, then inner half';
+        const idx = items.findIndex((it) => /open angle fb machine/i.test(String((it && it.drill) || '')));
+        let oa;
+        if (idx >= 0) {
+          oa = items.splice(idx, 1)[0];
+          if (!String(oa.note || '').includes('Open angle emphasized')) {
+            oa.note = oa.note ? oa.note + ' \u2014 ' + noteTxt : noteTxt;
+          }
+        } else {
+          oa = { drill: 'Open Angle FB Machine', volume: 'Up to you', note: noteTxt };
+        }
+        b.items = [oa, ...items];
+      }
+    }
+    // Hitting plan: rebuild from the new program (mirrors grades/cues/
+    // strengths in), carrying the coach's environment picks + doc settings
+    // from the old plan so nothing he set is lost. _custom keeps the boot
+    // sheet sync + lazy backfill from wiping this plan later.
+    const newPlan = buildHittingPlan(prog);
+    if (Array.isArray(oldPlan.environments_custom)) {
+      newPlan.environments_custom = oldPlan.environments_custom;
+      newPlan.environments = [
+        ...oldPlan.environments_custom.map((id) => { const e = envById(id); return e ? e.name : null; }).filter(Boolean),
+        ...(Array.isArray(oldPlan.environments_other) ? oldPlan.environments_other : []),
+      ];
+    }
+    if (Array.isArray(oldPlan.environments_other)) newPlan.environments_other = oldPlan.environments_other;
+    for (const k of ['environments_note', 'env_variations', 'footer', 'daysPerWeek', 'frequency']) {
+      if (oldPlan[k]) newPlan[k] = oldPlan[k];
+    }
+    newPlan._custom = true;
+    newPlan._v = HITTING_PLAN_VERSION;
+    prog.hitting_plan = newPlan;
+    db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?')
+      .run(JSON.stringify(prog), new Date().toISOString(), p.id);
+    setSetting('sam_chapman_program_oct22', '1');
+    console.log('applySamChapmanProgramOct22: applied new Sam Chapman program (phase "' + PHASE + '", ' + RANGE + ')');
+  } catch (e) {
+    console.log('applySamChapmanProgramOct22 failed:', e.message);
+  }
+}
+
 // ---- Boot ----
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
@@ -10305,6 +10531,7 @@ app.listen(PORT, () => {
   seedBobbyLifting();
   assignBobbyAthleteLifting();
   setBobbyAthleteHittingDrills();
+  applySamChapmanProgramOct22();
   const n = db.prepare("SELECT COUNT(*) AS n FROM users WHERE role != 'coach'").get().n;
   console.log(`Players signed up: ${n}`);
   if (!process.env.SESSION_SECRET && isProd) {
