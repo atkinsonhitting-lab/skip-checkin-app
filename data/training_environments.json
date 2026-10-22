@@ -8,7 +8,7 @@
   ],
   "environments": [
     {
-      "description": "Set the machine on the hitter's open side and aim it over the plate. The goal is a line drive through the batter's eye. If you pull it with backspin, that's a good swing too. Stay in your move and deliver a clean barrel.",
+      "description": "For posture and direction — stay over the plate, head finishing low and over the plate, and drive the ball with direction. Set the machine on the hitter's open side and aim it over the plate. The goal is a line drive through the batter's eye. If you pull it with backspin, that's a good swing too. Stay in your move and deliver a clean barrel.",
       "id": "open-angle",
       "match": [
         "open angled",
@@ -18,7 +18,7 @@
       "name": "Open angle machine"
     },
     {
-      "description": "Set the machine on the hitter's closed side and aim it over the plate. Let the ball travel and hold your direction as long as possible. Don't rush the turn or force the ball to any part of the field.",
+      "description": "Keep the turn tight into the middle of the field. Set the machine on the hitter's closed side and aim it over the plate. Let the ball travel and stay connected — don't open up early or force it pull-side.",
       "id": "closed-angle",
       "match": [
         "closed angle"
@@ -56,7 +56,7 @@
       "name": "LH angled breaking ball"
     },
     {
-      "description": "Toss from the hitter's open side and angle the ball over the plate. The goal is a line drive through the batter's eye, but pulling it with backspin is good too. Stay in your move and deliver a clean barrel.",
+      "description": "For posture and direction — stay over the plate, head finishing low and over the plate, and drive the ball with direction. Toss from the hitter's open side and angle the ball over the plate. The goal is a line drive through the batter's eye, but pulling it with backspin is good too. Stay in your move and deliver a clean barrel.",
       "id": "open-angle-front-toss",
       "match": [
         "open angle front toss",
@@ -73,7 +73,7 @@
       ]
     },
     {
-      "description": "Toss from the hitter's closed side and angle the ball over the plate. Let it travel and hold your direction as long as possible. We're not forcing the ball anywhere.",
+      "description": "Keep the turn tight into the middle of the field. Toss from the hitter's closed side and angle the ball over the plate. Let the ball travel and stay connected — don't open up early or force it pull-side.",
       "id": "closed-angle-front-toss",
       "match": [
         "closed angle front toss",
@@ -117,7 +117,7 @@
     {
       "id": "closed-angle-machine-and-front-toss",
       "name": "Closed angle machine and front toss",
-      "description": "Pair the machine and front toss from the hitter's closed side. Set the machine on the closed side and aim it over the plate, then mix in front toss from the same angle. Let it travel and hold your direction as long as possible. We're not forcing the ball anywhere.",
+      "description": "Keep the turn tight into the middle of the field. Pair the machine and front toss from the hitter's closed side — set the machine on the closed side and aim it over the plate, then mix in front toss from the same angle. Let the ball travel and stay connected — don't open up early or force it pull-side.",
       "match": [
         "closed angle machine and front toss",
         "closed angle machine + front toss"

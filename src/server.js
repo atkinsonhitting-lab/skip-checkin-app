@@ -1855,8 +1855,8 @@ function buildHittingPlan(prog) {
     'sam chapman': [
       { name: 'Punching Bag / Tire', why: 'Swings the barrel with the body, not the hands — deep and connected.' },
       { name: 'Med Ball Drill', why: 'Feels the chest-over-the-plate posture driving the barrel.' },
-      { name: 'Kick Through Drill', why: 'Turns it deep — heel up, all one move.' },
-      { name: 'Ball Drop Drill', why: 'Trains waiting for it, then swinging the barrel late and deep.' },
+      { name: 'Kick Through Drill', why: 'Feel your back hip and barrel connected — don\u2019t get stuck back.' },
+      { name: 'Ball Drop Drill', why: 'Feel quickness — short to the ball.' },
     ],
   };
   const wanted = CORE_DRILLS[athleteKey] || [];
@@ -10524,6 +10524,83 @@ function applySamChapmanProgramOct22() {
   }
 }
 
+// Sam Chapman doc fix (Oct 22 2026, Bobby via chat): the Hitting Program doc
+// didn't reflect the INTENT behind his key drills/environments.
+// 1. The CORE_DRILLS whys for Kick Through / Ball Drop are code — Sam's
+//    stored plan is _custom, so the lazy backfill never rebuilds it; this
+//    migration rebuilds ONLY Sam's hitting plan to pick the new whys up.
+// 2. Open/Closed angle descriptions are DEFINITIONS (Bobby): closed angle =
+//    keep the turn tight into the middle of the field; open angle = posture
+//    and direction. The LIVE library file sits on Render's persistent disk,
+//    so update it in place via saveEnvLib (same pattern as the db.js env-lib
+//    migrations); the repo JSON carries the same text. These descriptions
+//    are shared across hitters — intended, they're what the environments
+//    ARE for.
+// Guarded by the settings flag 'sam_chapman_doc_whys_oct22' so it runs
+// ONCE. Prep Work blocks and the doc Prep section are NOT touched.
+function applySamChapmanDocWhysOct22() {
+  try {
+    if (getSetting('sam_chapman_doc_whys_oct22')) {
+      console.log('applySamChapmanDocWhysOct22: already applied, skipping');
+      return;
+    }
+    const ENV_DESCS = {
+      'closed-angle': "Keep the turn tight into the middle of the field. Set the machine on the hitter's closed side and aim it over the plate. Let the ball travel and stay connected — don't open up early or force it pull-side.",
+      'closed-angle-front-toss': "Keep the turn tight into the middle of the field. Toss from the hitter's closed side and angle the ball over the plate. Let the ball travel and stay connected — don't open up early or force it pull-side.",
+      'closed-angle-machine-and-front-toss': "Keep the turn tight into the middle of the field. Pair the machine and front toss from the hitter's closed side — set the machine on the closed side and aim it over the plate, then mix in front toss from the same angle. Let the ball travel and stay connected — don't open up early or force it pull-side.",
+      'open-angle': "For posture and direction — stay over the plate, head finishing low and over the plate, and drive the ball with direction. Set the machine on the hitter's open side and aim it over the plate. The goal is a line drive through the batter's eye. If you pull it with backspin, that's a good swing too. Stay in your move and deliver a clean barrel.",
+      'open-angle-front-toss': "For posture and direction — stay over the plate, head finishing low and over the plate, and drive the ball with direction. Toss from the hitter's open side and angle the ball over the plate. The goal is a line drive through the batter's eye, but pulling it with backspin is good too. Stay in your move and deliver a clean barrel.",
+    };
+    let envChanged = false;
+    const newList = envLib.ENV_LIST.map((e) => {
+      if (e && ENV_DESCS[e.id] && e.description !== ENV_DESCS[e.id]) {
+        envChanged = true;
+        return { ...e, description: ENV_DESCS[e.id] };
+      }
+      return e;
+    });
+    if (envChanged) {
+      envLib.saveEnvLib({ environments: newList, default_ids: [...envLib.DEFAULT_IDS] });
+      console.log('applySamChapmanDocWhysOct22: updated Open/Closed angle descriptions in the live environment library');
+    }
+    const row = db.prepare("SELECT id FROM remote_programs WHERE lower(athlete_name) = 'sam chapman'").get();
+    if (!row) {
+      console.log('applySamChapmanDocWhysOct22: no Sam Chapman program found, skipping plan rebuild (flag not set)');
+      return;
+    }
+    const p = getProgram(row.id);
+    if (!p) return;
+    const prog = p.prog;
+    const oldPlan = (prog.hitting_plan && typeof prog.hitting_plan === 'object') ? prog.hitting_plan : {};
+    const newPlan = buildHittingPlan(prog);
+    if (Array.isArray(oldPlan.environments_custom)) {
+      newPlan.environments_custom = oldPlan.environments_custom;
+      newPlan.environments = [
+        ...oldPlan.environments_custom.map((id) => { const e = envById(id); return e ? e.name : null; }).filter(Boolean),
+        ...(Array.isArray(oldPlan.environments_other) ? oldPlan.environments_other : []),
+      ];
+    }
+    if (Array.isArray(oldPlan.environments_other)) newPlan.environments_other = oldPlan.environments_other;
+    for (const k of ['environments_note', 'env_variations', 'footer', 'daysPerWeek', 'frequency']) {
+      if (oldPlan[k]) newPlan[k] = oldPlan[k];
+    }
+    // Preserve any other plan fields the builder doesn't produce (e.g.
+    // warmup, which feeds the doc's Prep section — Prep stays untouched).
+    for (const k of Object.keys(oldPlan)) {
+      if (!(k in newPlan) && k !== '_v') newPlan[k] = oldPlan[k];
+    }
+    newPlan._custom = true;
+    newPlan._v = HITTING_PLAN_VERSION;
+    prog.hitting_plan = newPlan;
+    db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?')
+      .run(JSON.stringify(prog), new Date().toISOString(), p.id);
+    setSetting('sam_chapman_doc_whys_oct22', '1');
+    console.log('applySamChapmanDocWhysOct22: rebuilt Sam Chapman hitting plan with new drill whys');
+  } catch (e) {
+    console.log('applySamChapmanDocWhysOct22 failed:', e.message);
+  }
+}
+
 // ---- Boot ----
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
@@ -10532,6 +10609,7 @@ app.listen(PORT, () => {
   assignBobbyAthleteLifting();
   setBobbyAthleteHittingDrills();
   applySamChapmanProgramOct22();
+  applySamChapmanDocWhysOct22();
   const n = db.prepare("SELECT COUNT(*) AS n FROM users WHERE role != 'coach'").get().n;
   console.log(`Players signed up: ${n}`);
   if (!process.env.SESSION_SECRET && isProd) {
