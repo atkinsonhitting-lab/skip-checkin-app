@@ -4984,7 +4984,14 @@ function programEditPage(user, p, profileEmail, hasLifting, progression, opts) {
   const subs = o.subs || [];
   const prog = p.prog || {};
   const grades = prog.grades && typeof prog.grades === 'object' ? prog.grades : {};
-  const gradeFields = ['Mindset & Approach', 'Strength & Explosiveness', 'Load', 'Setup', 'Launch Position', 'Zone Entry', 'Path', 'Post-Contact Direction', 'Finish', 'Timing']
+  const gradeNames = ['Mental grade', 'Will to work and get better', 'Bat to ball', 'Power ability', 'The Load', 'The Setup', 'Launch Position', 'Zone Entry', 'Path', 'Post-Contact Direction', 'The Finish'];
+  for (const g of Object.keys(grades)) {
+    if (!gradeNames.includes(g) && String(grades[g] || '').trim()) gradeNames.push(g);
+  }
+  for (const g of Object.keys(prog.grade_whys || {})) {
+    if (!gradeNames.includes(g) && String((prog.grade_whys || {})[g] || '').trim()) gradeNames.push(g);
+  }
+  const gradeFields = gradeNames
     .map(
       (g) => {
         const key = g.replace(/ /g, '_');
@@ -6184,7 +6191,7 @@ function hittingPlanPage(user, p, opts) {
     ? `<h2 class="doc-sec">Areas for Improvement = Grades</h2>
        <p class="grade-scale">Grading scale is based on where the hitter is currently at:</p>
        <ul class="grade-list">${gradeEntries.map(([k, v]) => `
-         <li><strong>${esc(k)} = ${esc(String(v))}</strong>${gradeWhys[k] ? ` - ${esc(gradeWhys[k])}` : ''}</li>`).join('')}</ul>`
+         <li><strong>${esc(k)} = ${esc(String(v))}</strong>${gradeWhys[k] ? ` — ${esc(gradeWhys[k])}` : ''}</li>`).join('')}</ul>`
     : '';
 
   // Bobby (Sep 24 2026): Action Plan — his movement/timing/game cues, right
@@ -6315,6 +6322,7 @@ function hittingPlanPage(user, p, opts) {
         <div class="doc-title-wrap">
           <h1 class="doc-title">Hitting Program</h1>
           <p class="doc-athlete">${esc(athleteName)}</p>
+          ${(plan.date_range || plan.phase_emphasis) ? `<p class="doc-athlete">${esc([plan.date_range, plan.phase_emphasis].filter(Boolean).join(' · '))}</p>` : ''}
         </div>
       </div>
       <p class="doc-note" style="font-size:14px;color:#ccc;font-style:normal;margin:0 0 16px">Use this program and work with me to develop your own daily routine &mdash; the exact work you do every day to get better.</p>
@@ -6478,7 +6486,14 @@ function hittingPlanEditPage(user, p) {
   // fall back to prog.grades for plans saved before the mirror existed.
   const _g = (plan.grades && typeof plan.grades === 'object' && Object.keys(plan.grades).length ? plan.grades : prog.grades) || {};
   const _gw = (plan.grade_whys && typeof plan.grade_whys === 'object' && Object.keys(plan.grade_whys).length ? plan.grade_whys : prog.grade_whys) || {};
-  const gradeRows = ['Mindset & Approach', 'Strength & Explosiveness', 'Load', 'Setup', 'Launch Position', 'Zone Entry', 'Path', 'Post-Contact Direction', 'Finish', 'Timing'].map((g) => {
+  const gradeNames = ['Mental grade', 'Will to work and get better', 'Bat to ball', 'Power ability', 'The Load', 'The Setup', 'Launch Position', 'Zone Entry', 'Path', 'Post-Contact Direction', 'The Finish'];
+  for (const g of Object.keys(_g)) {
+    if (!gradeNames.includes(g) && String(_g[g] || '').trim()) gradeNames.push(g);
+  }
+  for (const g of Object.keys(_gw)) {
+    if (!gradeNames.includes(g) && String(_gw[g] || '').trim()) gradeNames.push(g);
+  }
+  const gradeRows = gradeNames.map((g) => {
     const key = g.replace(/ /g, '_');
     return `<div class="grade-edit-block">
       <label class="fld fld-inline">Grade — ${esc(g)}<input type="text" name="grade_${key}" value="${esc(_g[g] || '')}" maxlength="4" placeholder="B+"></label>

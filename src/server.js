@@ -1790,7 +1790,59 @@ app.post('/routine/remove', requireLogin, (req, res) => {
 
 // ---- Remote programs: Bobby's remote hitters get their training program
 // in the app. Accounts link by name at signup (and on every boot, in db.js).
-const PROGRAM_GRADES = ['Mindset & Approach', 'Strength & Explosiveness', 'Load', 'Setup', 'Launch Position', 'Zone Entry', 'Path', 'Post-Contact Direction', 'Finish', 'Timing'];
+const PROGRAM_GRADES = ['Mental grade', 'Will to work and get better', 'Bat to ball', 'Power ability', 'The Load', 'The Setup', 'Launch Position', 'Zone Entry', 'Path', 'Post-Contact Direction', 'The Finish'];
+function gradeFieldName(grade) {
+  return 'grade_' + String(grade || '').replace(/ /g, '_');
+}
+function gradeWhyFieldName(grade) {
+  return 'grade_why_' + String(grade || '').replace(/ /g, '_');
+}
+// Collect grades from a coach-editor POST without silently losing data when
+// a form is older than the grade names it was rendered with. A field that is
+// present in the POST is authoritative (including an intentional blank); a
+// missing field falls back to the first stored value. Non-canonical keys are
+// carried from storage even when the current form did not render them.
+function collectProgramGrades(body, storedSources) {
+  const b = body || {};
+  const sources = (Array.isArray(storedSources) ? storedSources : []).filter((s) => s && typeof s === 'object');
+  const storedValue = (grade, kind) => {
+    for (const src of sources) {
+      const obj = kind === 'why' ? src.grade_whys : src.grades;
+      if (obj && typeof obj === 'object' && String(obj[grade] || '').trim()) return String(obj[grade]).trim();
+    }
+    return '';
+  };
+  const collectOne = (grade, kind, fieldName, limit) => {
+    if (Object.prototype.hasOwnProperty.call(b, fieldName)) {
+      return String(b[fieldName] || '').trim().slice(0, limit);
+    }
+    return storedValue(grade, kind).slice(0, limit);
+  };
+  const grades = {};
+  const gradeWhys = {};
+  for (const g of PROGRAM_GRADES) {
+    const v = collectOne(g, 'grade', gradeFieldName(g), 4);
+    if (v) grades[g] = v;
+    const why = collectOne(g, 'why', gradeWhyFieldName(g), 200);
+    if (why) gradeWhys[g] = why;
+  }
+  const extraGrades = new Set();
+  for (const src of sources) {
+    for (const obj of [src.grades, src.grade_whys]) {
+      if (!obj || typeof obj !== 'object') continue;
+      for (const g of Object.keys(obj)) {
+        if (!PROGRAM_GRADES.includes(g)) extraGrades.add(g);
+      }
+    }
+  }
+  for (const g of extraGrades) {
+    const v = collectOne(g, 'grade', gradeFieldName(g), 4);
+    if (v) grades[g] = v;
+    const why = collectOne(g, 'why', gradeWhyFieldName(g), 200);
+    if (why) gradeWhys[g] = why;
+  }
+  return { grades, gradeWhys };
+}
 function blankProgram(name) {
   return {
     athlete: name,
@@ -1854,9 +1906,11 @@ function buildHittingPlan(prog) {
     ],
     'sam chapman': [
       { name: 'Punching Bag / Tire', why: 'Swings the barrel with the body, not the hands — deep and connected.' },
-      { name: 'Med Ball Drill', why: 'Feels the chest-over-the-plate posture driving the barrel.' },
+      { name: 'Med Ball Drill', why: 'Feel the chest-over-the-plate posture driving the barrel.' },
       { name: 'Kick Through Drill', why: 'Feel your back hip and barrel connected — don\u2019t get stuck back.' },
       { name: 'Ball Drop Drill', why: 'Feel quickness — short to the ball.' },
+      { name: 'Open Angle', why: 'For posture and direction — start away, then work the inner half. Head finishes low and over the plate.' },
+      { name: 'Short Bat Swings', why: 'Inside and outside pitches — stay over the plate and hold your posture. Hit through contact, not just to it.' },
     ],
   };
   const wanted = CORE_DRILLS[athleteKey] || [];
@@ -1922,6 +1976,8 @@ function buildHittingPlan(prog) {
 
   return {
     _v: HITTING_PLAN_VERSION,
+    phase_emphasis: String(prog.phase_emphasis || ''),
+    date_range: String(prog.date_range || ''),
     strengths: Array.isArray(prog.strengths) ? prog.strengths.filter(Boolean) : [],
     grades: prog.grades && typeof prog.grades === 'object' ? prog.grades : {},
     grade_whys: prog.grade_whys && typeof prog.grade_whys === 'object' ? prog.grade_whys : {},
@@ -4369,14 +4425,7 @@ app.post('/coach/program/:id/save', requireCoach, (req, res) => {
   prog.phase_emphasis = String(b.phase_emphasis || '').trim().slice(0, 120);
   prog.adjustment = String(b.adjustment || '').trim().slice(0, 500);
   prog.mental_framework = String(b.mental_framework || '').trim().slice(0, 200);
-  const grades = {};
-  const gradeWhys = {};
-  for (const g of PROGRAM_GRADES) {
-    const v = String(b['grade_' + g.replace(/ /g, '_')] || '').trim().slice(0, 4);
-    if (v) grades[g] = v;
-    const why = String(b['grade_why_' + g.replace(/ /g, '_')] || '').trim().slice(0, 200);
-    if (why) gradeWhys[g] = why;
-  }
+  const { grades, gradeWhys } = collectProgramGrades(b, [prog]);
   prog.grades = grades;
   prog.grade_whys = gradeWhys;
   // Bobby (Sep 24 2026): grades show on the program document, which reads
@@ -4385,6 +4434,8 @@ app.post('/coach/program/:id/save', requireCoach, (req, res) => {
   if (prog.hitting_plan && typeof prog.hitting_plan === 'object') {
     prog.hitting_plan.grades = grades;
     prog.hitting_plan.grade_whys = gradeWhys;
+    prog.hitting_plan.phase_emphasis = prog.phase_emphasis;
+    prog.hitting_plan.date_range = prog.date_range;
   }
   prog.strengths = String(b.strengths || '')
     .split('\n')
@@ -4528,6 +4579,8 @@ app.post('/coach/program/:id/hitting-plan', requireCoach, (req, res) => {
   const plan = {
     _custom: true, // Bobby (Sep 23 2026): coach edit — sheet sync must preserve this
     _v: HITTING_PLAN_VERSION, // Bobby (Sep 24 2026): saved plans must not trip the lazy backfill
+    phase_emphasis: String(oldPlan.phase_emphasis || ''),
+    date_range: String(oldPlan.date_range || ''),
     environments_note: String(b.environments_note || '').trim(),
     env_variations: String(b.env_variations || '').trim(),
     warmup: [],
@@ -4554,16 +4607,9 @@ app.post('/coach/program/:id/hitting-plan', requireCoach, (req, res) => {
     if (oldPlan.daysPerWeek) plan.daysPerWeek = oldPlan.daysPerWeek;
     if (oldPlan.frequency) plan.frequency = oldPlan.frequency;
   }
-  const GRADES = ['Mindset & Approach', 'Strength & Explosiveness', 'Load', 'Setup', 'Launch Position', 'Zone Entry', 'Path', 'Post-Contact Direction', 'Finish', 'Timing'];
-  if (GRADES.some((g) => ('grade_' + g.replace(/ /g, '_')) in b)) {
-    const grades = {};
-    const gradeWhys = {};
-    for (const g of GRADES) {
-      const v = String(b['grade_' + g.replace(/ /g, '_')] || '').trim().slice(0, 4);
-      if (v) grades[g] = v;
-      const why = String(b['grade_why_' + g.replace(/ /g, '_')] || '').trim().slice(0, 200);
-      if (why) gradeWhys[g] = why;
-    }
+  const GRADES = PROGRAM_GRADES;
+  if (Object.keys(b).some((k) => k.startsWith('grade_'))) {
+    const { grades, gradeWhys } = collectProgramGrades(b, [oldPlan, p.prog]);
     plan.grades = grades;
     plan.grade_whys = gradeWhys;
     // Mirror onto prog so the whole-program editor reads the same grades.
@@ -4597,6 +4643,8 @@ app.post('/coach/program/:id/hitting-plan', requireCoach, (req, res) => {
     if ('adjustment' in b) p.prog.adjustment = String(b.adjustment || '').trim().slice(0, 500);
     if ('mental_framework' in b) p.prog.mental_framework = String(b.mental_framework || '').trim().slice(0, 200);
   }
+  plan.phase_emphasis = String(p.prog.phase_emphasis || plan.phase_emphasis || '');
+  plan.date_range = String(p.prog.date_range || plan.date_range || '');
   // Warmup items: w_name_0, w_detail_0, ...
   for (let i = 0; i < 50; i++) {
     const name = String(b[`w_name_${i}`] || '').trim();
@@ -10601,6 +10649,77 @@ function applySamChapmanDocWhysOct22() {
   }
 }
 
+// Sam Chapman fix-all (Oct 23 2026, Bobby via chat): Bobby set the missing
+// grade — The Setup = A. Sam's stored program still carried only 10 of the
+// 11 canonical grades, and the Hitting Program doc needed a rebuilt plan so
+// the completed grade set, the phase/date line, and the new Open Angle /
+// Short Bat core-drill rows all render. Guarded by the settings flag
+// 'sam_chapman_fix_all_oct23' so it runs ONCE; Bobby's later in-app edits
+// always win. Only Sam's row is touched. Prep is not changed.
+function applySamChapmanFixAllOct23() {
+  try {
+    if (getSetting('sam_chapman_fix_all_oct23')) {
+      console.log('applySamChapmanFixAllOct23: already applied, skipping');
+      return;
+    }
+    const row = db.prepare("SELECT id FROM remote_programs WHERE lower(athlete_name) = 'sam chapman'").get();
+    if (!row) {
+      console.log('applySamChapmanFixAllOct23: no Sam Chapman program found, skipping (flag not set)');
+      return;
+    }
+    const p = getProgram(row.id);
+    if (!p) return;
+    const prog = p.prog;
+    const oldPlan = (prog.hitting_plan && typeof prog.hitting_plan === 'object') ? prog.hitting_plan : {};
+
+    // Canonical 11-grade order (PROGRAM_GRADES). Bobby supplied The Setup
+    // on Oct 23; every other value is exactly what Sam's program stored.
+    prog.grades = {
+      'Mental grade': 'A',
+      'Will to work and get better': 'A-',
+      'Bat to ball': 'A',
+      'Power ability': 'B',
+      'The Load': 'B',
+      'The Setup': 'A',
+      'Launch Position': 'B',
+      'Zone Entry': 'B+',
+      'Path': 'B+',
+      'Post-Contact Direction': 'B-',
+      'The Finish': 'B+',
+    };
+    prog.grade_whys = { 'Post-Contact Direction': 'Posture coming up slightly' };
+
+    const newPlan = buildHittingPlan(prog);
+    newPlan.phase_emphasis = String(prog.phase_emphasis || 'Posture and the Forward Move');
+    newPlan.date_range = String(prog.date_range || '10/28–11/28');
+    if (Array.isArray(oldPlan.environments_custom)) {
+      newPlan.environments_custom = oldPlan.environments_custom;
+      newPlan.environments = [
+        ...oldPlan.environments_custom.map((id) => { const e = envById(id); return e ? e.name : null; }).filter(Boolean),
+        ...(Array.isArray(oldPlan.environments_other) ? oldPlan.environments_other : []),
+      ];
+    }
+    if (Array.isArray(oldPlan.environments_other)) newPlan.environments_other = oldPlan.environments_other;
+    for (const k of ['environments_note', 'env_variations', 'footer', 'daysPerWeek', 'frequency']) {
+      if (oldPlan[k]) newPlan[k] = oldPlan[k];
+    }
+    // Preserve any other stored plan fields the builder doesn't produce
+    // (e.g. warmup, which feeds the doc's Prep section — Prep stays as-is).
+    for (const k of Object.keys(oldPlan)) {
+      if (!(k in newPlan) && k !== '_v') newPlan[k] = oldPlan[k];
+    }
+    newPlan._custom = true;
+    newPlan._v = HITTING_PLAN_VERSION;
+    prog.hitting_plan = newPlan;
+    db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?')
+      .run(JSON.stringify(prog), new Date().toISOString(), p.id);
+    setSetting('sam_chapman_fix_all_oct23', '1');
+    console.log('applySamChapmanFixAllOct23: applied Sam Chapman fix-all (The Setup = A, 11 canonical grades, rebuilt hitting plan with phase/date + Open Angle + Short Bat rows)');
+  } catch (e) {
+    console.log('applySamChapmanFixAllOct23 failed:', e.message);
+  }
+}
+
 // ---- Boot ----
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
@@ -10610,6 +10729,7 @@ app.listen(PORT, () => {
   setBobbyAthleteHittingDrills();
   applySamChapmanProgramOct22();
   applySamChapmanDocWhysOct22();
+  applySamChapmanFixAllOct23();
   const n = db.prepare("SELECT COUNT(*) AS n FROM users WHERE role != 'coach'").get().n;
   console.log(`Players signed up: ${n}`);
   if (!process.env.SESSION_SECRET && isProd) {
