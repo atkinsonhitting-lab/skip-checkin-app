@@ -10800,6 +10800,140 @@ function applySamChapmanHittingOrderOct26() {
   }
 }
 
+// Sam Chapman routine repair (Oct 26 2026, follow-up to the hitting-order fix).
+// Live inspection Oct 26 found Sam's program routine missing its Prep Work
+// block and ALL hitting blocks: the Hitting Program doc showed no Prep
+// section and the Today Hitting drill picker was empty ("No drills in your
+// program yet"), even though the sheet + seed files contain those blocks.
+// Root cause (best evidence from code): the boot sheet sync reads
+// data/sheets, which on Render resolves to /app/data/sheets — but /app/data
+// is the persistent-disk mount, which shadows the image's data/ directory.
+// Nothing ever writes sheets/ to the disk, so the sync silently no-ops in
+// production (early return, no error). Production routine therefore only
+// evolves via migrations + editor saves, and a routine that lost blocks
+// never heals. Earlier "Prep byte-identical" checks compared against a
+// baseline that ALSO lacked Prep, so "unchanged" masked "missing".
+// This repair runs on EVERY boot (after the sync + Sam migrations) and is
+// Sam-only. It never deletes a block, never touches grades, hitting plan,
+// mobility, cues, notes, environments, phase, or date, and never touches
+// another athlete. Two parts:
+//  1. Always re-apply Bobby's Oct 26 hitting transforms (idempotent):
+//     Med Ball Drill out of hitting blocks; Short Bat Swings directly after
+//     Kick Through Drill in Side Flips / Front Toss. This also heals a
+//     future stale-sync clobber of hitting-block items.
+//  2. Restore missing canonical Prep + hitting blocks ONLY when the exact
+//     broken signature holds: no Prep block with items AND no hitting block
+//     with items. A single deliberately deleted block is left alone —
+//     Bobby's in-app edits still win everywhere except the full-loss case.
+// Canonical blocks are embedded here (not read from the sheet file, which
+// is shadowed in production) and match the repo sheet + Oct 26 edits.
+function repairSamChapmanRoutineOct26() {
+  try {
+    const row = db.prepare("SELECT id FROM remote_programs WHERE lower(athlete_name) = 'sam chapman'").get();
+    if (!row) return;
+    const p = getProgram(row.id);
+    if (!p) return;
+    const prog = p.prog;
+    if (!Array.isArray(prog.routine)) prog.routine = [];
+    const routine = prog.routine;
+    const catOf = (b) => String((b && b.category) || '');
+    const titleOf = (b) => String((b && b.title) || '');
+    const hasItems = (b) => Array.isArray(b.items) && b.items.some((it) => String((it && it.drill) || '').trim());
+    const isHittingBlock = (b) => {
+      const cat = catOf(b).toLowerCase();
+      if (/daily routine|med\s*ball|prep|mobility/i.test(cat)) return false;
+      return /side flips|seated darts|front toss|bp\s*\/\s*machine/i.test(cat);
+    };
+    let changed = false;
+    // Part 1: Oct 26 transforms on existing hitting blocks.
+    for (const b of routine) {
+      if (!isHittingBlock(b) || !Array.isArray(b.items)) continue;
+      const before = JSON.stringify(b.items);
+      let items = b.items.filter((it) => String((it && it.drill) || '') !== 'Med Ball Drill');
+      const cat = catOf(b).toLowerCase();
+      if (/side flips|front toss/i.test(cat)) {
+        const sbIdx = items.findIndex((it) => String((it && it.drill) || '') === 'Short Bat Swings');
+        const ktIdx = items.findIndex((it) => String((it && it.drill) || '') === 'Kick Through Drill');
+        if (sbIdx >= 0 && ktIdx >= 0 && sbIdx !== ktIdx + 1) {
+          const [sb] = items.splice(sbIdx, 1);
+          const kt = items.findIndex((it) => String((it && it.drill) || '') === 'Kick Through Drill');
+          items.splice(kt + 1, 0, sb);
+        }
+      }
+      b.items = items;
+      if (JSON.stringify(b.items) !== before) changed = true;
+    }
+    // Part 2: full-loss signature only.
+    const hasPrep = routine.some((b) => /prep/i.test(catOf(b)) && hasItems(b));
+    const hasHitting = routine.some((b) => isHittingBlock(b) && hasItems(b));
+    if (!hasPrep && !hasHitting) {
+      const it = (drill, volume, note) => {
+        const o = { drill };
+        if (volume) o.volume = volume;
+        if (note) o.note = note;
+        return o;
+      };
+      const SB_NOTE = 'Inside and outside pitches — stay over the plate, hold your posture';
+      // Canonical order = the boot sheet sync's output order.
+      const canon = [
+        { category: 'Daily Routine', items: [it('Med Ball Drill'), it('Kick Through Drill'), it('Ball Drop Drill', null, 'Heel up, all one move')] },
+        { category: 'Med Ball', title: 'Day 1', items: [it('Med Ball Overhead Slam', '3 sets × 5 reps'), it('Med Ball Split Stance Rotational Throw', '3 sets × 4 reps each side'), it('Med Ball Rotational Throw', '2 sets × 4 reps each side')] },
+        { category: 'Prep Work', items: [it('Band Loads', '2 sets × 10 reps'), it('Punching Bag / Tire', '2 sets × 8 reps', 'Turn it deep, heel up, all one move')] },
+        { category: 'Side Flips', items: [it('Kick Through Drill', '4 swings'), it('Short Bat Swings', '2 sets × 4 swings', SB_NOTE), it('Ball Drop Drill', '5 swings', 'Heel up, all one move'), it('Normal Swings', '2 sets × 3 swings')] },
+        { category: 'Seated Darts', items: [it('Kick Through Drill', '2 sets × 4 swings'), it('Open Angle', '2 sets × 4 swings'), it('Normal Swings', '2 sets × 4 swings')] },
+        { category: 'BP / Machine', items: [it('Open Angle FB Machine', 'Up to you', 'Open angle emphasized — start away, then inner half'), it('RH Angled Breaking Ball Machine (foam balls OK)', 'Up to you'), it('FB + Breaking Ball Swing Decisions', 'Up to you', 'Mess with height and location — work different counts: 0-0, 2 strikes, 2-0, etc.'), it('Swing Decisions', 'Up to you', 'Mixed BP, mixed machine, dual machine — work different counts: 0-0, 2 strikes, 2-0, etc.'), it('FB Machine — higher velo (foam balls OK)', 'Up to you'), it('LH Angled Breaking Ball Machine (foam balls OK)', 'Up to you')] },
+        { category: 'Med Ball', title: 'Day 2', items: [it('Med Ball Step Back Scoop Toss', '3 sets × 4 reps each side'), it('Med Ball Shotput Throw', '3 sets × 4 reps each side'), it('Med Ball Scoop Toss', '2 sets × 5 reps each side')] },
+        { category: 'Front Toss', items: [it('Kick Through Drill', '2 sets × 4 swings'), it('Short Bat Swings', '2 sets × 4 swings', SB_NOTE), it('Open Angle', '2 sets × 4 swings', 'Start away'), it('Open Angle', '2 sets × 4 swings', 'Work inner half — head finishing low and over the plate'), it('Normal Swings', '2 sets × 4 swings')] },
+        { category: 'Med Ball', title: 'Day 3', items: [it('Med Ball Rotational Throw', '3 sets × 4 reps each side'), it('Med Ball Hip Toss', '3 sets × 4 reps each side'), it('Med Ball Rotational Slam', '2 sets × 5 reps each side')] },
+        { category: 'Med Ball', title: 'Pregame', items: [it('Med Ball Overhead Slam', '1 set × 3 reps'), it('Med Ball Rotational Throw', '1 set × 3 reps each side')] },
+        { category: 'Prep Work', title: 'Pregame', items: [it('Band Loads', '10 reps'), it('Punching Bag / Tire', '12 reps', 'Turn it deep, heel up, all one move')] },
+        { category: 'Side Flips', title: 'Pregame', items: [it('Kick Through Drill', '4 swings'), it('Ball Drop Drill', '5 swings', 'Heel up, all one move'), it('Normal Swings', '5 swings')] },
+        { category: 'Front Toss', title: 'Pregame', items: [it('Kick Through Drill', '5 swings'), it('Open Angle', '5 swings')] },
+      ];
+      const keyOf = (b) => catOf(b) + '\0' + titleOf(b);
+      // Keep every existing block (canonical or Bobby-added) in place;
+      // insert each missing canonical block after the nearest preceding
+      // canonical block already in the routine.
+      const present = new Set();
+      for (const b of routine) present.add(keyOf(b));
+      for (let ci = 0; ci < canon.length; ci++) {
+        const c = canon[ci];
+        const key = c.category + '\0' + (c.title || '');
+        if (present.has(key)) {
+          // Canonical block exists but empty: restore its items.
+          const ex = routine.find((b) => keyOf(b) === key);
+          if (ex && !hasItems(ex)) {
+            ex.items = c.items.map((x) => ({ ...x }));
+            if (c.title) ex.title = c.title;
+            changed = true;
+          }
+          continue;
+        }
+        // Find insertion point: after the nearest preceding canonical
+        // block present in the routine (or at the front).
+        let at = 0;
+        for (let pj = ci - 1; pj >= 0; pj--) {
+          const pk = canon[pj].category + '\0' + (canon[pj].title || '');
+          const idx = routine.findIndex((b) => keyOf(b) === pk);
+          if (idx >= 0) { at = idx + 1; break; }
+        }
+        const nb = { category: c.category, items: c.items.map((x) => ({ ...x })) };
+        if (c.title) nb.title = c.title;
+        routine.splice(at, 0, nb);
+        present.add(key);
+        changed = true;
+      }
+    }
+    if (changed) {
+      db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?')
+        .run(JSON.stringify(prog), new Date().toISOString(), p.id);
+      console.log('repairSamChapmanRoutineOct26: repaired Sam Chapman routine (Prep + hitting blocks restored / Oct 26 transforms applied)');
+    }
+  } catch (e) {
+    console.log('repairSamChapmanRoutineOct26 failed:', e.message);
+  }
+}
+
 // ---- Boot ----
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
@@ -10811,6 +10945,7 @@ app.listen(PORT, () => {
   applySamChapmanDocWhysOct22();
   applySamChapmanFixAllOct23();
   applySamChapmanHittingOrderOct26();
+  repairSamChapmanRoutineOct26();
   const n = db.prepare("SELECT COUNT(*) AS n FROM users WHERE role != 'coach'").get().n;
   console.log(`Players signed up: ${n}`);
   if (!process.env.SESSION_SECRET && isProd) {
