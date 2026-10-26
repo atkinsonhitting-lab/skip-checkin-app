@@ -1905,12 +1905,10 @@ function buildHittingPlan(prog) {
       { name: 'Banded Turns', why: 'Builds the connected turn — back hip and barrel working together.' },
     ],
     'sam chapman': [
-      { name: 'Punching Bag / Tire', why: 'Swings the barrel with the body, not the hands — deep and connected.' },
-      { name: 'Med Ball Drill', why: 'Feel the chest-over-the-plate posture driving the barrel.' },
       { name: 'Kick Through Drill', why: 'Feel your back hip and barrel connected — don\u2019t get stuck back.' },
+      { name: 'Short Bat Swings', why: 'Inside and outside pitches — stay over the plate and hold your posture. Hit through contact, not just to it.' },
       { name: 'Ball Drop Drill', why: 'Feel quickness — short to the ball.' },
       { name: 'Open Angle', why: 'For posture and direction — start away, then work the inner half. Head finishes low and over the plate.' },
-      { name: 'Short Bat Swings', why: 'Inside and outside pitches — stay over the plate and hold your posture. Hit through contact, not just to it.' },
     ],
   };
   const wanted = CORE_DRILLS[athleteKey] || [];
@@ -10720,6 +10718,88 @@ function applySamChapmanFixAllOct23() {
   }
 }
 
+// Sam Chapman hitting order (Oct 26 2026, Bobby via chat, after reviewing
+// the Hitting Program doc): Punching Bag / Tire is PREP WORK, not a drill —
+// it already renders in the doc's Prep section, so it comes OUT of the doc
+// drill table (CORE_DRILLS below no longer lists it). Med Ball Drill comes
+// OUT of Sam's hitting day blocks (Side Flips, Seated Darts, Front Toss,
+// BP / Machine, Pregame hitting) — the Med Ball section blocks (Day 1/2/3/
+// Pregame throws) are NOT touched, and neither is the Daily Routine block
+// (Med Ball Drill stays there; Bobby can say if he wants it gone there
+// too). Short Bat Swings move to RIGHT AFTER Kick Through Drill in Side
+// Flips and Front Toss blocks. Guarded by the settings flag
+// 'sam_chapman_hitting_order_oct26' so it runs ONCE; Bobby's later in-app
+// edits always win. Only Sam's row is touched. Grades, cues, strengths,
+// mobility, med ball, notes, environments, phase, and date are NOT changed.
+function applySamChapmanHittingOrderOct26() {
+  try {
+    if (getSetting('sam_chapman_hitting_order_oct26')) {
+      console.log('applySamChapmanHittingOrderOct26: already applied, skipping');
+      return;
+    }
+    const row = db.prepare("SELECT id FROM remote_programs WHERE lower(athlete_name) = 'sam chapman'").get();
+    if (!row) {
+      console.log('applySamChapmanHittingOrderOct26: no Sam Chapman program found, skipping (flag not set)');
+      return;
+    }
+    const p = getProgram(row.id);
+    if (!p) return;
+    const prog = p.prog;
+    const oldPlan = (prog.hitting_plan && typeof prog.hitting_plan === 'object') ? prog.hitting_plan : {};
+    // Routine edits — hitting blocks only. Never Daily Routine, never
+    // Med Ball / Prep Work / mobility blocks (their categories are skipped
+    // outright, so a Med Ball Drill item there can never be touched).
+    const isHittingBlock = (b) => {
+      const cat = String((b && b.category) || '').toLowerCase();
+      if (/daily routine|med\s*ball|prep|mobility/i.test(cat)) return false;
+      return /side flips|seated darts|front toss|bp\s*\/\s*machine/i.test(cat);
+    };
+    for (const b of (Array.isArray(prog.routine) ? prog.routine : [])) {
+      if (!isHittingBlock(b) || !Array.isArray(b.items)) continue;
+      let items = b.items.filter((it) => String((it && it.drill) || '') !== 'Med Ball Drill');
+      const cat = String(b.category || '').toLowerCase();
+      if (/side flips|front toss/i.test(cat)) {
+        const sbIdx = items.findIndex((it) => String((it && it.drill) || '') === 'Short Bat Swings');
+        const ktIdx = items.findIndex((it) => String((it && it.drill) || '') === 'Kick Through Drill');
+        if (sbIdx >= 0 && ktIdx >= 0 && sbIdx !== ktIdx + 1) {
+          const [sb] = items.splice(sbIdx, 1);
+          const kt = items.findIndex((it) => String((it && it.drill) || '') === 'Kick Through Drill');
+          items.splice(kt + 1, 0, sb);
+        }
+      }
+      b.items = items;
+    }
+    const newPlan = buildHittingPlan(prog);
+    newPlan.phase_emphasis = String(prog.phase_emphasis || 'Posture and the Forward Move');
+    newPlan.date_range = String(prog.date_range || '10/28–11/28');
+    if (Array.isArray(oldPlan.environments_custom)) {
+      newPlan.environments_custom = oldPlan.environments_custom;
+      newPlan.environments = [
+        ...oldPlan.environments_custom.map((id) => { const e = envById(id); return e ? e.name : null; }).filter(Boolean),
+        ...(Array.isArray(oldPlan.environments_other) ? oldPlan.environments_other : []),
+      ];
+    }
+    if (Array.isArray(oldPlan.environments_other)) newPlan.environments_other = oldPlan.environments_other;
+    for (const k of ['environments_note', 'env_variations', 'footer', 'daysPerWeek', 'frequency']) {
+      if (oldPlan[k]) newPlan[k] = oldPlan[k];
+    }
+    // Preserve any other stored plan fields the builder doesn't produce
+    // (e.g. warmup, which feeds the doc's Prep section — Prep stays as-is).
+    for (const k of Object.keys(oldPlan)) {
+      if (!(k in newPlan) && k !== '_v') newPlan[k] = oldPlan[k];
+    }
+    newPlan._custom = true;
+    newPlan._v = HITTING_PLAN_VERSION;
+    prog.hitting_plan = newPlan;
+    db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ? WHERE id = ?')
+      .run(JSON.stringify(prog), new Date().toISOString(), p.id);
+    setSetting('sam_chapman_hitting_order_oct26', '1');
+    console.log('applySamChapmanHittingOrderOct26: applied Sam Chapman hitting order (doc drills Kick Through, Short Bat, Ball Drop, Open Angle; Med Ball Drill removed from hitting blocks; Daily Routine untouched)');
+  } catch (e) {
+    console.log('applySamChapmanHittingOrderOct26 failed:', e.message);
+  }
+}
+
 // ---- Boot ----
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
@@ -10730,6 +10810,7 @@ app.listen(PORT, () => {
   applySamChapmanProgramOct22();
   applySamChapmanDocWhysOct22();
   applySamChapmanFixAllOct23();
+  applySamChapmanHittingOrderOct26();
   const n = db.prepare("SELECT COUNT(*) AS n FROM users WHERE role != 'coach'").get().n;
   console.log(`Players signed up: ${n}`);
   if (!process.env.SESSION_SECRET && isProd) {

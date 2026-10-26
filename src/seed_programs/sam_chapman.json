@@ -44,12 +44,13 @@
   {
    "items": [
     {
-     "drill": "Med Ball Drill",
+     "drill": "Kick Through Drill",
      "volume": "4 swings"
     },
     {
-     "drill": "Kick Through Drill",
-     "volume": "4 swings"
+     "drill": "Short Bat Swings",
+     "volume": "2 sets \u00d7 4 swings",
+     "note": "Inside and outside pitches \u2014 stay over the plate, hold your posture"
     },
     {
      "drill": "Ball Drop Drill",
@@ -59,11 +60,6 @@
     {
      "drill": "Normal Swings",
      "volume": "2 sets \u00d7 3 swings"
-    },
-    {
-     "drill": "Short Bat Swings",
-     "volume": "2 sets \u00d7 4 swings",
-     "note": "Inside and outside pitches \u2014 stay over the plate, hold your posture"
     }
    ],
    "section": "Side Flips",
@@ -71,10 +67,6 @@
   },
   {
    "items": [
-    {
-     "drill": "Med Ball Drill",
-     "volume": "2 sets \u00d7 4 swings"
-    },
     {
      "drill": "Kick Through Drill",
      "volume": "2 sets \u00d7 4 swings"
@@ -160,12 +152,13 @@
   {
    "items": [
     {
-     "drill": "Med Ball Drill",
+     "drill": "Kick Through Drill",
      "volume": "4 swings"
     },
     {
-     "drill": "Kick Through Drill",
-     "volume": "4 swings"
+     "drill": "Short Bat Swings",
+     "volume": "2 sets \u00d7 4 swings",
+     "note": "Inside and outside pitches \u2014 stay over the plate, hold your posture"
     },
     {
      "drill": "Ball Drop Drill",
@@ -175,11 +168,6 @@
     {
      "drill": "Normal Swings",
      "volume": "2 sets \u00d7 3 swings"
-    },
-    {
-     "drill": "Short Bat Swings",
-     "volume": "2 sets \u00d7 4 swings",
-     "note": "Inside and outside pitches \u2014 stay over the plate, hold your posture"
     }
    ],
    "section": "Side Flips",
@@ -188,12 +176,13 @@
   {
    "items": [
     {
-     "drill": "Med Ball Drill",
+     "drill": "Kick Through Drill",
      "volume": "2 sets \u00d7 4 swings"
     },
     {
-     "drill": "Kick Through Drill",
-     "volume": "2 sets \u00d7 4 swings"
+     "drill": "Short Bat Swings",
+     "volume": "2 sets \u00d7 4 swings",
+     "note": "Inside and outside pitches \u2014 stay over the plate, hold your posture"
     },
     {
      "drill": "Open Angle",
@@ -204,11 +193,6 @@
      "drill": "Open Angle",
      "volume": "2 sets \u00d7 4 swings",
      "note": "Work inner half \u2014 head finishing low and over the plate"
-    },
-    {
-     "drill": "Short Bat Swings",
-     "volume": "2 sets \u00d7 4 swings",
-     "note": "Inside and outside pitches \u2014 stay over the plate, hold your posture"
     },
     {
      "drill": "Normal Swings",
@@ -287,12 +271,13 @@
   {
    "items": [
     {
-     "drill": "Med Ball Drill",
+     "drill": "Kick Through Drill",
      "volume": "4 swings"
     },
     {
-     "drill": "Kick Through Drill",
-     "volume": "4 swings"
+     "drill": "Short Bat Swings",
+     "volume": "2 sets \u00d7 4 swings",
+     "note": "Inside and outside pitches \u2014 stay over the plate, hold your posture"
     },
     {
      "drill": "Ball Drop Drill",
@@ -302,11 +287,6 @@
     {
      "drill": "Normal Swings",
      "volume": "2 sets \u00d7 3 swings"
-    },
-    {
-     "drill": "Short Bat Swings",
-     "volume": "2 sets \u00d7 4 swings",
-     "note": "Inside and outside pitches \u2014 stay over the plate, hold your posture"
     }
    ],
    "section": "Side Flips",
@@ -315,12 +295,13 @@
   {
    "items": [
     {
-     "drill": "Med Ball Drill",
+     "drill": "Kick Through Drill",
      "volume": "2 sets \u00d7 4 swings"
     },
     {
-     "drill": "Kick Through Drill",
-     "volume": "2 sets \u00d7 4 swings"
+     "drill": "Short Bat Swings",
+     "volume": "2 sets \u00d7 4 swings",
+     "note": "Inside and outside pitches \u2014 stay over the plate, hold your posture"
     },
     {
      "drill": "Open Angle",
@@ -331,11 +312,6 @@
      "drill": "Open Angle",
      "volume": "2 sets \u00d7 4 swings",
      "note": "Work inner half \u2014 head finishing low and over the plate"
-    },
-    {
-     "drill": "Short Bat Swings",
-     "volume": "2 sets \u00d7 4 swings",
-     "note": "Inside and outside pitches \u2014 stay over the plate, hold your posture"
     },
     {
      "drill": "Normal Swings",
@@ -410,10 +386,6 @@
   {
    "items": [
     {
-     "drill": "Med Ball Drill",
-     "volume": "4 swings"
-    },
-    {
      "drill": "Kick Through Drill",
      "volume": "4 swings"
     },
@@ -432,10 +404,6 @@
   },
   {
    "items": [
-    {
-     "drill": "Med Ball Drill",
-     "volume": "5 swings"
-    },
     {
      "drill": "Kick Through Drill",
      "volume": "5 swings"
