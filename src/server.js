@@ -10973,6 +10973,152 @@ function applyPrepDefaultsFlagOct27() {
   }
 }
 
+// Bobby (Oct 27 2026): Allen Mech program — hitting + lifting, built in
+// chat and authorized for upload Oct 27. Creates the remote_programs row
+// for athlete_name "Allen Mech" (no user account yet — signup links by
+// name via linkRemoteProgram) with a _custom hitting plan and a 4-day
+// lifting program. Runs once (flag allen_mech_program_oct27). The row
+// deliberately has NO use_prep_defaults flag (blank-by-default: no Prep
+// section), NO cues, NO training environments, and NO mobility/med-ball
+// blocks — only what Bobby put in. Content comes straight from
+// allen_mech_draft_program_oct26.md (hitting) and
+// allen_mech_lifting_program_oct27.md (lifting); nothing invented.
+function applyAllenMechProgramOct27() {
+  try {
+    if (getSetting('allen_mech_program_oct27')) {
+      console.log('applyAllenMechProgramOct27: already applied, skipping');
+      return;
+    }
+    const PHASE = 'Getting to the Proper Launch Position and Maintaining Direction to the Middle of the Field';
+    const grades = {
+      'Mental grade': 'TBD',
+      'Will to work and get better': 'A+',
+      'Bat to ball': 'TBD',
+      'Power ability': 'B',
+      'The Load': 'B',
+      'The Setup': 'B',
+      'Launch Position': 'C',
+      'Zone Entry': 'B',
+      'Path': 'B',
+      'Post-Contact Direction': 'C',
+      'The Finish': 'B-',
+    };
+    const gradeWhys = {
+      'Mental grade': "Bobby hasn't worked with him much yet — doesn't know his approach in the box.",
+      'Bat to ball': 'Bobby still needs to see more.',
+      'Power ability': 'Good size, has the potential to hit the ball hard — just needs to clean up some moves in the swing and get more explosive.',
+      'The Setup': 'Hands are in unathletic spots sometimes.',
+      'Launch Position': 'Hips slightly get pointed upward, barrel gets stuck behind, hands are very low sometimes.',
+      'Path': 'Pretty clean path to the ball most of the time.',
+      'Post-Contact Direction': "Cuts himself off after contact, doesn't stay through the ball all the time.",
+      'The Finish': 'Finishes low sometimes due to his post-contact direction, loses posture.',
+    };
+    const drills = [
+      { name: 'Closed Off Drill', why: 'Split stance, front foot forward, back leg on the toes. Path and posture — barrel tall, hinged over the plate, butt back. Nice and easy — backspin balls through the middle of the field.', setsReps: '3 sets × 7 swings' },
+      { name: 'No Stride Launch Drill', why: "Load, then hold with the heel up. Hands near shoulder height, back elbow slightly higher, barrel tall, knob at the catcher's feet. Turn behind the ball without shifting all the way into the front heel.", setsReps: '3 sets × 7 swings' },
+      { name: 'Feet Together Separation Drill', why: 'Feet together, slight knee bend, hands mid-sternum, vertical load. Slow, almost 3-second load — hands ready on time, then turn behind the ball.', setsReps: '3 sets × 7 swings' },
+      { name: 'Game Swings', why: "Blend all three drills. Launch position — hips even, hands near shoulder height, knob at the catcher's feet. Hold posture, butt back, finish at the front shoulder. Change pitch location each round.", setsReps: '3 sets × 10 swings' },
+    ];
+    const prog = {
+      athlete: 'Allen Mech',
+      phase_emphasis: PHASE,
+      date_range: '',
+      grades,
+      grade_whys: gradeWhys,
+      strengths: [],
+      adjustment: '',
+      cues: { movement: '', timing: '', game: '' },
+      routine: [{ category: 'Hitting', items: drills.map((d) => ({ drill: d.name, volume: d.setsReps })) }],
+      hitting_plan: {
+        _v: HITTING_PLAN_VERSION,
+        _custom: true,
+        phase_emphasis: PHASE,
+        date_range: '',
+        strengths: [],
+        grades,
+        grade_whys: gradeWhys,
+        need: '',
+        why_text: '',
+        reminder: '',
+        cues: { movement: '', timing: '', game: '' },
+        drills,
+        environments: [],
+        environments_custom: [],
+        frequency: 'Execute this plan as many days a week as you want.',
+      },
+    };
+    const ex = (name, sets, reps, section, desc, intent) => {
+      const o = { name, sets: String(sets), reps: String(reps), section, desc };
+      if (intent) o.intent = intent;
+      return o;
+    };
+    const pairTag = (pair) => ({ pair });
+    const lifting = {
+      name: 'Allen Mech — Lifting Block 1',
+      days: [
+        { label: 'Day 1 — Lower A', exercises: [
+          ex('10-Yard Sprints', 1, 5, 'power', 'First. Acceleration, max intent, full rest — walk back between reps.', 'max'),
+          ex('Broad Jump', 3, 3, 'power', 'Max intent, full reset each rep. Exception to the 5-rep minimum.', 'max'),
+          ex('Trap Bar Jumps', 3, 5, 'power', 'Light load, DYNAMIC — continuous reps, no reset between reps.', 'max'),
+          ex('Rotational Throw', 3, 5, 'rotational', 'Wall med ball, 3×5 each side. Max intent, rotate FAST.', 'max'),
+          ex('Rotational Slam', 3, 5, 'rotational', 'Med ball, 3×5 each side. Max intent, rotate FAST.', 'max'),
+          ex('Trap Bar Deadlift', 4, 8, 'strength', 'HEAVIER, hypertrophy — controlled, not a max-effort grind.'),
+          ex('Pallof Press', 3, 10, 'brakes', 'Core / anti-rotation. 3×10 each side.'),
+        ] },
+        { label: 'Day 2 — Upper A', exercises: [
+          ex('Pullover Med Ball Throw', 3, 5, 'power', 'Lying on your back, ball overhead behind you, throw it forward explosively with the lats and core. Max intent, full reset.', 'max'),
+          ex('Scoop Toss', 3, 5, 'power', 'Wall med ball, 3×5 each side. Max intent.', 'max'),
+          ex('DB Bench Press', 4, 10, 'strength', 'HEAVIER, hypertrophy — more bench volume for size.'),
+          ex('DB Single-Arm Row', 3, 10, 'strength', 'HEAVIER, hypertrophy. 3×10 each side.'),
+          ex('Cable Rotation', 3, 8, 'rotational', 'LIGHT and FAST — speed of the turn, not load. 3×8 each side.', 'max'),
+        ] },
+        { label: 'Day 3 — Lower B', exercises: [
+          ex('20-Yard Sprints', 1, 5, 'power', 'First. Max intent, full rest — walk back between reps.', 'max'),
+          { ...ex('Bulgarian Split Squat', 3, 8, 'strength', 'HEAVIER, hypertrophy. 3×8 each side. Paired with band-assisted split squat jumps — alternate sets.'), ...pairTag('D3A') },
+          { ...ex('Band-Assisted Split Squat Jumps', 3, 5, 'power', 'Band assistance, max intent, drive up fast. 3×5 each side. Paired with Bulgarian split squats — alternate sets.', 'max'), ...pairTag('D3A') },
+          ex('Overhead Slam', 3, 5, 'power', 'Med ball, max intent.', 'max'),
+          ex('DB Suitcase Carry', 3, '30 sec', 'brakes', 'Core. 3×30 sec each side.'),
+        ] },
+        { label: 'Day 4 — Upper B', exercises: [
+          ex('Lateral Bound + Stick', 3, 5, 'power', 'Athleticism / brakes. 3×5 each side — stick each landing.', 'max'),
+          ex('Shotput Throw', 3, 5, 'power', 'Wall med ball, 3×5 each side. Max intent, rotate FAST.', 'max'),
+          ex('Band-Assisted Plyo Push-Up', 3, 5, 'power', 'Band reduces bodyweight, max intent, full reset — hands leave the ground each rep.', 'max'),
+          ex('Cable Rotation', 3, 8, 'rotational', 'LIGHT and FAST — speed of the turn, not load. 3×8 each side.', 'max'),
+        ] },
+      ],
+      notes: [
+        'Warm up properly every session — general movement + ramp-up sets. No mobility routine prescribed.',
+        'Session order: sprints/jumps/throws (speed) → compound strength (heavier, hypertrophy) → fast rotation/core.',
+        'Speed work is max intent with full rest. Trap Bar Jumps are dynamic — continuous, no reset between reps.',
+        '4 Bobby days + 2 school heavy days = 6 lifting days a week. If a Bobby day lands on a school day, cut it to speed + core only.',
+        'Re-test every 2 weeks: broad jump + Pocket Radar tee EV (same setup). After 4 weeks, Bobby writes Block 2.',
+      ],
+    };
+    const now = new Date().toISOString();
+    let liftRow = db.prepare('SELECT id FROM lifting_programs WHERE name = ?').get(lifting.name);
+    if (liftRow) {
+      db.prepare('UPDATE lifting_programs SET program_json = ?, updated_at = ? WHERE id = ?')
+        .run(JSON.stringify(lifting), now, liftRow.id);
+    } else {
+      const info = db.prepare('INSERT INTO lifting_programs (name, is_template, program_json, updated_at) VALUES (?, 0, ?, ?)')
+        .run(lifting.name, JSON.stringify(lifting), now);
+      liftRow = { id: Number(info.lastInsertRowid) };
+    }
+    const existing = db.prepare('SELECT id FROM remote_programs WHERE lower(athlete_name) = ?').get('allen mech');
+    if (existing) {
+      db.prepare('UPDATE remote_programs SET program_json = ?, updated_at = ?, lifting_program_id = ?, block_start = ?, block_number = 1 WHERE id = ?')
+        .run(JSON.stringify(prog), now, liftRow.id, '2026-10-27', existing.id);
+    } else {
+      db.prepare('INSERT INTO remote_programs (athlete_name, program_json, updated_at, lifting_program_id, block_start, block_number) VALUES (?, ?, ?, ?, ?, 1)')
+        .run('Allen Mech', JSON.stringify(prog), now, liftRow.id, '2026-10-27');
+    }
+    setSetting('allen_mech_program_oct27', '1');
+    console.log('applyAllenMechProgramOct27: created Allen Mech program (hitting + lifting Block 1)');
+  } catch (e) {
+    console.log('applyAllenMechProgramOct27 failed:', e.message);
+  }
+}
+
 // ---- Boot ----
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
@@ -10986,6 +11132,7 @@ app.listen(PORT, () => {
   applySamChapmanHittingOrderOct26();
   repairSamChapmanRoutineOct26();
   applyPrepDefaultsFlagOct27();
+  applyAllenMechProgramOct27();
   const n = db.prepare("SELECT COUNT(*) AS n FROM users WHERE role != 'coach'").get().n;
   console.log(`Players signed up: ${n}`);
   if (!process.env.SESSION_SECRET && isProd) {
