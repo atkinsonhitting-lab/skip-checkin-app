@@ -6274,7 +6274,13 @@ function hittingPlanPage(user, p, opts) {
   // Bobby (Oct 19 2026): Hitter's Prep — default warm-up items (Bobby
   // customizes via chat, data/hitter_prep_defaults.json) shown at the top
   // of the Hitting program when the program has no prep of its own.
-  if (!allPrep.length && Array.isArray(o.hitterPrepDefaults)) {
+  // Bobby (Oct 27 2026): new hitters start BLANK — the defaults render
+  // ONLY when this program explicitly opts in (program_json
+  // use_prep_defaults === true). Programs that predate the flag get it
+  // stamped true by a one-time boot migration, so existing hitters see
+  // exactly what they see today. A program with its own warmup or routine
+  // Prep blocks never reaches this fallback either way.
+  if (!allPrep.length && prog.use_prep_defaults === true && Array.isArray(o.hitterPrepDefaults)) {
     for (const d of o.hitterPrepDefaults) {
       if (d && String(d.name || '').trim()) allPrep.push({ name: d.name, detail: d.volume || '' });
     }

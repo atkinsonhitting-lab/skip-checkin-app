@@ -10934,6 +10934,45 @@ function repairSamChapmanRoutineOct26() {
   }
 }
 
+// Bobby (Oct 27 2026): new hitters start BLANK — no default prep, no
+// cues unless he writes them. The doc's Prep fallback (views.js
+// hittingPlanPage) now renders data/hitter_prep_defaults.json ONLY when
+// program_json.use_prep_defaults === true. This one-time boot migration
+// stamps that flag true on every program row that exists at migration
+// time, so every current hitter (Sam, Liam, Ryan, everyone) sees exactly
+// what they see today. Programs created after this change get no flag,
+// so they render no Prep section unless Bobby gives them their own
+// warmup or routine Prep blocks. The flag survives program-editor and
+// hitting-plan-editor saves (both mutate the stored program object in
+// place rather than rebuilding it), and the editor never writes the
+// flag itself — Bobby adds prep through normal program data, which
+// renders with or without the flag. Cues already render only when
+// plan.cues has non-empty movement/timing/game text (views.js), so no
+// cue change was needed here.
+function applyPrepDefaultsFlagOct27() {
+  try {
+    if (getSetting('prep_defaults_flag_oct27')) {
+      console.log('applyPrepDefaultsFlagOct27: already applied, skipping');
+      return;
+    }
+    const rows = db.prepare('SELECT id, program_json FROM remote_programs').all();
+    let stamped = 0;
+    for (const row of rows) {
+      let prog;
+      try { prog = JSON.parse(row.program_json || '{}'); } catch { continue; }
+      if (prog.use_prep_defaults === true) continue;
+      prog.use_prep_defaults = true;
+      db.prepare('UPDATE remote_programs SET program_json = ? WHERE id = ?')
+        .run(JSON.stringify(prog), row.id);
+      stamped++;
+    }
+    setSetting('prep_defaults_flag_oct27', '1');
+    console.log(`applyPrepDefaultsFlagOct27: stamped use_prep_defaults=true on ${stamped} existing program(s); new programs stay blank by default`);
+  } catch (e) {
+    console.log('applyPrepDefaultsFlagOct27 failed:', e.message);
+  }
+}
+
 // ---- Boot ----
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
@@ -10946,6 +10985,7 @@ app.listen(PORT, () => {
   applySamChapmanFixAllOct23();
   applySamChapmanHittingOrderOct26();
   repairSamChapmanRoutineOct26();
+  applyPrepDefaultsFlagOct27();
   const n = db.prepare("SELECT COUNT(*) AS n FROM users WHERE role != 'coach'").get().n;
   console.log(`Players signed up: ${n}`);
   if (!process.env.SESSION_SECRET && isProd) {
